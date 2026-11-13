@@ -10,6 +10,7 @@ from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
@@ -19,6 +20,7 @@ from constructs import Construct
 
 MANIFEST = "manifest.webmanifest"
 DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
+LOCATION_PARAM = "/news/location"  # created by hand (see README); holds the home town, so it stays out of the repo
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
@@ -146,10 +148,16 @@ class NewsStack(Stack):
             code=lambda_.Code.from_asset("backend", exclude=["**/__pycache__"]),
             memory_size=256,
             timeout=Duration.seconds(60),
-            environment={"DATA_BUCKET": data_bucket.bucket_name, "DATA_PREFIX": DATA_PREFIX},
-            log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.TWO_WEEKS),
+            environment={"DATA_BUCKET": data_bucket.bucket_name, "DATA_PREFIX": DATA_PREFIX, "LOCATION_PARAM": LOCATION_PARAM},
+            log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )
         data_bucket.grant_put(fn, f"{DATA_PREFIX}/*")  # pyright: ignore[reportArgumentType]
+        fn.add_to_role_policy(  # exactly one parameter, one action
+            iam.PolicyStatement(
+                actions=["ssm:GetParameter"],
+                resources=[self.format_arn(service="ssm", resource="parameter", resource_name=LOCATION_PARAM.lstrip("/"))],
+            )
+        )
         events.Rule(
             self,
             "IngestSchedule",
