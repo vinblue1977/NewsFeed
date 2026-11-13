@@ -28,5 +28,6 @@ DeployRoleStack(
     description="GitHub Actions OIDC deploy role for the News stack (deployed once by hand)",
 )
 cdk.Tags.of(app).add("project", "news")
+cdk.Tags.of(app).add("managed-by", "cdk")
 cdk.Aspects.of(app).add(AwsSolutionsChecks(verbose=True))
 app.synth()

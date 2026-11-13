@@ -125,7 +125,28 @@ def test_deploy_role_trusts_only_main_of_this_repo_and_only_assumes_bootstrap_ro
     template = _deploy_role_template()[1]
     trust = json.dumps(template.find_resources("AWS::IAM::Role"))
     assert "repo:vinblue1977/NewsFeed:ref:refs/heads/main" in trust
-    assert "sts.amazonaws.com" in trust
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "AssumeRolePolicyDocument": Match.object_like(
+                {
+                    "Statement": Match.array_with(
+                        [
+                            Match.object_like(
+                                {
+                                    "Condition": {
+                                        "StringEquals": Match.object_like(
+                                            {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"}
+                                        )
+                                    }
+                                }
+                            )
+                        ]
+                    )
+                }
+            )
+        },
+    )
     assert "*" not in json.dumps(template.find_resources("AWS::IAM::Policy"))  # no wildcards anywhere in the permissions
     template.has_resource_properties(
         "AWS::IAM::Policy",
@@ -144,3 +165,28 @@ def test_deploy_role_trusts_only_main_of_this_repo_and_only_assumes_bootstrap_ro
             }
         },
     )
+
+
+TAGGABLE = {
+    "AWS::S3::Bucket",
+    "AWS::Lambda::Function",
+    "AWS::IAM::Role",
+    "AWS::CloudFront::Distribution",
+    "AWS::Logs::LogGroup",
+    "AWS::Events::Rule",
+}
+
+
+def test_app_tags_reach_every_taggable_resource() -> None:
+    """The tags app.py applies to the whole app land on every resource type that supports tags, in both stacks."""
+    app = cdk.App(context=CDK_CONTEXT)
+    env = cdk.Environment(account=ACCOUNT, region="us-east-2")
+    stacks = [NewsStack(app, "News", env=env), DeployRoleStack(app, "Role", env=env)]
+    cdk.Tags.of(app).add("project", "news")
+    cdk.Tags.of(app).add("managed-by", "cdk")
+    for stack in stacks:
+        for logical_id, res in Template.from_stack(stack).to_json()["Resources"].items():
+            if logical_id.startswith("Custom"):
+                continue  # CDK's own auto-delete helper is a raw CfnResource that the Tags aspect does not reach
+            if res["Type"] in TAGGABLE:
+                assert {"project", "managed-by"} <= {t["Key"] for t in res["Properties"]["Tags"]}, res["Type"]
