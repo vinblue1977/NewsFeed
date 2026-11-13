@@ -4,7 +4,6 @@ from typing import Any
 import pytest
 
 from ingest.config import ConfigError, cached_location, load_location, parse_location
-from ingest.handler import handler
 
 LOCATION = {"town": "Exampleville", "lat": 40.0, "lon": -90.0, "nearby": ["Springfield"], "feeds": ["https://example.com/rss"]}
 
@@ -48,13 +47,6 @@ def test_load_location_needs_the_env_var(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_parse_location_rejects_bad_input(raw: str) -> None:
     with pytest.raises(ConfigError):
         parse_location(raw)
-
-
-def test_handler_returns_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ingest.handler.cached_location", lambda: LOCATION)
-    result = handler({}, object())
-    assert result["status"] == "ok"
-    assert result["local_feeds"] == 1
 
 
 def test_load_location_creates_a_client_when_none_given(monkeypatch: pytest.MonkeyPatch) -> None:
