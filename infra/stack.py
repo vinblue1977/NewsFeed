@@ -3,6 +3,8 @@
 No API, no auth, no user table: the app is static files plus feed JSON that the ingest Lambda writes to S3.
 """
 
+from typing import Any
+
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
@@ -15,6 +17,7 @@ from aws_cdk import aws_s3_deployment as s3deploy
 from cdk_nag import NagPackSuppression, NagSuppressions, RegexAppliesTo
 from constructs import Construct
 
+MANIFEST = "manifest.webmanifest"
 DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
@@ -34,7 +37,7 @@ def _bucket(scope: Construct, construct_id: str, *, retain: bool = False) -> s3.
 
 
 class NewsStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:  # noqa: ANN003
+    def __init__(self, scope: Construct, construct_id: str, **kwargs: Any) -> None:
         super().__init__(scope, construct_id, **kwargs)
         site_dir = str(self.node.try_get_context("siteDir") or "frontend/dist")
 
@@ -112,13 +115,26 @@ class NewsStack(Stack):
             default_root_object="index.html",
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,
         )
-        s3deploy.BucketDeployment(
+        # The manifest gets an explicit content type (nosniff is on, so a guessed one could make browsers ignore it).
+        site_deploy = s3deploy.BucketDeployment(
             self,
             "DeploySite",
             destination_bucket=site_bucket,
             sources=[s3deploy.Source.asset(site_dir)],
-            distribution=distribution,  # pyright: ignore[reportArgumentType]
+            exclude=[MANIFEST],
         )
+        manifest_deploy = s3deploy.BucketDeployment(
+            self,
+            "DeployManifest",
+            destination_bucket=site_bucket,
+            sources=[s3deploy.Source.asset(site_dir)],
+            exclude=["*"],
+            include=[MANIFEST],
+            content_type="application/manifest+json",
+            prune=False,
+            distribution=distribution,  # pyright: ignore[reportArgumentType]  # the one /* invalidation, after both uploads
+        )
+        manifest_deploy.node.add_dependency(site_deploy)  # one after the other, not in parallel
 
         # ---- scheduled ingest: EventBridge -> Lambda -> JSON in the data bucket (stub until Phase 2)
         fn = lambda_.Function(
@@ -176,16 +192,22 @@ class NewsStack(Stack):
             ],
             apply_to_children=True,
         )
-        # CDK's own helper Lambdas (bucket deployment, auto-delete): their runtime and policies are CDK's.
-        NagSuppressions.add_stack_suppressions(
-            self,
-            [
-                reason("AwsSolutions-IAM4", "CDK-managed helper Lambdas use the basic execution role", [LOGS_POLICY]),
-                reason(
-                    "AwsSolutions-IAM5",
-                    "CDK bucket deployment needs object-level wildcards on its own buckets",
-                    [RegexAppliesTo(regex=r"/^(Action::s3:.*|Resource::.*\*)$/g")],
-                ),
-                reason("AwsSolutions-L1", "CDK-managed helper Lambdas pick their own runtime"),
-            ],
-        )
+        # CDK's own helper Lambdas (bucket deployment, auto-delete, log retention) are the "Custom::*" and
+        # "LogRetention*" children of the stack. Suppress only on those, so the Ingest function and everything of ours
+        # stays checked. A CDK upgrade that adds a helper with another prefix fails cdk-nag in CI (fails closed);
+        # then add the prefix to the list below.
+        for child in self.node.children:
+            if child.node.id.startswith(("Custom::", "LogRetention")):
+                NagSuppressions.add_resource_suppressions(
+                    child,
+                    [
+                        reason("AwsSolutions-IAM4", "CDK-managed helper Lambda uses the basic execution role", [LOGS_POLICY]),
+                        reason(
+                            "AwsSolutions-IAM5",
+                            "CDK bucket deployment needs object-level wildcards on its own buckets",
+                            [RegexAppliesTo(regex=r"/^(Action::s3:.*|Resource::.*\*)$/g")],
+                        ),
+                        reason("AwsSolutions-L1", "CDK-managed helper Lambda picks its own runtime"),
+                    ],
+                    apply_to_children=True,
+                )
