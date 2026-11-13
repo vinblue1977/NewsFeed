@@ -102,20 +102,23 @@ def _parse_date(raw: str | None) -> datetime | None:
         return None
     raw = raw.strip()
     try:
-        parsed = parsedate_to_datetime(raw)  # RSS: RFC 822
-    except TypeError, ValueError:
         try:
+            parsed = parsedate_to_datetime(raw)  # RSS: RFC 822
+        except TypeError, ValueError:
             parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))  # Atom: ISO 8601
-        except ValueError:
-            return None
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    except TypeError, ValueError, OverflowError:
+        return None
 
 
 def _child(node: ET.Element, *names: str) -> str | None:
+    """The text of the first matching child, including text inside child elements (Atom XHTML summaries)."""
     for name in names:
         found = node.find(name)
-        if found is not None and (found.text or "").strip():
-            return found.text
+        if found is not None:
+            text = "".join(found.itertext()).strip()
+            if text:
+                return text
     return None
 
 
@@ -127,18 +130,23 @@ def _atom_link(entry: ET.Element) -> str | None:
     return links[0].get("href") if links else None
 
 
-_SAFE_ENCODINGS = {"utf-8", "us-ascii", "ascii", "iso-8859-1", "windows-1252"}  # all ASCII-compatible, so byte scans work
+# ASCII-compatible encodings only, so the byte-level scan below sees every declaration.
+_SAFE_ENCODING = re.compile(r"^(utf-?8|us-ascii|ascii|latin-?1|iso-8859-\d{1,2}|windows-125\d)$", re.IGNORECASE)
+_XML_DECL = re.compile(rb"""^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_CDATA_OR_COMMENT = re.compile(rb"<!\[CDATA\[.*?\]\]>|<!--.*?-->", re.DOTALL)
 
 
 def _check_safe(body: bytes) -> None:
     """Refuse documents the byte-level DOCTYPE/ENTITY scan could not see through (UTF-16/32, odd encodings)."""
-    if b"\x00" in body[:512] or body[:2] in (b"\xff\xfe", b"\xfe\xff"):
+    start = body[3:] if body[:3] == b"\xef\xbb\xbf" else body  # a UTF-8 BOM is fine
+    if b"\x00" in start[:512] or start[:2] in (b"\xff\xfe", b"\xfe\xff"):
         raise FeedError("feed is not an ASCII-compatible encoding")
-    declared = re.match(rb"""\s*<\?xml[^>]*encoding=["']([^"']+)["']""", body[:512], re.IGNORECASE)
-    if declared and declared.group(1).decode("ascii", "replace").lower() not in _SAFE_ENCODINGS:
+    declared = _XML_DECL.match(start[:1024])
+    if declared and not _SAFE_ENCODING.match(declared.group(1).decode("ascii", "replace")):
         raise FeedError("feed declares an unsupported encoding")
-    lowered = body.lower()
-    if b"<!doctype" in lowered or b"<!entity" in lowered:
+    # Article HTML inside CDATA or comments may legitimately contain "<!DOCTYPE html>"; only real markup counts.
+    markup = _CDATA_OR_COMMENT.sub(b"", start).lower()
+    if b"<!doctype" in markup or b"<!entity" in markup:
         raise FeedError("feed declares a DOCTYPE or entities; refusing to parse it")
 
 

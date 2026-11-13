@@ -174,3 +174,43 @@ def test_source_list_is_sane() -> None:
     assert all(s.url.startswith("https://") for s in SOURCES)
     assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business"}
     assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
+
+
+ITEM = "<item><title>T</title><link>https://e.com/a</link><pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate>{extra}</item>"
+
+
+def test_html_inside_cdata_or_comments_is_not_a_doctype() -> None:
+    extra = "<description><![CDATA[<!DOCTYPE html><p>hi</p> <!ENTITY x>]]></description><!-- <!DOCTYPE y> -->"
+    body = f"<rss><channel>{ITEM.format(extra=extra)}</channel></rss>".encode()
+    assert len(parse_feed(body, SRC)) == 1
+
+
+@pytest.mark.parametrize("encoding", ["latin1", "ISO-8859-15", "windows-1251", "utf8", "US-ASCII"])
+def test_common_declared_encodings_are_accepted(encoding: str) -> None:
+    body = f"<?xml version='1.0' encoding='{encoding}'?><rss><channel>{ITEM.format(extra='')}</channel></rss>".encode()
+    assert len(parse_feed(body, SRC)) == 1
+
+
+def test_a_utf8_bom_and_a_late_declaration_are_handled() -> None:
+    plain = f"<?xml version='1.0' encoding='UTF-8'?><rss><channel>{ITEM.format(extra='')}</channel></rss>".encode()
+    assert len(parse_feed(b"\xef\xbb\xbf" + plain, SRC)) == 1
+    bad = b"\xef\xbb\xbf<?xml version='1.0' encoding='UTF-16'?><rss/>"
+    with pytest.raises(FeedError, match="encoding"):
+        parse_feed(bad, SRC)
+
+
+def test_out_of_range_dates_drop_the_item_not_the_feed() -> None:
+    items = [
+        ITEM.format(extra="").replace("Fri, 13 Nov 2026 12:00:00 GMT", "Fri, 31 Dec 9999 23:00:00 -1400"),
+        ITEM.format(extra="").replace("https://e.com/a", "https://e.com/b"),
+    ]
+    got = parse_feed(f"<rss><channel>{''.join(items)}</channel></rss>".encode(), SRC)
+    assert [i["url"] for i in got] == ["https://e.com/b"]
+
+
+def test_atom_xhtml_summary_and_padded_values() -> None:
+    body = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><title> Padded </title>
+    <link href="https://e.com/x"/><updated>2026-11-13T09:00:00Z</updated>
+    <summary type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">Hello <b>there</b></div></summary></entry></feed>"""
+    item = parse_feed(body, SRC)[0]
+    assert item["title"] == "Padded" and item["summary"] == "Hello there"

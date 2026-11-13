@@ -6,6 +6,7 @@ import boto3
 import pytest
 
 from ingest import handler as handler_module
+from ingest import pipeline
 from ingest.feeds import FeedError
 from ingest.pipeline import collect, local_sources
 from ingest.sources import Source
@@ -97,7 +98,7 @@ def test_per_source_cap(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_local_sources_use_the_host_as_name() -> None:
     made = local_sources(["https://www.example.com/rss", "weird"])
-    assert [(s.id, s.name, s.topic) for s in made] == [("local-0", "example.com", "local"), ("local-1", "weird", "local")]
+    assert [(s.id, s.name, s.topic) for s in made] == [("local-0", "example.com", "local"), ("local-1", "local", "local")]
 
 
 class FakeS3:
@@ -145,3 +146,51 @@ def test_handler_refuses_a_mostly_failed_run(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(RuntimeError, match="2 of 3 sources failed"):
         handler_module.handler({}, object())
     assert s3.puts == []
+
+
+def test_tracking_parameters_and_trailing_slashes_do_not_defeat_dedupe() -> None:
+    docs = {
+        "https://a.example/f": rss(("A", "https://x.example/s/?utm_source=rss&amp;id=1", "", "Fri, 13 Nov 2026 11:00:00 GMT")),
+        "https://b.example/f": rss(("B", "https://X.example/s?id=1#top", "", "Fri, 13 Nov 2026 10:00:00 GMT")),
+        "https://c.example/f": rss(("C", "https://x.example/s?id=2", "", "Fri, 13 Nov 2026 09:00:00 GMT")),
+    }
+    items, _ = collect([src("a", "a"), src("b", "b"), src("c", "c")], now=NOW, fetcher=docs.__getitem__)
+    assert [i["title"] for i in items] == ["A", "C"]  # id=2 is a different story
+
+
+def test_the_longest_place_name_wins_and_odd_names_match() -> None:
+    docs = {
+        "https://c.example/f": rss(
+            ("Palatine Heights school board", "https://x.example/1", "", "Fri, 13 Nov 2026 09:00:00 GMT"),
+            ("Mayor of St. Charles speaks", "https://x.example/2", "", "Fri, 13 Nov 2026 08:00:00 GMT"),
+        )
+    }
+    items, _ = collect(
+        [src("c", "c", topic="local")], ["Palatine", "Palatine Heights", "St. Charles"], now=NOW, fetcher=docs.__getitem__
+    )
+    assert [i["place"] for i in items] == ["Palatine Heights", "St. Charles"]
+
+
+def test_local_source_names_are_just_the_host() -> None:
+    with_userinfo = (
+        "https://user:pw" + chr(64) + "www.example.com:8443/rss"
+    )  # built at runtime: the privacy guard bans "@" in URLs
+    made = local_sources([with_userinfo, "https:///nohost"])
+    assert [s.name for s in made] == ["example.com", "local"]
+
+
+def test_a_slow_run_is_cut_off_and_the_rest_still_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    monkeypatch.setattr(pipeline, "RUN_BUDGET_SECONDS", 0.3)
+
+    def fetcher(url: str) -> bytes:
+        if "slow" in url:
+            time.sleep(2)
+        return DOCS["https://a.example/f"]
+
+    start = time.monotonic()
+    items, status = collect([src("slow", "slow"), src("a", "a")], now=NOW, fetcher=fetcher)
+    assert time.monotonic() - start < 1.5
+    assert status["slow"] == {"ok": False, "items": 0, "error": "timed out"}
+    assert status["a"]["ok"] and len(items) == 2

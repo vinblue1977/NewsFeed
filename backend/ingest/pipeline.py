@@ -2,9 +2,10 @@
 
 import re
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ingest.feeds import FeedError, fetch, parse_feed
 from ingest.sources import Source
@@ -13,6 +14,7 @@ MAX_AGE = timedelta(hours=72)
 MAX_FUTURE = timedelta(hours=12)  # a small clock or timezone slip is clamped; more than this is bogus and dropped
 MAX_PER_SOURCE = 40
 WORKERS = 8
+RUN_BUDGET_SECONDS = 40  # whole run; the Lambda timeout is 60 s and the feed must still be written
 
 
 def local_sources(urls: Iterable[str]) -> list[Source]:
@@ -21,7 +23,16 @@ def local_sources(urls: Iterable[str]) -> list[Source]:
 
 
 def _host(url: str) -> str:
-    return re.sub(r"^www\.", "", url.split("/")[2]) if url.count("/") >= 2 else url
+    """A display name for a feed URL: just the host (never userinfo or port)."""
+    host = urlsplit(url).hostname
+    return re.sub(r"^www\.", "", host) if host else "local"
+
+
+def _dedupe_key(url: str) -> str:
+    """The URL without tracking parameters, fragment and trailing slash, so one story is not shown twice."""
+    parts = urlsplit(url)
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith(("utm_", "fbclid", "gclid"))])
+    return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip("/"), query, ""))
 
 
 def _mentions(item: dict[str, Any], pattern: re.Pattern[str], places: dict[str, str]) -> str | None:
@@ -41,7 +52,10 @@ def collect(
     now = now or datetime.now(UTC)
     fetcher = fetcher or fetch  # looked up at call time, so tests can replace the module's fetch
     places = {p.lower(): p for p in nearby if p}
-    place_re = re.compile(r"\b(" + "|".join(re.escape(p) for p in places) + r")\b", re.IGNORECASE) if places else None
+    longest_first = sorted(places, key=len, reverse=True)  # "Palatine Heights" must win over "Palatine"
+    place_re = (
+        re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in longest_first) + r")(?!\w)", re.IGNORECASE) if places else None
+    )
 
     def run(source: Source) -> tuple[Source, list[dict[str, Any]], str | None]:
         try:
@@ -52,8 +66,11 @@ def collect(
             return source, [], f"unexpected {type(exc).__name__}"
 
     sources = [s for s in sources if s.enabled]
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        results = list(pool.map(run, sources))
+    pool = ThreadPoolExecutor(max_workers=WORKERS)
+    futures = [(source, pool.submit(run, source)) for source in sources]
+    wait([f for _, f in futures], timeout=RUN_BUDGET_SECONDS)
+    pool.shutdown(wait=False, cancel_futures=True)  # stragglers are abandoned, not waited for
+    results = [f.result() if f.done() else (source, [], "timed out") for source, f in futures]
 
     items: dict[str, dict[str, Any]] = {}
     status: dict[str, dict[str, Any]] = {}
@@ -74,9 +91,10 @@ def collect(
                 if not place:
                     continue
                 item["place"] = place
-            if item["url"] in items:
+            key = _dedupe_key(item["url"])
+            if key in items:
                 continue
-            items[item["url"]] = item
+            items[key] = item
             kept += 1
         status[source.id] = {"ok": error is None, "items": kept, **({"error": error} if error else {})}
     return sorted(items.values(), key=lambda i: i["published"], reverse=True), status

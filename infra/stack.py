@@ -147,6 +147,7 @@ class NewsStack(Stack):
             handler="ingest.handler.handler",
             code=lambda_.Code.from_asset("backend", exclude=["**/__pycache__"]),
             memory_size=256,
+            retry_attempts=0,  # the schedule is the retry; a failed run must not triple the outbound fetches
             timeout=Duration.seconds(60),
             environment={"DATA_BUCKET": data_bucket.bucket_name, "DATA_PREFIX": DATA_PREFIX, "LOCATION_PARAM": LOCATION_PARAM},
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
