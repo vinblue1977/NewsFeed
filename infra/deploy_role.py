@@ -10,7 +10,9 @@ from aws_cdk import CfnOutput, Duration, Stack
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
-GITHUB_REPO = "vinblue1977/NewsFeed"
+# This repository uses GitHub's immutable OIDC subject (owner and repo IDs), so a rename or transfer cannot hand the role to
+# someone else. Check with: gh api repos/vinblue1977/NewsFeed/actions/oidc/customization/sub
+GITHUB_SUBJECT_PREFIX = "repo:vinblue1977@13391763/NewsFeed@1457117737"
 GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
 QUALIFIER = "hnb659fds"  # the default CDK bootstrap qualifier
 BOOTSTRAP_ROLES = ("deploy", "file-publishing", "image-publishing", "lookup")
@@ -33,7 +35,7 @@ class DeployRoleStack(Stack):
                 {
                     "StringEquals": {
                         f"{GITHUB_OIDC_HOST}:aud": "sts.amazonaws.com",
-                        f"{GITHUB_OIDC_HOST}:sub": f"repo:{GITHUB_REPO}:ref:refs/heads/main",
+                        f"{GITHUB_OIDC_HOST}:sub": f"{GITHUB_SUBJECT_PREFIX}:ref:refs/heads/main",
                     }
                 },
             ),
