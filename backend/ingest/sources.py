@@ -50,7 +50,7 @@ SOURCES: tuple[Source, ...] = (
     _s("techcrunch", "TechCrunch", "https://techcrunch.com/feed/", "tech"),
     _s("engadget", "Engadget", "https://www.engadget.com/rss.xml", "tech"),
     _s("9to5mac", "9to5Mac", "https://9to5mac.com/feed/", "tech"),
-    _s("tomshw", "Tom's Hardware", "https://www.tomshardware.com/feeds/all", "tech"),
+    _s("tomshw", "Tom's Hardware", "https://www.tomshardware.com/feeds.xml", "tech"),
     _s("register", "The Register", "https://www.theregister.com/headlines.atom", "tech"),
     _s("bbc-tech", "BBC News", "https://feeds.bbci.co.uk/news/technology/rss.xml", "tech"),
     # Business
