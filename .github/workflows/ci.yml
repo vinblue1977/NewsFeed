@@ -18,7 +18,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # A push to main is always a merged PR (branch protection) that was up to date with main, so checks and
-# workflow-lint skip pushes. There is no deploy job yet: add one (GitHub OIDC -> AWS) when the stack is ready to ship.
+# workflow-lint skip pushes. The deploy job runs on pushes to main only, and only once the AWS_ROLE_ARN repository
+# variable is set (the account ID lives there, not in the repo).
 jobs:
   # Decides whether checks and workflow-lint run: always on schedule and manual runs; on a PR only if something
   # besides docs (docs/ or top-level Markdown) changed. GitHub counts a skipped required job as passed.
@@ -200,3 +201,53 @@ jobs:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
         with:
           fail-on-severity: high
+
+  # Deploys the News stack from main through GitHub OIDC (no stored keys). The role (infra/deploy_role.py) trusts only
+  # this repository's main branch. Skipped until the AWS_ROLE_ARN repository variable exists.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-24.04  # pinned; ubuntu-latest moves to 26 on 2026-10-19
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write  # to request the OIDC token
+    concurrency:
+      group: deploy
+      cancel-in-progress: false  # never cut a CloudFormation update short
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.12.19"
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements*.txt
+      - name: Install Python dependencies (uv; --seed keeps pip in the venv)
+        run: |
+          uv venv --seed --python "$(which python)" .venv
+          uv pip install --python .venv/bin/python --require-hashes -r requirements.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - name: Install the CDK CLI and the PWA's tools (exact versions; no install scripts)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix frontend --ignore-scripts --no-audit --no-fund
+      - name: Build the PWA
+        run: npm run -s build --prefix frontend
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd  # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+          role-session-name: news-deploy
+      - name: Deploy the News stack
+        run: . .venv/bin/activate && npx --no-install cdk deploy News --require-approval never
