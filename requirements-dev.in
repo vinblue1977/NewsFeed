@@ -1,0 +1,10 @@
+-r requirements.in
+-c requirements.txt
+pytest>=9.2.0
+pytest-cov>=7.1.0
+ruff>=0.17.3
+pip-audit>=2.10.1
+boto3>=1.43.123
+pytest-xdist>=3.8.0
+pip-tools>=7.6.2  # `make lock`
+setuptools>=84.1.0  # GHSA-xmj3-9gf7-h52w

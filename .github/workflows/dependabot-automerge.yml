@@ -1,0 +1,58 @@
+name: Dependabot auto-merge
+
+# Dependabot PRs merge themselves once the required checks pass, and the Dependabot PRs still open are rebased after any merge into main.
+# Both steps use AUTOMERGE_TOKEN (a fine-grained PAT, stored as an Actions and a Dependabot secret) instead
+# of GITHUB_TOKEN: a merge made by GITHUB_TOKEN starts no push run and a branch update made
+# by it starts no checks. The token needs Contents, Pull requests, Actions and Workflows write on this repo.
+#
+# pull_request_target is what lets a Dependabot PR read secrets. It is safe here because nothing in this
+# workflow checks out or runs code from the PR; it only calls `gh` with the PR number.
+
+on:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened, synchronize, closed]
+
+permissions: {}  # the token below does the work; GITHUB_TOKEN gets nothing
+
+jobs:
+  # Turns on auto-merge; GitHub merges when the required checks pass and the branch is up to date.
+  enable:
+    if: github.event.action != 'closed' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-24.04  # pinned; ubuntu-latest moves to 26 on 2026-10-19
+    timeout-minutes: 5
+    steps:
+      # Patch and minor bumps only. The update type comes from the PR title ("Bump x from 1.2.3 to 1.2.4"):
+      # a major bump, a grouped update or a SHA-to-SHA bump does not match, so it waits for a human.
+      - run: |
+          if [[ "$TITLE" =~ from\ v?([0-9]+)(\.[^\ ]*)?\ to\ v?([0-9]+) ]] && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[3]}" ]; then
+            gh pr merge --auto --squash "$PR" --repo "$REPO"
+          else
+            echo "Not a patch/minor bump; leaving it for manual review."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TITLE: ${{ github.event.pull_request.title }}
+
+  # Any merge into main (Dependabot's or ours) leaves open Dependabot PRs behind it, and branch protection wants
+  # them up to date. Dependabot rebases its own PRs, which also starts their checks; `gh pr update-branch`
+  # would make it refuse to.
+  rebase-others:
+    if: >-
+      github.event.action == 'closed' && github.event.pull_request.merged
+      && github.event.pull_request.base.ref == github.event.repository.default_branch
+    concurrency:
+      group: dependabot-rebase  # overlapping merges queue instead of racing each other's rebases
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04  # pinned; ubuntu-latest moves to 26 on 2026-10-19
+    timeout-minutes: 5
+    steps:
+      - run: |
+          # Only the ones GitHub says are behind main. UNKNOWN (right after a merge) is skipped to avoid rebase loops.
+          for pr in $(gh pr list --repo "$REPO" --author 'app/dependabot' --state open --json number,mergeStateStatus --jq '.[]|select(.mergeStateStatus=="BEHIND")|.number'); do
+            gh pr comment "$pr" --repo "$REPO" --body '@dependabot rebase'
+          done
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          REPO: ${{ github.repository }}
