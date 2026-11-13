@@ -18,11 +18,11 @@ def build_feed(location: dict[str, Any]) -> dict[str, Any]:
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    """EventBridge entry point. Writes data/feed.json; fails loudly if no source worked at all."""
+    """EventBridge entry point. Writes data/feed.json; keeps the previous file if more than half the sources failed."""
     feed = build_feed(cached_location())
     failed = [sid for sid, s in feed["sources"].items() if not s["ok"]]
-    if len(failed) == len(feed["sources"]):  # never overwrite a good feed with an empty one
-        raise RuntimeError("every source failed; keeping the previous feed")
+    if len(failed) * 2 > len(feed["sources"]) or not feed["items"]:  # a bad run must not replace a good feed
+        raise RuntimeError(f"{len(failed)} of {len(feed['sources'])} sources failed; keeping the previous feed")
     boto3.client("s3").put_object(
         Bucket=os.environ["DATA_BUCKET"],
         Key=f"{os.environ['DATA_PREFIX']}/feed.json",

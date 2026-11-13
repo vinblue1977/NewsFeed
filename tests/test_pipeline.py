@@ -26,6 +26,7 @@ DOCS = {
         ("New", "https://x.example/1", "", "Fri, 13 Nov 2026 11:00:00 GMT"),
         ("Old", "https://x.example/2", "", "Mon, 02 Nov 2026 11:00:00 GMT"),
         ("Future", "https://x.example/3", "", "Sat, 14 Nov 2026 00:00:00 GMT"),
+        ("Bogus", "https://x.example/8", "", "Wed, 01 Jan 2031 00:00:00 GMT"),
     ),
     "https://b.example/f": rss(("Dup", "https://x.example/1", "", "Fri, 13 Nov 2026 10:00:00 GMT")),
     "https://c.example/f": rss(
@@ -50,7 +51,7 @@ def src(id: str, host: str, **kw: Any) -> Source:  # noqa: A002
 def test_collect_dedupes_drops_old_clamps_future_and_isolates_failures() -> None:
     sources = [src("a", "a"), src("b", "b"), src("bad", "missing"), src("off", "a", enabled=False)]
     items, status = collect(sources, now=NOW, fetcher=fake_fetcher)
-    assert [i["title"] for i in items] == ["Future", "New"]  # newest first; old and duplicate dropped
+    assert [i["title"] for i in items] == ["Future", "New"]  # newest first; old, duplicate and bogus-dated dropped
     assert items[0]["published"] == NOW.isoformat(timespec="seconds")  # clamped, not shown from the future
     assert status["a"] == {"ok": True, "items": 2}
     assert status["b"] == {"ok": True, "items": 0}  # its only item duplicated a's
@@ -65,6 +66,23 @@ def test_local_items_must_mention_a_nearby_place() -> None:
         ("Road closed in Buffalo Grove", "Buffalo Grove"),
         ("Palatine news", "Palatine"),
     ]
+
+
+def test_place_uses_the_configured_spelling() -> None:
+    docs = {"https://c.example/f": rss(("ROAD WORK IN MCKINNEY", "https://x.example/9", "", "Fri, 13 Nov 2026 09:00:00 GMT"))}
+    items, _ = collect([src("c", "c", topic="local")], ["McKinney"], now=NOW, fetcher=docs.__getitem__)
+    assert items[0]["place"] == "McKinney"
+
+
+def test_an_unexpected_exception_in_one_source_does_not_sink_the_run() -> None:
+    def fetcher(url: str) -> bytes:
+        if "boom" in url:
+            raise RecursionError
+        return DOCS[url]
+
+    items, status = collect([src("boom", "boom"), src("a", "a")], now=NOW, fetcher=fetcher)
+    assert status["boom"] == {"ok": False, "items": 0, "error": "unexpected RecursionError"}
+    assert len(items) == 2
 
 
 def test_local_feed_without_places_keeps_nothing() -> None:
@@ -113,6 +131,17 @@ def test_handler_refuses_to_overwrite_with_an_all_failed_run(monkeypatch: pytest
     monkeypatch.setattr(handler_module, "cached_location", lambda: {"nearby": [], "feeds": []})
     monkeypatch.setattr(handler_module, "SOURCES", (src("bad", "missing"),))
     monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
-    with pytest.raises(RuntimeError, match="every source failed"):
+    with pytest.raises(RuntimeError, match="1 of 1 sources failed"):
+        handler_module.handler({}, object())
+    assert s3.puts == []
+
+
+def test_handler_refuses_a_mostly_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    monkeypatch.setattr(boto3, "client", lambda name: s3)
+    monkeypatch.setattr(handler_module, "cached_location", lambda: {"nearby": [], "feeds": []})
+    monkeypatch.setattr(handler_module, "SOURCES", (src("a", "a"), src("m1", "missing"), src("m2", "missing")))
+    monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
+    with pytest.raises(RuntimeError, match="2 of 3 sources failed"):
         handler_module.handler({}, object())
     assert s3.puts == []

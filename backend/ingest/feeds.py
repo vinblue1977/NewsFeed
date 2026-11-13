@@ -2,7 +2,9 @@
 
 import hashlib
 import html
+import http.client
 import re
+import time
 import urllib.request
 import xml.etree.ElementTree as ET  # noqa: S405  (DOCTYPE/ENTITY declarations are rejected before parsing; see parse_feed)
 from datetime import UTC, datetime
@@ -16,6 +18,7 @@ from ingest.sources import Source
 USER_AGENT = "Mozilla/5.0 (compatible; NewsPWA/1.0; personal reader)"
 TIMEOUT_SECONDS = 8
 ACCEPT = "application/rss+xml, application/atom+xml, application/xml, text/xml"
+DEADLINE_SECONDS = 20  # total wall-clock budget per feed (the socket timeout alone resets on every byte)
 MAX_BYTES = 2_000_000  # the largest feed seen is about 1.1 MB
 SUMMARY_CHARS = 400
 ATOM = "{http://www.w3.org/2005/Atom}"
@@ -25,20 +28,35 @@ class FeedError(Exception):
     """A feed could not be fetched or parsed."""
 
 
+class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        if urlsplit(newurl).scheme != "https":
+            raise FeedError("redirected to a non-https URL")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_HttpsOnlyRedirects)
+
+
 def fetch(url: str) -> bytes:
-    """GET a feed over HTTPS, with a timeout and a size cap."""
+    """GET a feed over HTTPS (redirects too), with a socket timeout, a total deadline and a size cap."""
     if urlsplit(url).scheme != "https":
         raise FeedError("only https feeds are fetched")
     headers = {"User-Agent": USER_AGENT, "Accept": ACCEPT}
     request = urllib.request.Request(url, headers=headers)  # noqa: S310  (https scheme checked above)
+    deadline = time.monotonic() + DEADLINE_SECONDS
+    body = bytearray()
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
-            body = response.read(MAX_BYTES + 1)
-    except OSError as exc:  # URLError, HTTPError, timeouts and connection errors are all OSError
-        raise FeedError(f"fetch failed: {exc}") from exc
-    if len(body) > MAX_BYTES:
-        raise FeedError("feed is larger than the size cap")
-    return body
+        with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+            while chunk := response.read(65536):
+                body += chunk
+                if len(body) > MAX_BYTES:
+                    raise FeedError("feed is larger than the size cap")
+                if time.monotonic() > deadline:
+                    raise FeedError("feed is too slow")
+    except (OSError, http.client.HTTPException) as exc:  # URLError, HTTPError, timeouts, IncompleteRead
+        raise FeedError(f"fetch failed: {type(exc).__name__}") from exc
+    return bytes(body)
 
 
 class _Text(HTMLParser):
@@ -109,11 +127,24 @@ def _atom_link(entry: ET.Element) -> str | None:
     return links[0].get("href") if links else None
 
 
+_SAFE_ENCODINGS = {"utf-8", "us-ascii", "ascii", "iso-8859-1", "windows-1252"}  # all ASCII-compatible, so byte scans work
+
+
+def _check_safe(body: bytes) -> None:
+    """Refuse documents the byte-level DOCTYPE/ENTITY scan could not see through (UTF-16/32, odd encodings)."""
+    if b"\x00" in body[:512] or body[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        raise FeedError("feed is not an ASCII-compatible encoding")
+    declared = re.match(rb"""\s*<\?xml[^>]*encoding=["']([^"']+)["']""", body[:512], re.IGNORECASE)
+    if declared and declared.group(1).decode("ascii", "replace").lower() not in _SAFE_ENCODINGS:
+        raise FeedError("feed declares an unsupported encoding")
+    lowered = body.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise FeedError("feed declares a DOCTYPE or entities; refusing to parse it")
+
+
 def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
     """Parse an RSS 2.0 or Atom document into items. Entries without a title, a safe link or a date are dropped."""
-    head = body[:4096].lower()
-    if b"<!doctype" in head or b"<!entity" in body.lower():
-        raise FeedError("feed declares a DOCTYPE or entities; refusing to parse it")
+    _check_safe(body)
     try:
         root = ET.fromstring(body)  # noqa: S314
     except ET.ParseError as exc:

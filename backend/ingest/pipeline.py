@@ -10,6 +10,7 @@ from ingest.feeds import FeedError, fetch, parse_feed
 from ingest.sources import Source
 
 MAX_AGE = timedelta(hours=72)
+MAX_FUTURE = timedelta(hours=12)  # a small clock or timezone slip is clamped; more than this is bogus and dropped
 MAX_PER_SOURCE = 40
 WORKERS = 8
 
@@ -23,9 +24,10 @@ def _host(url: str) -> str:
     return re.sub(r"^www\.", "", url.split("/")[2]) if url.count("/") >= 2 else url
 
 
-def _mentions(item: dict[str, Any], pattern: re.Pattern[str]) -> str | None:
+def _mentions(item: dict[str, Any], pattern: re.Pattern[str], places: dict[str, str]) -> str | None:
+    """The configured spelling of the first nearby place the item mentions."""
     found = pattern.search(f"{item['title']} {item['summary']}")
-    return found.group(0) if found else None
+    return places[found.group(0).lower()] if found else None
 
 
 def collect(
@@ -38,7 +40,7 @@ def collect(
     """Return (items newest first, per-source status). Local items must mention one of `nearby` and get a `place`."""
     now = now or datetime.now(UTC)
     fetcher = fetcher or fetch  # looked up at call time, so tests can replace the module's fetch
-    places = [p for p in nearby if p]
+    places = {p.lower(): p for p in nearby if p}
     place_re = re.compile(r"\b(" + "|".join(re.escape(p) for p in places) + r")\b", re.IGNORECASE) if places else None
 
     def run(source: Source) -> tuple[Source, list[dict[str, Any]], str | None]:
@@ -46,6 +48,8 @@ def collect(
             return source, parse_feed(fetcher(source.url), source), None
         except FeedError as exc:
             return source, [], str(exc)
+        except Exception as exc:  # (one bad feed, whatever it raises, must not sink the run)
+            return source, [], f"unexpected {type(exc).__name__}"
 
     sources = [s for s in sources if s.enabled]
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -55,17 +59,21 @@ def collect(
     status: dict[str, dict[str, Any]] = {}
     for source, parsed, error in results:
         kept = 0
-        for item in sorted(parsed, key=lambda i: i["published"], reverse=True)[:MAX_PER_SOURCE]:
+        for item in sorted(parsed, key=lambda i: i["published"], reverse=True):
+            if kept >= MAX_PER_SOURCE:  # the cap counts stories that survive the filters, not raw entries
+                break
             published = datetime.fromisoformat(item["published"])
             if now - published > MAX_AGE:
                 continue
-            if published > now:  # a feed with a clock or timezone slip: never show a story from the future
+            if published - now > MAX_FUTURE:
+                continue
+            if published > now:  # a small clock or timezone slip: never show a story from the future
                 item["published"] = now.isoformat(timespec="seconds")
             if source.topic == "local":
-                place = _mentions(item, place_re) if place_re else None
+                place = _mentions(item, place_re, places) if place_re else None
                 if not place:
                     continue
-                item["place"] = place.title()
+                item["place"] = place
             if item["url"] in items:
                 continue
             items[item["url"]] = item
