@@ -21,11 +21,19 @@ jobs:
     runs-on: ubuntu-24.04  # pinned; ubuntu-latest moves to 26 on 2026-10-19
     timeout-minutes: 5
     steps:
-      - run: gh pr merge --auto --squash "$PR" --repo "$REPO"
+      # Patch and minor bumps only. The update type comes from the PR title ("Bump x from 1.2.3 to 1.2.4"):
+      # a major bump, a grouped update or a SHA-to-SHA bump does not match, so it waits for a human.
+      - run: |
+          if [[ "$TITLE" =~ from\ v?([0-9]+)(\.[^\ ]*)?\ to\ v?([0-9]+) ]] && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[3]}" ]; then
+            gh pr merge --auto --squash "$PR" --repo "$REPO"
+          else
+            echo "Not a patch/minor bump; leaving it for manual review."
+          fi
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          TITLE: ${{ github.event.pull_request.title }}
 
   # Any merge into main (Dependabot's or ours) leaves open Dependabot PRs behind it, and branch protection wants
   # them up to date. Dependabot rebases its own PRs, which also starts their checks; `gh pr update-branch`
@@ -41,8 +49,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          # Only the ones behind main (UNKNOWN: GitHub has not worked it out yet right after a merge).
-          for pr in $(gh pr list --repo "$REPO" --author 'app/dependabot' --state open --json number,mergeStateStatus --jq '.[]|select(.mergeStateStatus=="BEHIND" or .mergeStateStatus=="UNKNOWN")|.number'); do
+          # Only the ones GitHub says are behind main. UNKNOWN (right after a merge) is skipped to avoid rebase loops.
+          for pr in $(gh pr list --repo "$REPO" --author 'app/dependabot' --state open --json number,mergeStateStatus --jq '.[]|select(.mergeStateStatus=="BEHIND")|.number'); do
             gh pr comment "$pr" --repo "$REPO" --body '@dependabot rebase'
           done
         env:

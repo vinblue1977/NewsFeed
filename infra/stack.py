@@ -19,7 +19,8 @@ DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
-def _bucket(scope: Construct, construct_id: str) -> s3.Bucket:
+def _bucket(scope: Construct, construct_id: str, *, retain: bool = False) -> s3.Bucket:
+    """Private, encrypted, TLS-only bucket. `retain` keeps the contents if the stack or construct is ever removed."""
     return s3.Bucket(
         scope,
         construct_id,
@@ -27,8 +28,8 @@ def _bucket(scope: Construct, construct_id: str) -> s3.Bucket:
         encryption=s3.BucketEncryption.S3_MANAGED,
         enforce_ssl=True,
         object_ownership=s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
-        removal_policy=RemovalPolicy.DESTROY,
-        auto_delete_objects=True,
+        removal_policy=RemovalPolicy.RETAIN if retain else RemovalPolicy.DESTROY,
+        auto_delete_objects=not retain,
     )
 
 
@@ -38,52 +39,75 @@ class NewsStack(Stack):
         site_dir = str(self.node.try_get_context("siteDir") or "frontend/dist")
 
         site_bucket = _bucket(self, "SiteBucket")
-        data_bucket = _bucket(self, "DataBucket")
+        data_bucket = _bucket(self, "DataBucket", retain=True)  # feed JSON survives a replace or rename
 
-        headers = cloudfront.ResponseHeadersPolicy(
-            self,
-            "SecurityHeaders",
-            security_headers_behavior=cloudfront.ResponseSecurityHeadersBehavior(
-                content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
-                    content_security_policy=(
-                        "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https:; "
-                        "manifest-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; "
-                        "base-uri 'none'; form-action 'none'; upgrade-insecure-requests"
+        def headers_policy(construct_id: str, cache_control: str) -> cloudfront.ResponseHeadersPolicy:
+            return cloudfront.ResponseHeadersPolicy(
+                self,
+                construct_id,
+                security_headers_behavior=cloudfront.ResponseSecurityHeadersBehavior(
+                    content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
+                        content_security_policy=(
+                            "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; "
+                            "img-src 'self' data: https:; manifest-src 'self'; connect-src 'self'; worker-src 'self'; "
+                            "object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; "
+                            "upgrade-insecure-requests"
+                        ),
+                        override=True,
                     ),
-                    override=True,
+                    strict_transport_security=cloudfront.ResponseHeadersStrictTransportSecurity(
+                        access_control_max_age=Duration.days(365), include_subdomains=True, override=True
+                    ),
+                    content_type_options=cloudfront.ResponseHeadersContentTypeOptions(override=True),
+                    frame_options=cloudfront.ResponseHeadersFrameOptions(
+                        frame_option=cloudfront.HeadersFrameOption.DENY, override=True
+                    ),
+                    referrer_policy=cloudfront.ResponseHeadersReferrerPolicy(
+                        referrer_policy=cloudfront.HeadersReferrerPolicy.NO_REFERRER, override=True
+                    ),
                 ),
-                strict_transport_security=cloudfront.ResponseHeadersStrictTransportSecurity(
-                    access_control_max_age=Duration.days(365), include_subdomains=True, override=True
+                custom_headers_behavior=cloudfront.ResponseCustomHeadersBehavior(
+                    custom_headers=[
+                        cloudfront.ResponseCustomHeader(header="X-Robots-Tag", value="noindex, nofollow", override=True),
+                        cloudfront.ResponseCustomHeader(header="Cache-Control", value=cache_control, override=True),
+                    ]
                 ),
-                content_type_options=cloudfront.ResponseHeadersContentTypeOptions(override=True),
-                frame_options=cloudfront.ResponseHeadersFrameOptions(
-                    frame_option=cloudfront.HeadersFrameOption.DENY, override=True
-                ),
-                referrer_policy=cloudfront.ResponseHeadersReferrerPolicy(
-                    referrer_policy=cloudfront.HeadersReferrerPolicy.NO_REFERRER, override=True
-                ),
-            ),
-            custom_headers_behavior=cloudfront.ResponseCustomHeadersBehavior(
-                custom_headers=[
-                    cloudfront.ResponseCustomHeader(header="X-Robots-Tag", value="noindex, nofollow", override=True),
-                    cloudfront.ResponseCustomHeader(header="Cache-Control", value="no-cache", override=True),
-                ]
-            ),
+            )
+
+        # index.html, the manifest and the data JSON must revalidate; Vite's content-hashed /assets/* never change.
+        revalidate = headers_policy("SecurityHeaders", "no-cache")
+        immutable = headers_policy("AssetHeaders", "public, max-age=31536000, immutable")
+        # The feed is rewritten every 30 minutes: let the edge keep it for at most a few minutes.
+        data_cache = cloudfront.CachePolicy(
+            self,
+            "DataCache",
+            default_ttl=Duration.minutes(2),
+            min_ttl=Duration.seconds(0),
+            max_ttl=Duration.minutes(5),
+            enable_accept_encoding_gzip=True,
+            enable_accept_encoding_brotli=True,
         )
+        site_origin = origins.S3BucketOrigin.with_origin_access_control(site_bucket)  # pyright: ignore[reportArgumentType]
         distribution = cloudfront.Distribution(
             self,
             "Site",
             default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3BucketOrigin.with_origin_access_control(site_bucket),  # pyright: ignore[reportArgumentType]
+                origin=site_origin,
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                response_headers_policy=headers,
+                response_headers_policy=revalidate,
             ),
             additional_behaviors={
+                "/assets/*": cloudfront.BehaviorOptions(
+                    origin=site_origin,
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    response_headers_policy=immutable,
+                ),
                 f"/{DATA_PREFIX}/*": cloudfront.BehaviorOptions(
                     origin=origins.S3BucketOrigin.with_origin_access_control(data_bucket),  # pyright: ignore[reportArgumentType]
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                    response_headers_policy=headers,
-                )
+                    cache_policy=data_cache,
+                    response_headers_policy=revalidate,
+                ),
             },
             default_root_object="index.html",
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,
