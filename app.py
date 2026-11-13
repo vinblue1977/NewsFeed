@@ -8,6 +8,7 @@ from cdk_nag import AwsSolutionsChecks
 
 from infra.deploy_role import DeployRoleStack
 from infra.stack import NewsStack
+from infra.tags import APP_TAGS
 
 app = cdk.App()
 NewsStack(
@@ -27,7 +28,7 @@ DeployRoleStack(
     termination_protection=True,
     description="GitHub Actions OIDC deploy role for the News stack (deployed once by hand)",
 )
-cdk.Tags.of(app).add("project", "news")
-cdk.Tags.of(app).add("managed-by", "cdk")
+for key, value in APP_TAGS.items():
+    cdk.Tags.of(app).add(key, value)
 cdk.Aspects.of(app).add(AwsSolutionsChecks(verbose=True))
 app.synth()
