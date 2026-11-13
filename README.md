@@ -22,7 +22,7 @@ Deploys run from CI on every push to `main`, through GitHub OIDC (no stored keys
      '{"town": "...", "lat": 0.0, "lon": 0.0, "nearby": ["..."], "feeds": ["https://..."]}'
    ```
 
-2. **Deploy role (once, by hand).** `NewsDeployRole` trusts this repository's `main` branch and can only assume the CDK bootstrap roles. It reuses the account's existing GitHub OIDC provider.
+2. **Deploy role (once, by hand).** This is the one exception to "no deploys from a laptop": CI has no role until this stack exists, and later changes to it need the same manual step. `NewsDeployRole` trusts this repository's `main` branch and can only assume the CDK bootstrap roles. It reuses the account's existing GitHub OIDC provider.
 
    ```sh
    npx --no-install cdk deploy NewsDeployRole

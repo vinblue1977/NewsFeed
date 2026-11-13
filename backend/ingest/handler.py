@@ -3,10 +3,10 @@
 import json
 from typing import Any
 
-from ingest.config import load_location
+from ingest.config import cached_location
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Reads the location config (fails loudly if missing); does nothing else yet."""
-    location = load_location()
+    location = cached_location()
     return {"status": "ok", "sources": 0, "local_feeds": len(location["feeds"]), "event": json.dumps(event, sort_keys=True)}
