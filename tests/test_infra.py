@@ -197,3 +197,8 @@ def test_app_tags_reach_every_taggable_resource() -> None:
             if has_tags_property:
                 tags = {t["Key"]: t["Value"] for t in res["Properties"]["Tags"]}
                 assert APP_TAGS.items() <= tags.items(), f"{stack.stack_name}/{logical_id} lacks the app tags"
+
+
+def test_a_failed_ingest_is_not_retried_by_lambda() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    template.has_resource_properties("AWS::Lambda::EventInvokeConfig", {"MaximumRetryAttempts": 0})

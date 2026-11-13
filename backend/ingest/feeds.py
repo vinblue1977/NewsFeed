@@ -1,0 +1,190 @@
+"""Fetch and parse RSS 2.0 and Atom feeds into normalised items. Everything here treats feed content as untrusted."""
+
+import hashlib
+import html
+import http.client
+import re
+import time
+import urllib.request
+import xml.etree.ElementTree as ET  # noqa: S405  (DOCTYPE/ENTITY declarations are rejected before parsing; see parse_feed)
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
+from typing import Any
+from urllib.parse import urlsplit
+
+from ingest.sources import Source
+
+USER_AGENT = "Mozilla/5.0 (compatible; NewsPWA/1.0; personal reader)"
+TIMEOUT_SECONDS = 8
+ACCEPT = "application/rss+xml, application/atom+xml, application/xml, text/xml"
+DEADLINE_SECONDS = 20  # total wall-clock budget per feed (the socket timeout alone resets on every byte)
+MAX_BYTES = 2_000_000  # the largest feed seen is about 1.1 MB
+SUMMARY_CHARS = 400
+ATOM = "{http://www.w3.org/2005/Atom}"
+
+
+class FeedError(Exception):
+    """A feed could not be fetched or parsed."""
+
+
+class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        if urlsplit(newurl).scheme != "https":
+            raise FeedError("redirected to a non-https URL")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_HttpsOnlyRedirects)
+
+
+def fetch(url: str) -> bytes:
+    """GET a feed over HTTPS (redirects too), with a socket timeout, a total deadline and a size cap."""
+    if urlsplit(url).scheme != "https":
+        raise FeedError("only https feeds are fetched")
+    headers = {"User-Agent": USER_AGENT, "Accept": ACCEPT}
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310  (https scheme checked above)
+    deadline = time.monotonic() + DEADLINE_SECONDS
+    body = bytearray()
+    try:
+        with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+            while chunk := response.read(65536):
+                body += chunk
+                if len(body) > MAX_BYTES:
+                    raise FeedError("feed is larger than the size cap")
+                if time.monotonic() > deadline:
+                    raise FeedError("feed is too slow")
+    except (OSError, http.client.HTTPException) as exc:  # URLError, HTTPError, timeouts, IncompleteRead
+        raise FeedError(f"fetch failed: {type(exc).__name__}") from exc
+    return bytes(body)
+
+
+class _Text(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.skip = 0  # depth inside <script>/<style>, whose contents are code, not text
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.skip += tag in ("script", "style")
+
+    def handle_endtag(self, tag: str) -> None:
+        self.skip = max(0, self.skip - (tag in ("script", "style")))
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip:
+            self.parts.append(data)
+
+
+def clean_text(raw: str | None, limit: int | None = None) -> str:
+    """Strip tags, decode entities, collapse whitespace, truncate on a word boundary."""
+    if not raw:
+        return ""
+    stripper = _Text()
+    stripper.feed(raw)
+    stripper.close()
+    text = re.sub(r"\s+", " ", html.unescape("".join(stripper.parts))).strip()
+    if limit and len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-") + "…"
+    return text
+
+
+def _safe_url(url: str | None) -> str | None:
+    """Only http(s) links with a host are kept (a feed could carry a javascript: or data: URL)."""
+    if not url:
+        return None
+    parts = urlsplit(url.strip())
+    return url.strip() if parts.scheme in ("http", "https") and parts.netloc else None
+
+
+def _parse_date(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    raw = raw.strip()
+    try:
+        try:
+            parsed = parsedate_to_datetime(raw)  # RSS: RFC 822
+        except TypeError, ValueError:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))  # Atom: ISO 8601
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    except TypeError, ValueError, OverflowError:
+        return None
+
+
+def _child(node: ET.Element, *names: str) -> str | None:
+    """The text of the first matching child, including text inside child elements (Atom XHTML summaries)."""
+    for name in names:
+        found = node.find(name)
+        if found is not None:
+            text = "".join(found.itertext()).strip()
+            if text:
+                return text
+    return None
+
+
+def _atom_link(entry: ET.Element) -> str | None:
+    links = entry.findall(f"{ATOM}link")
+    for link in links:
+        if link.get("rel", "alternate") == "alternate" and link.get("href"):
+            return link.get("href")
+    return links[0].get("href") if links else None
+
+
+# ASCII-compatible encodings only, so the byte-level scan below sees every declaration.
+_SAFE_ENCODING = re.compile(r"^(utf-?8|us-ascii|ascii|latin-?1|iso-8859-\d{1,2}|windows-125\d)$", re.IGNORECASE)
+_XML_DECL = re.compile(rb"""^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_CDATA_OR_COMMENT = re.compile(rb"<!\[CDATA\[.*?\]\]>|<!--.*?-->", re.DOTALL)
+
+
+def _check_safe(body: bytes) -> None:
+    """Refuse documents the byte-level DOCTYPE/ENTITY scan could not see through (UTF-16/32, odd encodings)."""
+    start = body[3:] if body[:3] == b"\xef\xbb\xbf" else body  # a UTF-8 BOM is fine
+    if b"\x00" in start[:512] or start[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        raise FeedError("feed is not an ASCII-compatible encoding")
+    declared = _XML_DECL.match(start[:1024])
+    if declared and not _SAFE_ENCODING.match(declared.group(1).decode("ascii", "replace")):
+        raise FeedError("feed declares an unsupported encoding")
+    # Article HTML inside CDATA or comments may legitimately contain "<!DOCTYPE html>"; only real markup counts.
+    markup = _CDATA_OR_COMMENT.sub(b"", start).lower()
+    if b"<!doctype" in markup or b"<!entity" in markup:
+        raise FeedError("feed declares a DOCTYPE or entities; refusing to parse it")
+
+
+def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
+    """Parse an RSS 2.0 or Atom document into items. Entries without a title, a safe link or a date are dropped."""
+    _check_safe(body)
+    try:
+        root = ET.fromstring(body)  # noqa: S314
+    except ET.ParseError as exc:
+        raise FeedError(f"not valid XML: {exc}") from exc
+    items: list[dict[str, Any]] = []
+    for node in [*root.iter("item"), *root.iter(f"{ATOM}entry")]:
+        atom = node.tag == f"{ATOM}entry"
+        title = clean_text(_child(node, f"{ATOM}title") if atom else _child(node, "title"))
+        link = _safe_url(_atom_link(node) if atom else (_child(node, "link") or _child(node, "guid")))
+        published = _parse_date(
+            _child(node, f"{ATOM}published", f"{ATOM}updated")
+            if atom
+            else _child(node, "pubDate", "{http://purl.org/dc/elements/1.1/}date")
+        )
+        if not (title and link and published):
+            continue
+        summary = clean_text(
+            _child(node, f"{ATOM}summary", f"{ATOM}content") if atom else _child(node, "description"), SUMMARY_CHARS
+        )
+        item: dict[str, Any] = {
+            "id": hashlib.sha256(link.encode()).hexdigest()[:16],
+            "title": title,
+            "url": link,
+            "summary": "" if summary == title else summary,
+            "published": published.isoformat(timespec="seconds"),
+            "source": source.name,
+            "source_id": source.id,
+            "topic": source.topic,
+        }
+        if source.subtopic:
+            item["subtopic"] = source.subtopic
+        if source.metered:
+            item["metered"] = True
+        items.append(item)
+    return items
