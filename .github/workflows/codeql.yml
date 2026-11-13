@@ -16,6 +16,8 @@ concurrency:
 
 jobs:
   analyze:
+    # Dependabot PRs get a read-only token, so the results upload would fail; its bumps are covered by dependency-review.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-24.04  # pinned; ubuntu-latest moves to 26 on 2026-10-19
     timeout-minutes: 20
     permissions:

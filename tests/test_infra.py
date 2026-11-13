@@ -82,10 +82,12 @@ def test_manifest_is_deployed_separately_with_its_content_type() -> None:
     template = _synthesized(ACCOUNT)[1]
     deployments = template.find_resources("Custom::CDKBucketDeployment")
     assert len(deployments) == 2
-    props = [d["Properties"] for d in deployments.values()]
-    manifest = next(p for p in props if p.get("DistributionPaths") == ["/manifest.webmanifest"])
+    site = next(v["Properties"] for k, v in deployments.items() if k.startswith("DeploySite"))
+    manifest = next(v["Properties"] for k, v in deployments.items() if k.startswith("DeployManifest"))
+    assert "manifest.webmanifest" in site["Exclude"]  # not uploaded (or pruned) by the site deployment
+    assert "content-type" not in site.get("SystemMetadata", {})
+    assert manifest["Include"] == ["manifest.webmanifest"]
     assert manifest["SystemMetadata"]["content-type"] == "application/manifest+json"
     assert manifest["Prune"] is False
-    site = next(p for p in props if p is not manifest)
-    assert "manifest.webmanifest" in site["Exclude"]  # excluded here, so it is neither guessed nor pruned
-    assert any("DeploySite" in str(d) or "DeploySite" in k for k, d in deployments.items())
+    assert "DistributionId" not in site  # a single /* invalidation, from the manifest deployment
+    assert "DistributionId" in manifest

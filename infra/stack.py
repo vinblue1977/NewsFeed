@@ -122,7 +122,6 @@ class NewsStack(Stack):
             destination_bucket=site_bucket,
             sources=[s3deploy.Source.asset(site_dir)],
             exclude=[MANIFEST],
-            distribution=distribution,  # pyright: ignore[reportArgumentType]
         )
         manifest_deploy = s3deploy.BucketDeployment(
             self,
@@ -133,8 +132,7 @@ class NewsStack(Stack):
             include=[MANIFEST],
             content_type="application/manifest+json",
             prune=False,
-            distribution=distribution,  # pyright: ignore[reportArgumentType]
-            distribution_paths=[f"/{MANIFEST}"],  # the site deployment already invalidates /*
+            distribution=distribution,  # pyright: ignore[reportArgumentType]  # the one /* invalidation, after both uploads
         )
         manifest_deploy.node.add_dependency(site_deploy)  # one after the other, not in parallel
 

@@ -84,10 +84,9 @@ jobs:
       - name: Privacy guard
         run: make privacy
         env:
+          PII_DENYLIST: ${{ secrets.PII_DENYLIST }}  # private names to block; never printed
           # Only this PR's own commits (a PR checkout also holds a synthetic merge commit); empty scans all history.
           PRIVACY_LOG_RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || '' }}
-        env:
-          PII_DENYLIST: ${{ secrets.PII_DENYLIST }}  # private names to block; never printed
       - name: Lint (ruff with Bandit security rules, pyright types)
         run: make lint
       - name: Unit and infrastructure tests (parallel)

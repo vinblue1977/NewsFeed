@@ -13,8 +13,12 @@ fi
 
 # Author and committer emails must be GitHub or Anthropic no-reply addresses. PRIVACY_LOG_RANGE (e.g. BASE..HEAD, set by
 # CI on pull requests) limits the scan to the PR's own commits; unset scans all history. Addresses are never printed.
-bad="$(git log --format='%ae%n%ce' ${PRIVACY_LOG_RANGE:+"$PRIVACY_LOG_RANGE"} 2>/dev/null | sort -u \
-  | grep -vcE '^$|@users\.noreply\.github\.com$|^noreply@(github|anthropic)\.com$' || true)"
+# Fail closed: if git log cannot read the range (shallow clone, missing base commit) nothing was scanned.
+log="$(git log --format='%ae%n%ce' ${PRIVACY_LOG_RANGE:+"$PRIVACY_LOG_RANGE"})" || {
+  echo "::error::git log failed (range '${PRIVACY_LOG_RANGE:-all}'): the commit history was not scanned."
+  exit 1
+}
+bad="$(sort -u <<<"$log" | grep -vcE '^$|@users\.noreply\.github\.com$|^noreply@(github|anthropic)\.com$' || true)"
 if [ "$bad" != 0 ]; then
   echo "::error::$bad commit author/committer email(s) are not GitHub/Anthropic no-reply addresses (not printed). Set git user.email to your GitHub no-reply address."
   status=1
@@ -29,7 +33,7 @@ fi
 # Names from the PII_DENYLIST secret (comma-separated, never printed).
 if [ -n "${PII_DENYLIST:-}" ]; then
   IFS=',' read -r -a words <<<"$PII_DENYLIST"
-  history="$(git log --format='%an %ae %cn %ce %B' ${PRIVACY_LOG_RANGE:+"$PRIVACY_LOG_RANGE"} 2>/dev/null || true)"  # read once: grep -q on a pipe can SIGPIPE git under pipefail
+  history="$(git log --format='%an %ae %cn %ce %B' ${PRIVACY_LOG_RANGE:+"$PRIVACY_LOG_RANGE"})" || { echo "::error::git log failed: history not scanned."; exit 1; }  # read once: grep -q on a pipe can SIGPIPE git under pipefail
   for word in "${words[@]}"; do
     word="$(echo "$word" | xargs)"
     [ -z "$word" ] && continue
