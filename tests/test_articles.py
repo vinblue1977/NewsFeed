@@ -8,7 +8,16 @@ import pytest
 
 from ingest import articles as articles_module
 from ingest import handler as handler_module
-from ingest.articles import MAX_ARTICLES, MAX_CHARS, MIN_CHARS, build_articles, dumps, html_to_blocks
+from ingest.articles import (
+    MAX_ARTICLES,
+    MAX_CHARS,
+    MIN_CHARS,
+    build_articles,
+    dumps,
+    html_to_blocks,
+    is_boilerplate,
+    looks_like_code,
+)
 from ingest.feeds import parse_feed
 from ingest.sources import Source
 
@@ -34,6 +43,138 @@ def run(items: list[dict[str, Any]], generated: str = "g") -> tuple[dict[str, An
 
 
 # --- HTML -> blocks -------------------------------------------------------------------------------------------------
+
+
+# The real shape of the leak: a publisher's feed removed the <script> tags of an ad embed but left their contents behind as
+# bare text after an empty div, so there is no tag for the converter to skip.
+VERGE_LEAK = """<p>It can run for up to 18 hours on a single charge.</p>
+
+<div id="hype-desk-root"></div>
+
+  window.HYPE_DESK_CONFIG = {
+    productImageUrl: "https://platform.example.com/wp-content/uploads/deal.jpg",
+    productTitle: "Beats Solo 4 at Walmart",
+    shortDescription: "A new soundtrack for the season: shop wireless headphones.",
+    longDescription:
+      "A gift for the music fan, or an upgrade for your own daily listening.",
+    purchaseUrl: "https://goto.example.com/c/1?subId1=Hype&amp;veh=aff&amp;u=https%3A%2F%2Fwww.example.com%2Fip%2F1",
+    purchaseLinkText: "Shop Beats at Walmart"
+  };
+"""
+
+
+def test_script_contents_left_behind_as_plain_text_are_not_shown() -> None:
+    assert html_to_blocks(VERGE_LEAK) == [{"t": "p", "x": "It can run for up to 18 hours on a single charge."}]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "window.FOO = {a:1};",
+        "document.write('x')",
+        "  globalThis.dataLayer = [];",
+        "var x = 1;",
+        "const config = {};",
+        "let total = 0",
+        "function init() { return 1 }",
+        "async function load(a) {}",
+        "(function () { run(); })();",
+        "!function(){}();",
+        "import React from 'react'",
+        'export default from "./x"',
+        '{"items": [1, 2, 3]}',
+        "[ 'a': 1 ]",
+        "<div class='ad'>Buy now</div>",
+        "<!-- tracking -->",
+        "</div>",
+        "@media (max-width: 600px) { p { margin: 0; } }",
+        "@font-face { font-family: X; }",
+        "body { color: red; } p { margin: 0; }",
+        "x = {name: 'x', size: 3, ok: true}",
+        "{a: 1, b: true, c: null}",
+        "<IMG src='a.png'>",
+    ],
+)
+def test_code_like_blocks_are_dropped(text: str) -> None:
+    assert looks_like_code(text)
+    assert html_to_blocks(f"<p>{text.replace('<', '&lt;')}</p>") == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "He said window.location is a property you can read.",
+        "Use const x = 5 to declare it, or let if it changes.",
+        "Set a=b and c=>d in the maths, then {x} is the answer.",
+        "Score: 3-2. Notes: late goal. Result: win.",
+        "a < b and b > c, so the order holds.",
+        "The new >clickety< sound is what the keys make.",
+        "See https://example.com/a?b=c&d=e for more.",
+        "The function of the committee (see page 3) is advisory.",
+        "Whether it's {curly} or not, the brace is just a character.",
+        "The sensor reads {low: 2} in one mode.",
+        "Prices: $5, size: 3, color: red, stock: 10 (no braces here).",
+        "Born: 1990, Died: 2020 {sic}.",
+        "Score: 3, Notes: 2, Result: 1 {sic}",
+        "The config is {name: 'x', size: 3, ok: true} apparently.",
+        "<Settings> is where you toggle this.",
+        "<Press Enter> to continue.",
+        "<placeholder> stands for the name you choose.",
+    ],
+)
+def test_prose_that_mentions_code_is_kept(text: str) -> None:
+    assert not looks_like_code(text)
+    assert html_to_blocks(f"<p>{text.replace('<', '&lt;')}</p>") == [{"t": "p", "x": text}]
+
+
+def test_code_written_on_purpose_is_kept_even_when_it_looks_like_a_script() -> None:
+    inline = "<p><code>const x = 5</code> declares a constant that cannot be reassigned.</p>"
+    assert html_to_blocks(inline) == [{"t": "p", "x": "const x = 5 declares a constant that cannot be reassigned."}]
+    pre = '<p>Here is the config:</p><pre>{"a": 1, "b": true, "c": null}</pre><p>That is all.</p>'
+    assert [b["x"] for b in html_to_blocks(pre)] == ["Here is the config:", '{"a": 1, "b": true, "c": null}', "That is all."]
+    kbd = "<p><kbd>window.open(url)</kbd> opens a tab.</p>"
+    assert html_to_blocks(kbd) == [{"t": "p", "x": "window.open(url) opens a tab."}]
+    after = "<p><code>x</code> is short.</p><div>window.FOO = {a: 1, b: 2, c: 3};</div><p>Prose.</p>"
+    assert [b["x"] for b in html_to_blocks(after)] == ["x is short.", "Prose."]  # the flag does not leak into the next block
+
+
+def test_a_leak_with_angle_brackets_and_ampersands_is_still_recognised() -> None:
+    leak = "<p>Real text.</p><div></div>window.X = { a: 1, b: 'if (a &lt; b &amp;&amp; c) { run(); }' };"
+    assert html_to_blocks(leak) == [{"t": "p", "x": "Real text."}]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Comments",
+        "comments:",
+        "Share",
+        "Advertisement",
+        "Related",
+        "Read more.",
+        "Sign up for the Breaking News US email",
+        "Sign up for our weekly newsletter.",
+        "Sponsored by Backblaze: Backup you can rely on. Save 20% with code daily.",
+    ],
+)
+def test_page_furniture_blocks_are_dropped(text: str) -> None:
+    assert is_boilerplate(text)
+    assert html_to_blocks(f"<p>{text}</p>") == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Comments on the bill were mixed, and several members said so.",
+        "You can share the file with anyone who has the link.",
+        "Sign up for the program by Friday and you will get a seat.",
+        "Sponsored by the city, the event runs all week. Tickets are free.",
+        "Read more about it below, because the details matter.",
+    ],
+)
+def test_sentences_that_use_those_words_are_kept(text: str) -> None:
+    assert not is_boilerplate(text)
+    assert html_to_blocks(f"<p>{text}</p>") == [{"t": "p", "x": text}]
 
 
 def test_blocks_keep_paragraphs_headings_lists_and_quotes_as_plain_text() -> None:

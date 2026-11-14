@@ -30,6 +30,7 @@ _SKIP = frozenset(
         "header", "footer", "head", "title",
     }
 )  # fmt: skip
+_LITERAL = frozenset({"code", "pre", "kbd", "samp", "tt"})  # text in these is code on purpose: kept even if it looks like code
 _HEADINGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 _BREAKS = frozenset({"p", "div", "br", "hr", "ul", "ol", "section", "article", "pre", "dl", "dt", "dd"})
 # C0 controls (not tab/newline), DEL, line/paragraph separators, zero-width space and the byte-order mark. Joiners are kept:
@@ -37,6 +38,52 @@ _BREAKS = frozenset({"p", "div", "br", "hr", "ul", "ol", "section", "article", "
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u200b\u2028\u2029\ufeff]")
 _SPACE = re.compile(r"\s+")
 _FOOTER = re.compile(r"^the post .{0,300} appeared first on ", re.IGNORECASE)  # WordPress's link-back line
+
+# Code that reached the text as plain words. Some feeds strip a <script> tag but leave its contents behind (The Verge's ad
+# embeds do: "window.HYPE_DESK_CONFIG = { ... };"), so there is no tag left to skip. These patterns are deliberately narrow so
+# prose that merely mentions code survives: a block is dropped only if it STARTS like a script or real HTML markup, or is an
+# object or style-rule literal. Text that sat inside <code> or <pre> is deliberate code, and is never dropped (see _Blocks).
+_CODE_START = re.compile(
+    r"""^\s*(?:
+        (?:window|document|globalThis|self)\.[A-Za-z_$][\w$]*\s*(?:=|\()      # window.FOO = ... / document.write(...)
+        |(?:var|let|const)\s+[A-Za-z_$][\w$]*\s*=                          # const x = ...
+        |(?:async\s+)?function\b\s*[\w$]*\s*\(                              # function f(...
+        |\(\s*(?:function|\(\)\s*=>)|!\s*function\b                          # (function () {...  /  !function
+        |(?:import|export)\b[^.!?]{0,200}\bfrom\s+['"]                       # import x from 'y'
+        |[\[{]\s*["'][\w$-]+["']\s*:                                        # a JSON object or array
+        |</?(?i:div|span|p|a|img|script|style|link|meta|iframe|ul|ol|li|table|tr|td|br|hr|section|figure|button|svg|form|input|
+            h[1-6]|b|i|em|strong)\b[^<>]{0,200}>|<!--                       # markup shown as text (real tag names only)
+        |@(?:media|font-face|import|keyframes)\b                             # CSS at-rules
+    )""",
+    re.VERBOSE,
+)
+_KEY_VALUE = re.compile(r"""[A-Za-z_$][\w$-]*\s*:\s*(?:["'\[{\d]|true\b|false\b|null\b)""")
+_OBJECT_OPEN = re.compile(r"(?:^|[=(:,\[])\s*\{")  # a brace that opens an object: after =, (, :, comma, [ or at the start
+_CSS_RULE = re.compile(r"[^{}]{1,120}\{\s*[\w-]+\s*:[^{}]*;[^{}]*\}")
+
+# Page furniture that arrives as its own block: a lone label, a newsletter promo, a sponsor line. Whole-block matches only, so a
+# sentence that merely uses these words is kept.
+_BOILERPLATE = re.compile(
+    r"^(?:comments?|share|advertisement|related|read more)[:.]?$"
+    r"|^sign up for (?:the|our) [^.!?]{1,80}(?:email|newsletter)s?\.?$"
+    r"|^sponsored by [^.!?]{1,60}:.{0,250}$",
+    re.IGNORECASE,
+)
+
+
+def is_boilerplate(text: str) -> bool:
+    """True for a block that is page furniture (see above) rather than article text."""
+    return bool(_BOILERPLATE.search(text))
+
+
+def looks_like_code(text: str) -> bool:
+    """True for a block that is script, JSON, CSS or markup rather than prose (see the patterns above)."""
+    if _CODE_START.search(text):
+        return True
+    if "{" in text and "}" in text:
+        object_literal = bool(_OBJECT_OPEN.search(text)) and len(_KEY_VALUE.findall(text)) >= 3
+        return object_literal or bool(_CSS_RULE.search(text))
+    return False
 
 
 class _Blocks(HTMLParser):
@@ -50,6 +97,8 @@ class _Blocks(HTMLParser):
         self.skipping: str | None = None  # the skipped element we are inside, and how deep that same tag nests
         self.skip_depth = 0
         self.inside = {"h": 0, "li": 0, "q": 0}
+        self.literal_depth = 0  # inside <code>/<pre> and the like: code written on purpose
+        self.literal = False  # the block being built contains such text, so it is never judged as leaked code
 
     def _kind(self) -> str:
         return "h" if self.inside["h"] else "li" if self.inside["li"] else "q" if self.inside["q"] else "p"
@@ -57,8 +106,10 @@ class _Blocks(HTMLParser):
     def _flush(self) -> None:
         text = _SPACE.sub(" ", _CONTROL.sub("", "".join(self.parts))).strip()
         self.parts = []
-        if text and not _FOOTER.search(text):
-            self.blocks.append({"t": self._kind(), "x": text})
+        literal, self.literal = self.literal, False
+        if not text or _FOOTER.search(text) or is_boilerplate(text) or (looks_like_code(text) and not literal):
+            return
+        self.blocks.append({"t": self._kind(), "x": text})
 
     @staticmethod
     def _container(tag: str) -> str | None:
@@ -77,6 +128,8 @@ class _Blocks(HTMLParser):
             self._flush()
         if container:
             self.inside[container] += 1
+        if tag in _LITERAL:
+            self.literal_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
         if self.skipping:
@@ -90,10 +143,13 @@ class _Blocks(HTMLParser):
             self._flush()
         if container:
             self.inside[container] = max(0, self.inside[container] - 1)
+        if tag in _LITERAL:
+            self.literal_depth = max(0, self.literal_depth - 1)
 
     def handle_data(self, data: str) -> None:
         if not self.skipping:
             self.parts.append(data)
+            self.literal = self.literal or self.literal_depth > 0
 
     def close(self) -> None:
         super().close()
