@@ -8,7 +8,7 @@ import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isS
 import type { Section, Story } from './feed';
 import { formatChange, isFresh as marketsFresh, type Markets, priceLabel, type Quote, sparkline } from './markets';
 import { usePullToRefresh } from './pull';
-import { loadSettings, readSize, saveSettings, type Settings, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
+import { loadSettings, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
@@ -391,14 +391,17 @@ function SettingsScreen({ settings, update, sources, markets, marketsLoaded, onS
       <WatchlistEditor watchKey={settings.watchKey} update={update} onSaved={onSaved} />
       {symbols.length === 0 && <p class="note">{!settings.watchKey ? 'Add your key above to see your watchlist.' : markets ? 'No symbols yet.' : marketsLoaded ? 'Watchlist unavailable right now.' : 'Loading the watchlist…'}</p>}
       {symbols.length > 0 && (
-        <ul class="set">
-          {symbols.map(([symbol, label]) => (
-            <li key={symbol}><label>{label}
-              <input type="checkbox" checked={!settings.hiddenTickers.includes(symbol)}
-                onChange={() => update({ hiddenTickers: toggled(settings.hiddenTickers, symbol) })} />
-            </label></li>
-          ))}
-        </ul>
+        <details class="card fold">
+          <summary>Show or hide symbols ({shownCount(symbols.map(([s]) => s), settings.hiddenTickers)} of {symbols.length} shown)</summary>
+          <ul class="set inner">
+            {symbols.map(([symbol, label]) => (
+              <li key={symbol}><label>{label}
+                <input type="checkbox" checked={!settings.hiddenTickers.includes(symbol)}
+                  onChange={() => update({ hiddenTickers: toggled(settings.hiddenTickers, symbol) })} />
+              </label></li>
+            ))}
+          </ul>
+        </details>
       )}
       <p class="fine">Saved on this device only. Hiding a source or symbol does not delete it. The symbol list itself is kept privately on the server.</p>
     </div>

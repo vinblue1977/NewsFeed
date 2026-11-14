@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULTS, parseSettings, readSize, sourceNames, toggled, withoutSources } from './settings';
+import { DEFAULTS, parseSettings, readSize, shownCount, sourceNames, toggled, withoutSources } from './settings';
 import type { Feed } from './types';
 
 const it_ = (id: string, source: string, cluster?: string) => ({ id, title: id, url: 'https://e.com', summary: '', published: 'p', source, topic: 'us' as const, cluster });
@@ -46,5 +46,12 @@ describe('settings', () => {
   it('lists sources, including hidden ones that left the feed', () => {
     expect(sourceNames(feed, ['Zed'])).toEqual(['AP', 'BBC', 'CNN', 'Zed']);
     expect(sourceNames(undefined, [])).toEqual([]);
+  });
+});
+
+describe('shownCount', () => {
+  it('ignores hidden entries that are no longer listed', () => {
+    expect(shownCount(['A', 'B', 'C'], ['B', 'GONE'])).toBe(2);
+    expect(shownCount([], ['B'])).toBe(0);
   });
 });
