@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ingest.feeds import FeedError, fetch, parse_feed
+from ingest.filters import block_reason
 from ingest.sources import Source
 
 MAX_AGE = timedelta(hours=72)
@@ -19,7 +20,10 @@ RUN_BUDGET_SECONDS = 40  # whole run; the Lambda timeout is 60 s and the feed mu
 
 def local_sources(urls: Iterable[str]) -> list[Source]:
     """Sources for the feed URLs in the location parameter. Their items are kept only if they mention a nearby place."""
-    return [Source(id=f"local-{i}", name=_host(url), url=url, topic="local") for i, url in enumerate(urls)]
+    return [
+        Source(id=f"local-{i}", name=_host(url), url=url, topic="local", trusted=urlsplit(url).hostname == "news.google.com")
+        for i, url in enumerate(urls)
+    ]
 
 
 def _host(url: str) -> str:
@@ -76,6 +80,7 @@ def collect(
     status: dict[str, dict[str, Any]] = {}
     for source, parsed, error in results:
         kept = 0
+        blocked = 0
         for item in sorted(parsed, key=lambda i: i["published"], reverse=True):
             if kept >= MAX_PER_SOURCE:  # the cap counts stories that survive the filters, not raw entries
                 break
@@ -86,8 +91,13 @@ def collect(
                 continue
             if published > now:  # a small clock or timezone slip: never show a story from the future
                 item["published"] = now.isoformat(timespec="seconds")
+            if block_reason(item):
+                blocked += 1
+                continue
             if source.topic == "local":
                 place = _mentions(item, place_re, places) if place_re else None
+                if not place and source.trusted:  # the search was scoped by its query; label it with the first place
+                    place = next(iter(places.values()), None)
                 if not place:
                     continue
                 item["place"] = place
@@ -96,5 +106,10 @@ def collect(
                 continue
             items[key] = item
             kept += 1
-        status[source.id] = {"ok": error is None, "items": kept, **({"error": error} if error else {})}
+        status[source.id] = {
+            "ok": error is None,
+            "items": kept,
+            **({"blocked": blocked} if blocked else {}),
+            **({"error": error} if error else {}),
+        }
     return sorted(items.values(), key=lambda i: i["published"], reverse=True), status

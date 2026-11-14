@@ -124,6 +124,7 @@ def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
     body = json.loads(put["Body"])
     assert {"generated", "items", "sources"} <= body.keys()
     assert {i["topic"] for i in body["items"]} <= {"us", "local"}
+    assert {c["id"] for c in body["clusters"]} == {i["cluster"] for i in body["items"]}
 
 
 def test_handler_refuses_to_overwrite_with_an_all_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,3 +195,30 @@ def test_a_slow_run_is_cut_off_and_the_rest_still_counts(monkeypatch: pytest.Mon
     assert time.monotonic() - start < 1.5
     assert status["slow"] == {"ok": False, "items": 0, "error": "timed out"}
     assert status["a"]["ok"] and len(items) == 2
+
+
+def test_blocked_items_are_dropped_and_counted() -> None:
+    docs = {
+        "https://a.example/f": rss(
+            ("Free story", "https://www.npr.org/1", "", "Fri, 13 Nov 2026 11:00:00 GMT"),
+            ("Walled story", "https://www.nytimes.com/2", "", "Fri, 13 Nov 2026 10:00:00 GMT"),
+            ("Obituary", "https://www.legacy.com/3", "", "Fri, 13 Nov 2026 09:00:00 GMT"),
+        )
+    }
+    items, status = collect([src("a", "a")], now=NOW, fetcher=docs.__getitem__)
+    assert [i["title"] for i in items] == ["Free story"]
+    assert status["a"] == {"ok": True, "items": 1, "blocked": 2}
+
+
+def test_a_trusted_local_search_keeps_items_without_a_place_mention() -> None:
+    docs = {"https://g.example/f": rss(("Road work starts Monday", "https://x.example/1", "", "Fri, 13 Nov 2026 09:00:00 GMT"))}
+    scoped = Source("g", "g", "https://g.example/f", "local", trusted=True)
+    items, _ = collect([scoped], ["Buffalo Grove", "Palatine"], now=NOW, fetcher=docs.__getitem__)
+    assert items[0]["place"] == "Buffalo Grove"
+    items, _ = collect([scoped], [], now=NOW, fetcher=docs.__getitem__)
+    assert items == []  # nothing to label it with
+
+
+def test_only_google_news_local_feeds_are_trusted() -> None:
+    made = local_sources(["https://news.google.com/rss/search?q=x", "https://wgntv.example/feed"])
+    assert [s.trusted for s in made] == [True, False]

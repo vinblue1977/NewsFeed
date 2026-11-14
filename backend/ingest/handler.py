@@ -7,6 +7,7 @@ from typing import Any
 
 import boto3
 
+from ingest.cluster import cluster_items
 from ingest.config import cached_location
 from ingest.pipeline import collect, local_sources
 from ingest.sources import SOURCES
@@ -14,7 +15,8 @@ from ingest.sources import SOURCES
 
 def build_feed(location: dict[str, Any]) -> dict[str, Any]:
     items, status = collect([*SOURCES, *local_sources(location["feeds"])], location["nearby"])
-    return {"generated": datetime.now(UTC).isoformat(timespec="seconds"), "items": items, "sources": status}
+    clusters = cluster_items(items)
+    return {"generated": datetime.now(UTC).isoformat(timespec="seconds"), "items": items, "clusters": clusters, "sources": status}
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
@@ -29,4 +31,10 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         Body=json.dumps(feed, separators=(",", ":")).encode(),
         ContentType="application/json",
     )
-    return {"status": "ok", "items": len(feed["items"]), "sources": len(feed["sources"]), "failed": failed}
+    return {
+        "status": "ok",
+        "items": len(feed["items"]),
+        "clusters": len(feed["clusters"]),
+        "sources": len(feed["sources"]),
+        "failed": failed,
+    }

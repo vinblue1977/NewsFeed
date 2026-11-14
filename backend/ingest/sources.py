@@ -16,10 +16,18 @@ class Source:
     subtopic: str | None = None  # sports: nfl | cricket | tennis
     enabled: bool = True
     metered: bool = False
+    headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
+    trusted: bool = False  # a search the query already scoped (local Google News): skip the nearby-place filter
 
 
 def _s(id: str, name: str, url: str, topic: str, subtopic: str | None = None, **kw: bool) -> Source:  # noqa: A002
     return Source(id, name, url, topic, subtopic, **kw)
+
+
+def _gnews(id: str, name: str, site: str, topic: str) -> Source:  # noqa: A002
+    """Reuters, AP and CNN have no usable direct feed; Google News `site:` search is fresh and headline-only."""
+    url = f"https://news.google.com/rss/search?q=site:{site}+when:1d&hl=en-US&gl=US&ceid=US:en"
+    return Source(id, name, url, topic, headline_only=True)
 
 
 SOURCES: tuple[Source, ...] = (
@@ -31,7 +39,10 @@ SOURCES: tuple[Source, ...] = (
     _s("nbc", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/news", "us"),
     _s("thehill", "The Hill", "https://thehill.com/feed/", "us"),
     _s("bbc-us", "BBC News", "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml", "us"),
+    _gnews("gn-ap", "AP", "apnews.com", "us"),
+    _gnews("gn-cnn", "CNN", "cnn.com", "us"),
     # World
+    _gnews("gn-reuters", "Reuters", "reuters.com", "world"),
     _s("bbc-world", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml", "world"),
     _s("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "world"),
     _s("guardian-world", "The Guardian", "https://www.theguardian.com/world/rss", "world"),
