@@ -272,3 +272,19 @@ def test_google_news_item_without_a_source_element_falls_back_to_the_queried_sit
     assert parse_feed(body, src)[0]["domain"] == "reuters.com"
     unknown = Source("gl", "g", "https://news.google.com/rss/search?q=x", "local", trusted=True)
     assert parse_feed(body, unknown)[0]["domain"] == "news.google.com"
+
+
+def test_expat_refuses_entities_that_slip_past_the_byte_scan() -> None:
+    sneaky = b'<?a <!-- ?><!DOCTYPE r [<!ENTITY x "hello">]><?b --> ?><rss><channel></channel></rss>'
+    with pytest.raises(FeedError):
+        parse_feed(sneaky, SRC)
+
+
+def test_links_with_userinfo_or_absurd_length_are_dropped() -> None:
+    assert feeds._safe_url("https://" + "user:pw" + chr(64) + "evil.example/x") is None
+    assert feeds._safe_url("https://example.com/" + "a" * 3000) is None
+    assert feeds._safe_url("https://example.com/a") == "https://example.com/a"
+
+
+def test_entities_are_decoded_once() -> None:
+    assert clean_text("&amp;lt;b&amp;gt; &amp; more") == "&lt;b&gt; & more"

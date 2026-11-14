@@ -215,3 +215,12 @@ def test_ingest_can_read_back_only_the_feed_object() -> None:
     assert len(statements) == 1
     parts = statements[0]["Resource"]["Fn::Join"][1]
     assert parts[-1] == "/data/feed.json"  # bucket ARN + exactly this key, no wildcard
+
+
+def test_headers_policy_has_permissions_policy_and_no_remote_images() -> None:
+    template = Template.from_stack(NewsStack(cdk.App(), "T", env=cdk.Environment(account="123456789012", region="us-east-2")))
+    for policy in template.find_resources("AWS::CloudFront::ResponseHeadersPolicy").values():
+        config = policy["Properties"]["ResponseHeadersPolicyConfig"]
+        assert "img-src 'self';" in config["SecurityHeadersConfig"]["ContentSecurityPolicy"]["ContentSecurityPolicy"]
+        names = {h["Header"] for h in config["CustomHeadersConfig"]["Items"]}
+        assert {"Permissions-Policy", "Cross-Origin-Opener-Policy"} <= names

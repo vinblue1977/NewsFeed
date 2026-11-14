@@ -55,7 +55,7 @@ def alerts_doc(*features: dict[str, Any]) -> bytes:
 def test_forecast_url_has_the_point_and_units() -> None:
     url = forecast_url(LAT, LON)
     assert url.startswith("https://api.open-meteo.com/v1/forecast?")
-    assert "latitude=40.0000" in url and "longitude=-90.0000" in url
+    assert "latitude=40.00" in url and "longitude=-90.00" in url
     assert "temperature_unit=fahrenheit" in url and "wind_speed_unit=mph" in url
 
 
@@ -182,7 +182,7 @@ def test_build_weather_asks_nws_for_the_point() -> None:
         return json.dumps(forecast_doc()).encode() if "open-meteo" in url else alerts_doc()
 
     build_weather(LAT, LON, getter=get)
-    assert "https://api.weather.gov/alerts/active?point=40.0000,-90.0000" in urls
+    assert "https://api.weather.gov/alerts/active?point=40.00,-90.00" in urls
 
 
 @pytest.mark.parametrize("bad", [FeedError("fetch failed: 500"), b"garbage"])

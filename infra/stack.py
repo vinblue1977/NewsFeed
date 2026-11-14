@@ -54,7 +54,7 @@ class NewsStack(Stack):
                     content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
                         content_security_policy=(
                             "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; "
-                            "img-src 'self' data: https:; manifest-src 'self'; connect-src 'self'; worker-src 'self'; "
+                            "img-src 'self'; manifest-src 'self'; connect-src 'self'; worker-src 'self'; "
                             "object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; "
                             "upgrade-insecure-requests"
                         ),
@@ -73,6 +73,12 @@ class NewsStack(Stack):
                 ),
                 custom_headers_behavior=cloudfront.ResponseCustomHeadersBehavior(
                     custom_headers=[
+                        cloudfront.ResponseCustomHeader(
+                            header="Permissions-Policy",
+                            value="camera=(), microphone=(), geolocation=(), payment=()",
+                            override=True,
+                        ),
+                        cloudfront.ResponseCustomHeader(header="Cross-Origin-Opener-Policy", value="same-origin", override=True),
                         cloudfront.ResponseCustomHeader(header="X-Robots-Tag", value="noindex, nofollow", override=True),
                         cloudfront.ResponseCustomHeader(header="Cache-Control", value=cache_control, override=True),
                     ]
@@ -152,7 +158,9 @@ class NewsStack(Stack):
             environment={"DATA_BUCKET": data_bucket.bucket_name, "DATA_PREFIX": DATA_PREFIX, "LOCATION_PARAM": LOCATION_PARAM},
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )
-        data_bucket.grant_put(fn, f"{DATA_PREFIX}/*")  # pyright: ignore[reportArgumentType]
+        fn.add_to_role_policy(  # write only: no ACL, retention or legal-hold actions that `grant_put` would add
+            iam.PolicyStatement(actions=["s3:PutObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/*")])
+        )
         fn.add_to_role_policy(  # reads back last run's feed so story clusters keep their ids: one object, one action
             iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/feed.json")])
         )
@@ -199,7 +207,7 @@ class NewsStack(Stack):
                 reason(
                     "AwsSolutions-IAM5",
                     "Write access is limited to the data/ prefix of one bucket",
-                    [RegexAppliesTo(regex=r"/^Resource::.*/data/\*$/g"), RegexAppliesTo(regex=r"/^Action::s3:Abort\*$/g")],
+                    [RegexAppliesTo(regex=r"/^Resource::.*/data/\*$/g")],
                 ),
             ],
             apply_to_children=True,

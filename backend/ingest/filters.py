@@ -59,13 +59,15 @@ def host_matches(host: str, domains: frozenset[str] | set[str]) -> bool:
 
 def block_reason(item: dict[str, Any]) -> str | None:
     """Why an item must not be shown ('paywalled' or 'noise'), or None. Uses the item's `domain` and its URL."""
-    domain = item.get("domain") or urlsplit(item["url"]).hostname or ""
-    if host_matches(domain, PAYWALLED_DOMAINS):
-        return "paywalled"
-    if host_matches(domain, NOISE_DOMAINS):
-        return "noise"
+    # Check the claimed domain and the link's own host: a Google News item's <source> is attacker-controlled.
+    domains = [d for d in (item.get("domain"), urlsplit(item["url"]).hostname) if d]  # claimed domain first: deterministic
     path = urlsplit(item["url"]).path
-    for site, pattern in PAID_PATHS:
-        if host_matches(domain, {site}) and pattern.search(path):
+    for domain in domains:
+        if host_matches(domain, PAYWALLED_DOMAINS):
             return "paywalled"
+        if host_matches(domain, NOISE_DOMAINS):
+            return "noise"
+        for site, pattern in PAID_PATHS:
+            if host_matches(domain, {site}) and pattern.search(path):
+                return "paywalled"
     return None

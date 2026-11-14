@@ -6,12 +6,13 @@ import http.client
 import re
 import time
 import urllib.request
-import xml.etree.ElementTree as ET  # noqa: S405  (DOCTYPE/ENTITY declarations are rejected before parsing; see parse_feed)
+import xml.etree.ElementTree as ET  # noqa: S405  (DOCTYPE/ENTITY declarations are rejected first; see parse_xml)
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlsplit
+from xml.parsers import expat
 
 from ingest.articles import MAX_INPUT_CHARS, MIN_CHARS
 from ingest.sources import Source
@@ -22,6 +23,8 @@ ACCEPT = "application/rss+xml, application/atom+xml, application/xml, text/xml"
 DEADLINE_SECONDS = 20  # total wall-clock budget per feed (the socket timeout alone resets on every byte)
 MAX_BYTES = 2_000_000  # the largest feed seen is about 1.1 MB
 SUMMARY_CHARS = 400
+MAX_TITLE_CHARS = 300
+MAX_URL_CHARS = 2000
 ATOM = "{http://www.w3.org/2005/Atom}"
 CONTENT = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
@@ -50,7 +53,7 @@ def fetch(url: str, *, accept: str = ACCEPT, deadline_seconds: float | None = No
     body = bytearray()
     try:
         with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
-            while chunk := response.read(65536):
+            while chunk := response.read(8192):
                 body += chunk
                 if len(body) > MAX_BYTES:
                     raise FeedError("feed is larger than the size cap")
@@ -61,6 +64,9 @@ def fetch(url: str, *, accept: str = ACCEPT, deadline_seconds: float | None = No
     return bytes(body)
 
 
+_CODE_TAGS = frozenset({"script", "style"})
+
+
 class _Text(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -68,10 +74,10 @@ class _Text(HTMLParser):
         self.skip = 0  # depth inside <script>/<style>, whose contents are code, not text
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.skip += tag in ("script", "style")
+        self.skip += tag in _CODE_TAGS
 
     def handle_endtag(self, tag: str) -> None:
-        self.skip = max(0, self.skip - (tag in ("script", "style")))
+        self.skip = max(0, self.skip - (tag in _CODE_TAGS))
 
     def handle_data(self, data: str) -> None:
         if not self.skip:
@@ -85,7 +91,7 @@ def clean_text(raw: str | None, limit: int | None = None) -> str:
     stripper = _Text()
     stripper.feed(raw)
     stripper.close()
-    text = re.sub(r"\s+", " ", html.unescape("".join(stripper.parts))).strip()
+    text = re.sub(r"\s+", " ", "".join(stripper.parts)).strip()  # entities are already decoded
     if limit and len(text) > limit:
         text = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-") + "…"
     return text
@@ -95,8 +101,11 @@ def _safe_url(url: str | None) -> str | None:
     """Only http(s) links with a host are kept (a feed could carry a javascript: or data: URL)."""
     if not url:
         return None
-    parts = urlsplit(url.strip())
-    return url.strip() if parts.scheme in ("http", "https") and parts.netloc else None
+    url = url.strip()
+    parts = urlsplit(url)
+    # No userinfo (a "user:pw@host" authority can make a link read as another site) and a sane length.
+    ok = parts.scheme in ("http", "https") and parts.netloc and "@" not in parts.netloc and len(url) <= MAX_URL_CHARS
+    return url if ok else None
 
 
 def _parse_date(raw: str | None) -> datetime | None:
@@ -183,17 +192,33 @@ def _body_html(node: ET.Element, atom: bool) -> str | None:
     return best[:MAX_INPUT_CHARS] if len(best) >= MIN_CHARS else None
 
 
+def _refuse_doctype(*_args: Any) -> None:
+    raise FeedError("feed declares a DOCTYPE or entities; refusing to parse it")
+
+
+def parse_xml(body: bytes) -> ET.Element:
+    """Parse after a pass where expat itself refuses any DOCTYPE or entity declaration (the byte scan is a first filter)."""
+    guard = expat.ParserCreate()
+    guard.StartDoctypeDeclHandler = _refuse_doctype
+    guard.EntityDeclHandler = _refuse_doctype
+    try:
+        guard.Parse(body, True)
+    except expat.ExpatError as exc:
+        raise ET.ParseError(str(exc)) from exc
+    return ET.fromstring(body)  # noqa: S314  (no DOCTYPE or entity survived the guard pass)
+
+
 def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
     """Parse an RSS 2.0 or Atom document into items. Entries without a title, a safe link or a date are dropped."""
     check_safe_xml(body)
     try:
-        root = ET.fromstring(body)  # noqa: S314
+        root = parse_xml(body)
     except ET.ParseError as exc:
         raise FeedError(f"not valid XML: {exc}") from exc
     items: list[dict[str, Any]] = []
     for node in [*root.iter("item"), *root.iter(f"{ATOM}entry")]:
         atom = node.tag == f"{ATOM}entry"
-        title = clean_text(_child(node, f"{ATOM}title") if atom else _child(node, "title"))
+        title = clean_text(_child(node, f"{ATOM}title") if atom else _child(node, "title"), MAX_TITLE_CHARS)
         link = _safe_url(_atom_link(node) if atom else (_child(node, "link") or _child(node, "guid")))
         published = _parse_date(
             _child(node, f"{ATOM}published", f"{ATOM}updated")
