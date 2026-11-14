@@ -112,6 +112,18 @@ class FakeS3:
         raise OSError("no previous feed")
 
 
+@pytest.fixture(autouse=True)
+def no_side_documents(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The weather, markets and scores builders reach the network, so every handler test starts with them failing and opts in."""
+
+    def down(*args: Any) -> dict[str, Any]:
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(handler_module, "build_weather", down)
+    monkeypatch.setattr(handler_module, "build_markets", down)
+    monkeypatch.setattr(handler_module, "build_scores", down)
+
+
 def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
     s3 = FakeS3()
     monkeypatch.setattr(boto3, "client", lambda name: s3)
@@ -327,3 +339,56 @@ def test_weather_is_written_even_when_the_feed_run_is_rejected(monkeypatch: pyte
     with pytest.raises(RuntimeError, match="keeping the previous feed"):
         handler_module.handler({}, object())
     assert [p["Key"] for p in s3.puts] == ["data/weather.json"]
+
+
+def test_handler_writes_markets_and_scores(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(
+        handler_module, "cached_location", lambda: {"nearby": [], "feeds": [], "lat": 40.0, "lon": -90.0, "tickers": ["AAA"]}
+    )
+    asked: list[list[str]] = []
+
+    def markets(tickers: list[str]) -> dict[str, Any]:
+        asked.append(tickers)
+        return {"generated": "m"}
+
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "w"})
+    monkeypatch.setattr(handler_module, "build_markets", markets)
+    monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})
+    result = handler_module.handler({}, object())
+    assert (result["weather"], result["markets"], result["scores"]) == ("ok", "ok", "ok")
+    assert asked == [["AAA"]]
+    written = {p["Key"]: json.loads(p["Body"]) for p in s3.puts}
+    assert written["data/markets.json"] == {"generated": "m"} and written["data/scores.json"] == {"generated": "s"}
+    assert set(written) == {"data/feed.json", "data/weather.json", "data/markets.json", "data/scores.json"}
+
+
+def test_handler_without_tickers_asks_for_the_indexes_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    asked: list[list[str]] = []
+    monkeypatch.setattr(handler_module, "build_markets", lambda tickers: asked.append(tickers) or {"generated": "m"})
+    assert handler_module.handler({}, object())["markets"] == "ok"
+    assert asked == [[]]
+
+
+def test_one_failing_side_document_does_not_affect_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "w"})
+    monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})  # markets stays down
+    result = handler_module.handler({}, object())
+    assert (result["weather"], result["markets"], result["scores"]) == ("ok", "failed", "ok")
+    assert sorted(p["Key"] for p in s3.puts) == ["data/feed.json", "data/scores.json", "data/weather.json"]
+
+
+def test_markets_and_scores_are_written_even_when_the_feed_run_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "SOURCES", (src("bad", "missing"),))
+    monkeypatch.setattr(handler_module, "build_markets", lambda tickers: {"generated": "m"})
+    monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})
+    with pytest.raises(RuntimeError, match="keeping the previous feed"):
+        handler_module.handler({}, object())
+    assert sorted(p["Key"] for p in s3.puts) == ["data/markets.json", "data/scores.json"]

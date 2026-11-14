@@ -136,7 +136,7 @@ _XML_DECL = re.compile(rb"""^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", r
 _CDATA_OR_COMMENT = re.compile(rb"<!\[CDATA\[.*?\]\]>|<!--.*?-->", re.DOTALL)
 
 
-def _check_safe(body: bytes) -> None:
+def check_safe_xml(body: bytes) -> None:
     """Refuse documents the byte-level DOCTYPE/ENTITY scan could not see through (UTF-16/32, odd encodings)."""
     start = body[3:] if body[:3] == b"\xef\xbb\xbf" else body  # a UTF-8 BOM is fine
     if b"\x00" in start[:512] or start[:2] in (b"\xff\xfe", b"\xfe\xff"):
@@ -152,7 +152,7 @@ def _check_safe(body: bytes) -> None:
 
 def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
     """Parse an RSS 2.0 or Atom document into items. Entries without a title, a safe link or a date are dropped."""
-    _check_safe(body)
+    check_safe_xml(body)
     try:
         root = ET.fromstring(body)  # noqa: S314
     except ET.ParseError as exc:

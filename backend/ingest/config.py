@@ -5,11 +5,14 @@ import functools
 import json
 import math
 import os
+import re
 from typing import Any
 
 import boto3
 
 LOCATION_PARAM_ENV = "LOCATION_PARAM"
+SYMBOL = re.compile(r"[A-Za-z0-9^][A-Za-z0-9.^=_-]{0,14}")  # a quote symbol: starts with a letter, digit or ^, then . ^ = _ - too
+MAX_TICKERS = 20
 _REQUIRED = {"town": str, "lat": (int, float), "lon": (int, float), "nearby": list, "feeds": list}
 
 
@@ -18,7 +21,7 @@ class ConfigError(Exception):
 
 
 def parse_location(raw: str) -> dict[str, Any]:
-    """Validate the parameter's JSON: {"town", "lat", "lon", "nearby": [...], "feeds": [...]}."""
+    """Validate the parameter's JSON: {"town", "lat", "lon", "nearby": [...], "feeds": [...], optional "tickers": [...]}."""
     try:
         loc = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -30,6 +33,13 @@ def parse_location(raw: str) -> dict[str, Any]:
             raise ConfigError(f"location parameter field {key!r} is missing or has the wrong type")
     if not all(isinstance(v, str) and v for v in loc["nearby"] + loc["feeds"]):
         raise ConfigError("location parameter fields 'nearby' and 'feeds' must be lists of non-empty strings")
+    tickers = loc.get("tickers", [])  # optional: extra quote symbols for the Markets tab
+    if (
+        not isinstance(tickers, list)
+        or len(tickers) > MAX_TICKERS
+        or not all(isinstance(t, str) and SYMBOL.fullmatch(t) for t in tickers)
+    ):
+        raise ConfigError(f"location parameter field 'tickers' must be a list of at most {MAX_TICKERS} quote symbols")
     if not (math.isfinite(loc["lat"]) and -90 <= loc["lat"] <= 90 and math.isfinite(loc["lon"]) and -180 <= loc["lon"] <= 180):
         raise ConfigError("location parameter 'lat'/'lon' are out of range")
     return loc
