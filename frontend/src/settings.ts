@@ -81,3 +81,6 @@ export function withoutSources(feed: Feed, hidden: string[]): Feed {
 export function sourceNames(feed: Feed | undefined, hidden: string[]): string[] {
   return [...new Set([...(feed?.items.map((i) => i.source) ?? []), ...hidden])].sort((a, b) => a.localeCompare(b));
 }
+
+/** How many of the `all` entries are not hidden (a hidden entry that is no longer listed is not counted). */
+export const shownCount = (all: string[], hidden: string[]): number => all.filter((a) => !hidden.includes(a)).length;
