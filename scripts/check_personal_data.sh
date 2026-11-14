@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Privacy guard: fails on personal data in tracked files or commit history (the repo may be public).
+# Privacy guard: fails on personal data in tracked files, new files not yet added (git-ignored ones are skipped) or commit
+# history (the repo may be public). New files are scanned too, so a local run catches what CI would.
 set -euo pipefail
 
 status=0
 
 # Emails, except no-reply and example addresses.
-if git grep -nIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' -- ':!*package-lock.json' \
+if git grep --untracked --exclude-standard -nIE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' -- ':!*package-lock.json' \
   | grep -vE '@(users\.)?noreply\.(github|anthropic)\.com|noreply@|@example\.(com|org)'; then
   echo "::error::Found email addresses above. Personal emails stay out of the repo."
   status=1
@@ -25,7 +26,7 @@ if [ "$bad" != 0 ]; then
 fi
 
 # AWS account IDs, except the docs example used in tests.
-if git grep -nowE '[0-9]{12}' -- ':!*package-lock.json' | grep -vE ':123456789012$'; then
+if git grep --untracked --exclude-standard -nowE '[0-9]{12}' -- ':!*package-lock.json' | grep -vE ':123456789012$'; then
   echo "::error::Found 12-digit numbers above that look like AWS account IDs. The deploy reads the account from AWS."
   status=1
 fi
@@ -40,7 +41,7 @@ if [ -n "${PII_DENYLIST:-}" ]; then
   for word in "${words[@]}"; do
     word="$(echo "$word" | xargs)"
     [ -z "$word" ] && continue
-    if git grep -qiwF -- "$word" -- ':!*package-lock.json' || grep -qiwF -- "$word" <<<"$history"; then
+    if git grep --untracked --exclude-standard -qiwF -- "$word" -- ':!*package-lock.json' || grep -qiwF -- "$word" <<<"$history"; then
       echo "::error::A word from PII_DENYLIST appears in tracked files or commit history (not printed, to keep it private)."
       status=1
     fi
