@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the PWA icons (stdlib only): a blue "N" on the app's dark background.
+"""Regenerate the PWA icons (stdlib only): a gold serif "N" on black, like a newspaper masthead.
 
 Usage: python3 scripts/make_icons.py   (writes frontend/public/icon-*.png and apple-touch-icon.png)
 """
@@ -8,23 +8,40 @@ import struct
 import zlib
 from pathlib import Path
 
-BG = (23, 25, 28)  # #17191c, the app background
-FG = (59, 130, 246)  # blue accent
+BG = (13, 13, 15)  # #0d0d0f, black
+FG = (227, 179, 65)  # #e3b341, gold
 SS = 3  # supersampling per axis, for smooth edges
 
 
 def _in_n(x: float, y: float, margin: float) -> bool:
-    """Is (x, y) in unit coordinates inside the letter N? `margin` is the empty border (maskable icons need more)."""
+    """Is (x, y) in unit coordinates inside a serif letter N? `margin` is the empty border (maskable icons need more).
+
+    The shape: two thin stems, a thick diagonal from the top-left to the bottom-right, and slab serifs
+    (top-left, top-right and bottom-left; the diagonal itself lands on the bottom right)."""
     lo, hi = margin, 1 - margin
+    span = hi - lo
     if not (lo <= y <= hi):
         return False
-    w = (hi - lo) * 0.22  # stroke width
-    if lo <= x <= lo + w or hi - w <= x <= hi:
+    inset = 0.08 * span  # empty space between the glyph box and the stems
+    thin = 0.085 * span  # thin stem width
+    thick = 0.30 * span  # diagonal width, measured horizontally
+    serif_h = 0.075 * span
+    serif_w = 0.08 * span  # how far a serif reaches beyond a stem on each side
+    left0, left1 = lo + inset, lo + inset + thin
+    right0, right1 = hi - inset - thin, hi - inset
+    t = (y - lo) / span
+    # diagonal: its centre runs from the left stem (top) to the right stem (bottom)
+    c0, c1 = left0 + thick / 2, right1 - thick / 2
+    centre = c0 + t * (c1 - c0)
+    if abs(x - centre) <= thick / 2 and left0 <= x <= right1:
         return True
-    # diagonal from top-left to bottom-right: a band of horizontal width w around the line
-    t = (y - lo) / (hi - lo)
-    cx = lo + w / 2 + t * ((hi - w / 2) - (lo + w / 2))
-    return abs(x - cx) <= w * 0.6 and lo <= x <= hi
+    if left0 <= x <= left1 or right0 <= x <= right1:  # the stems
+        return True
+    top = y <= lo + serif_h
+    bottom = y >= hi - serif_h
+    if top and (left0 - serif_w <= x <= left1 + serif_w or right0 - serif_w <= x <= right1 + serif_w):
+        return True
+    return bottom and left0 - serif_w <= x <= left1 + serif_w
 
 
 def _png(size: int, margin: float) -> bytes:
