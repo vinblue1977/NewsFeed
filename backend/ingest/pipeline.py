@@ -39,10 +39,9 @@ def _dedupe_key(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip("/"), query, ""))
 
 
-def _mentions(item: dict[str, Any], pattern: re.Pattern[str], places: dict[str, str]) -> str | None:
-    """The configured spelling of the first nearby place the item mentions."""
-    found = pattern.search(f"{item['title']} {item['summary']}")
-    return places[found.group(0).lower()] if found else None
+def _mentions(item: dict[str, Any], pattern: re.Pattern[str]) -> bool:
+    """Whether the item names a nearby place. Which one is never recorded: the feed is public and must not say where you live."""
+    return pattern.search(f"{item['title']} {item['summary']}") is not None
 
 
 def collect(
@@ -52,14 +51,12 @@ def collect(
     now: datetime | None = None,
     fetcher: Callable[[str], bytes] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Return (items newest first, per-source status). Local items must mention one of `nearby` and get a `place`."""
+    """Return (items newest first, per-source status). Local items must mention one of `nearby`,
+    unless their source is trusted (a search the query already scoped). The place that matched is never recorded."""
     now = now or datetime.now(UTC)
     fetcher = fetcher or fetch  # looked up at call time, so tests can replace the module's fetch
-    places = {p.lower(): p for p in nearby if p}
-    longest_first = sorted(places, key=len, reverse=True)  # "Palatine Heights" must win over "Palatine"
-    place_re = (
-        re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in longest_first) + r")(?!\w)", re.IGNORECASE) if places else None
-    )
+    places = {p for p in nearby if p}
+    place_re = re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in places) + r")(?!\w)", re.IGNORECASE) if places else None
 
     def run(source: Source) -> tuple[Source, list[dict[str, Any]], str | None]:
         try:
@@ -95,12 +92,8 @@ def collect(
             if block_reason(item):
                 blocked += 1
                 continue
-            if source.topic == "local":
-                place = _mentions(item, place_re, places) if place_re else None
-                if not place and not source.trusted:
-                    continue
-                if place:  # a trusted search (already scoped by its query) keeps items that name no place, unlabelled
-                    item["place"] = place
+            if source.topic == "local" and not source.trusted and not (place_re and _mentions(item, place_re)):
+                continue
             key = _dedupe_key(item["url"])
             same_headline = (item["source"].lower(), item["title"].lower())  # a direct feed and Google News carry one story
             if key in items or same_headline in headlines:

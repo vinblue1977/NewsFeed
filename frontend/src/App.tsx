@@ -79,7 +79,7 @@ function StoryRow({ s, now }: { s: Story; now: Date }) {
     <StoryAnchor story={s} class={hasImg ? 'row has-img' : 'row'}>
       <div class="t">
         <Source name={s.item.source} when={timeAgo(s.item.published, now)}
-          extra={[topicLabel(s.item.topic), s.item.place, s.sources > 1 ? `${s.sources} sources` : ''].filter(Boolean).join(' · ')} />
+          extra={[topicLabel(s.item.topic), s.sources > 1 ? `${s.sources} sources` : ''].filter(Boolean).join(' · ')} />
         <h3>{s.item.title}</h3>
       </div>
       <Pic item={s.item} class="thumb" onFail={() => setBroken(imageSrc(s.item))} />
@@ -162,7 +162,7 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
       {!page && <div class="empty"><b>Article not found</b><span>It may have dropped out of the latest news.</span></div>}
       {page && (
         <article class="art">
-          <div class="tag">{topicLabel(page.item.topic)}{page.item.place ? ` · ${page.item.place}` : ''}</div>
+          <div class="tag">{topicLabel(page.item.topic)}</div>
           <h1>{page.item.title}</h1>
           <Pic item={page.item} class="pic" />
           <div class="src art-src">

@@ -66,16 +66,14 @@ def test_collect_dedupes_drops_old_clamps_future_and_isolates_failures() -> None
 def test_local_items_must_mention_a_nearby_place() -> None:
     sources = [src("c", "c", topic="local")]
     items, _ = collect(sources, ["Buffalo Grove", "Palatine"], now=NOW, fetcher=fake_fetcher)
-    assert [(i["title"], i["place"]) for i in items] == [
-        ("Road closed in Buffalo Grove", "Buffalo Grove"),
-        ("Palatine news", "Palatine"),
-    ]
+    assert [i["title"] for i in items] == ["Road closed in Buffalo Grove", "Palatine news"]
+    assert all("place" not in i for i in items)  # the public feed never says which of your places an item matched
 
 
-def test_place_uses_the_configured_spelling() -> None:
+def test_places_match_whatever_the_capitalisation() -> None:
     docs = {"https://c.example/f": rss(("ROAD WORK IN MCKINNEY", "https://x.example/9", "", "Fri, 13 Nov 2026 09:00:00 GMT"))}
     items, _ = collect([src("c", "c", topic="local")], ["McKinney"], now=NOW, fetcher=docs.__getitem__)
-    assert items[0]["place"] == "McKinney"
+    assert [i["title"] for i in items] == ["ROAD WORK IN MCKINNEY"] and "place" not in items[0]
 
 
 def test_an_unexpected_exception_in_one_source_does_not_sink_the_run() -> None:
@@ -220,17 +218,19 @@ def test_tracking_parameters_and_trailing_slashes_do_not_defeat_dedupe() -> None
     assert [i["title"] for i in items] == ["A", "C"]  # id=2 is a different story
 
 
-def test_the_longest_place_name_wins_and_odd_names_match() -> None:
+def test_odd_place_names_match() -> None:
     docs = {
         "https://c.example/f": rss(
             ("Palatine Heights school board", "https://x.example/1", "", "Fri, 13 Nov 2026 09:00:00 GMT"),
             ("Mayor of St. Charles speaks", "https://x.example/2", "", "Fri, 13 Nov 2026 08:00:00 GMT"),
+            ("Palatinex fair opens", "https://x.example/3", "", "Fri, 13 Nov 2026 07:00:00 GMT"),
+            ("Mayor of St Charles speaks", "https://x.example/4", "", "Fri, 13 Nov 2026 06:00:00 GMT"),
         )
     }
     items, _ = collect(
         [src("c", "c", topic="local")], ["Palatine", "Palatine Heights", "St. Charles"], now=NOW, fetcher=docs.__getitem__
     )
-    assert [i["place"] for i in items] == ["Palatine Heights", "St. Charles"]
+    assert [i["title"] for i in items] == ["Palatine Heights school board", "Mayor of St. Charles speaks"]
 
 
 def test_local_source_names_are_just_the_host() -> None:
@@ -271,7 +271,7 @@ def test_blocked_items_are_dropped_and_counted() -> None:
     assert status["a"] == {"ok": True, "items": 1, "blocked": 2}
 
 
-def test_a_trusted_local_search_keeps_items_without_a_place_mention_but_does_not_guess_one() -> None:
+def test_a_trusted_local_search_keeps_items_without_a_place_mention() -> None:
     docs = {
         "https://g.example/f": rss(
             ("Road work starts Monday", "https://x.example/1", "", "Fri, 13 Nov 2026 09:00:00 GMT"),
@@ -280,9 +280,7 @@ def test_a_trusted_local_search_keeps_items_without_a_place_mention_but_does_not
     }
     scoped = Source("g", "g", "https://g.example/f", "local", trusted=True)
     items, _ = collect([scoped], ["Buffalo Grove", "Palatine"], now=NOW, fetcher=docs.__getitem__)
-    by_title = {i["title"]: i for i in items}
-    assert "place" not in by_title["Road work starts Monday"]
-    assert by_title["Palatine council meets"]["place"] == "Palatine"
+    assert {i["title"] for i in items} == {"Road work starts Monday", "Palatine council meets"}
     items, _ = collect([scoped], [], now=NOW, fetcher=docs.__getitem__)
     assert len(items) == 2 and all("place" not in i for i in items)
 
