@@ -12,6 +12,7 @@ export interface Item {
   place?: string;
   subtopic?: string;
   metered?: boolean;
+  full?: boolean;  // the article's full text is in articles.json
 }
 
 export interface Cluster {
