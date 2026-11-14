@@ -4,6 +4,9 @@
   --card: #1f2226;
   --line: #2a2d32;
   --chip: #26292e;
+  --wx-bg: #1c2a44;
+  --wx-text: #aecbfa;
+  --warn-text: #ffd48a;
   --text: #e8eaed;
   --muted: #9aa0a6;
   --accent: #8ab4f8;
@@ -65,7 +68,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn.g { background: var(--chip); color: var(--text); }
 
 .note { margin: 8px 16px; background: var(--card); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; color: var(--muted); }
-.note.warn { background: #3a2e12; color: #ffd48a; }
+.note.warn { background: #3a2e12; color: var(--warn-text); }
 .empty { margin: 14px 16px; background: var(--card); border-radius: 16px; padding: 26px 18px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .empty b { font-size: 19px; }
 .empty span { color: var(--muted); font-size: 14px; }
@@ -92,3 +95,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .bi.first h2 { font-size: 20px; }
 .bi.first p { margin: 0 0 6px; color: #b4b8be; font-size: 14.5px; }
 .done { text-align: center; padding: 22px; color: var(--muted); font-size: 14px; }
+
+.wx { margin: 8px 16px; background: var(--wx-bg); border-radius: 14px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--wx-text); }
+.wx-k { font-size: 12px; font-weight: 600; letter-spacing: .5px; }
+.wx b { font-size: 26px; font-weight: 500; }
+.wx-alert { margin-top: 4px; font-size: 13px; color: var(--warn-text); }
+.wx-sub { margin-top: 4px; font-size: 13px; color: var(--muted); }
