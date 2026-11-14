@@ -1,6 +1,7 @@
 import { parseFeed } from './feed';
 import type { Feed } from './types';
 import { type Articles, parseArticles } from './article';
+import { type Markets, parseMarkets } from './markets';
 import { parseWeather, type Weather } from './weather';
 
 export const FEED_URL = '/data/feed.json';
@@ -20,6 +21,18 @@ export async function loadWeather(): Promise<Weather | undefined> {
   try {
     const response = await fetch(WEATHER_URL, { cache: 'no-cache' });
     return response.ok ? parseWeather(await response.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const MARKETS_URL = '/data/markets.json';
+
+/** The market quotes, or undefined for any problem (the Markets screen then says they are unavailable). */
+export async function loadMarkets(): Promise<Markets | undefined> {
+  try {
+    const response = await fetch(MARKETS_URL, { cache: 'no-cache' });
+    return response.ok ? parseMarkets(await response.json()) : undefined;
   } catch {
     return undefined;
   }

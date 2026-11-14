@@ -7,6 +7,8 @@
   --wx-bg: #1c2a44;
   --wx-text: #aecbfa;
   --warn-text: #ffd48a;
+  --gain: #7bd88f;
+  --loss: #ff8a80;
   --text: #e8eaed;
   --muted: #9aa0a6;
   --accent: #8ab4f8;
@@ -145,3 +147,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .zone.top { top: 0; }
 .zone.bottom { bottom: 0; }
 @media (prefers-reduced-motion: reduce) { .back, .tabbar { transition: none; } }
+
+/* Markets */
+.ql { list-style: none; margin: 0 16px 10px; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.q { display: grid; grid-template-columns: minmax(0, 1fr) 84px auto; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.q:first-child { border-top: 0; }
+.qn b { display: block; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qn span { font-size: 12px; color: var(--muted); }
+.qs { width: 84px; height: 28px; color: var(--muted); }
+.qs.up, .chg.up { color: var(--gain); }
+.qs.down, .chg.down { color: var(--loss); }
+.qp { grid-column: 3; text-align: right; }
+.qp b { display: block; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chg { font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fine { margin: 14px 16px 90px; font-size: 12px; color: var(--muted); }

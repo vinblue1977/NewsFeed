@@ -1,11 +1,12 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadFeed, loadWeather } from './api';
+import { loadArticles, loadFeed, loadMarkets, loadWeather } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, parseRoute, readerPage, safeUrl, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Story } from './feed';
+import { formatChange, isFresh as marketsFresh, type Markets, priceLabel, type Quote, sparkline } from './markets';
 import type { Feed, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
@@ -186,14 +187,69 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
   );
 }
 
-function TabBar({ hidden = false }: { hidden?: boolean }) {
+function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'markets' }) {
+  const link = (tab: 'home' | 'markets', href: string, label: string) =>
+    current === tab ? <a class="on" href={href} aria-current="page">{label}</a> : <a href={href}>{label}</a>;
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
-      <a class="on" href="#" aria-current="page">For you</a>
-      {['Explore', 'Saved', 'Markets', 'Settings'].map((name) => (
-        <button key={name} type="button" disabled>{name}</button>
-      ))}
+      {link('home', '#', 'For you')}
+      {['Explore', 'Saved'].map((name) => <button key={name} type="button" disabled>{name}</button>)}
+      {link('markets', '#/markets', 'Markets')}
+      <button type="button" disabled>Settings</button>
     </nav>
+  );
+}
+
+function QuoteRow({ q, index = false }: { q: Quote; index?: boolean }) {
+  const { text, dir } = formatChange(q.change, q.changePct);
+  const points = sparkline(q.series);
+  return (
+    <li class="q">
+      <div class="qn"><b>{q.name}</b><span>{q.symbol.replace('^', '')}</span></div>
+      {points && (
+        <svg class={`qs ${dir}`} viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+          <polyline points={points} fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" />
+        </svg>
+      )}
+      <div class="qp"><b>{priceLabel(q.price, q.currency, index)}</b><span class={`chg ${dir}`}>{text}</span></div>
+    </li>
+  );
+}
+
+function MarketsScreen({ markets, loaded, now }: { markets: Markets | undefined; loaded: boolean; now: Date }) {
+  const stale = markets ? !marketsFresh(markets.generated, now) : false;
+  const open = markets && !stale ? [...markets.indexes, ...markets.tickers].some((q) => q.open) : false;  // `open` is frozen at build time
+  const traded = markets?.indexes.find((q) => q.lastTrade)?.lastTrade;
+  return (
+    <div class="wrap">
+      <header class="hdr">
+        <div>
+          <div class="e">{markets ? (open ? 'Some markets open' : 'Markets closed') : 'Quotes'}</div>
+          <h1>Markets</h1>
+        </div>
+      </header>
+      {!markets && !loaded && <p class="note">Loading quotes…</p>}
+      {!markets && loaded && <div class="empty"><b>Quotes unavailable</b><span>They'll be back on the next update.</span></div>}
+      {markets && stale && <p class="note warn">Updated {timeAgo(markets.generated, now)}; prices may be out of date.</p>}
+      {markets && markets.indexes.length > 0 && (
+        <>
+          <div class="grp">Indexes</div>
+          <ul class="ql">{markets.indexes.map((q) => <QuoteRow key={q.symbol} q={q} index />)}</ul>
+        </>
+      )}
+      {markets && markets.tickers.length > 0 && (
+        <>
+          <div class="grp">Watchlist</div>
+          <ul class="ql">{markets.tickers.map((q) => <QuoteRow key={q.symbol} q={q} />)}</ul>
+        </>
+      )}
+      {markets && markets.missing > 0 && <p class="note">{markets.missing} {markets.missing === 1 ? 'quote is' : 'quotes are'} unavailable right now.</p>}
+      {markets && (
+        <p class="fine">
+          {traded ? `Last trade ${timeAgo(traded, now)}. ` : ''}Delayed, unofficial data from Yahoo Finance. Not investment advice.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -213,6 +269,8 @@ export function App() {
   const [shown, setShown] = useState(PAGE);
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
+  const [markets, setMarkets] = useState<Markets | undefined>();
+  const [marketsLoaded, setMarketsLoaded] = useState(false);
   const [route, setRoute] = useState(() => parseRoute(location.hash));
   const homeScroll = useRef(0);
   const routeRef = useRef(route);
@@ -227,15 +285,30 @@ export function App() {
       () => { if (mine === latest.current) setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' })); },
     );
   };
+  const latestMarkets = useRef(0);
+  const refreshMarkets = () => {
+    const mine = ++latestMarkets.current;  // a slower, older response must not overwrite a newer one
+    void loadMarkets().then((m) => {
+      if (mine !== latestMarkets.current) return;
+      if (m) setMarkets(m);  // a failed refresh keeps the last good quotes
+      setMarketsLoaded(true);
+    });
+  };
   useEffect(() => {
     refresh();
+    if (routeRef.current.kind === 'markets') refreshMarkets();
     const onVisible = () => {
-      if (document.visibilityState === 'visible') { setNow(new Date()); refresh(); }
+      if (document.visibilityState === 'visible') {
+        setNow(new Date());
+        refresh();
+        if (routeRef.current.kind === 'markets') refreshMarkets();
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     const onHash = () => {
       const next = parseRoute(location.hash);
       if (routeRef.current.kind === 'home' && next.kind !== 'home') homeScroll.current = window.scrollY;  // come back to the same place
+      if (next.kind === 'markets') refreshMarkets();
       routeRef.current = next;
       inAppNavs.current += 1;
       setRoute(next);
@@ -266,12 +339,21 @@ export function App() {
     setShown(PAGE);
   };
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
-  const screenKey = route.kind === 'home' ? 'home' : `${route.kind}:${route.id}`;
+  const screenKey = route.kind === 'home' || route.kind === 'markets' ? route.kind : `${route.kind}:${route.id}`;
   useEffect(() => {
     window.scrollTo(0, screenKey === 'home' ? homeScroll.current : 0);
   }, [screenKey]);
-  const chrome = useChrome(route.kind !== 'home', screenKey);
+  const chrome = useChrome(route.kind === 'story' || route.kind === 'read', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  if (route.kind === 'markets') {
+    return (
+      <>
+        <MarketsScreen markets={markets} loaded={marketsLoaded} now={now} />
+        <TabBar current="markets" />
+      </>
+    );
+  }
 
   if (route.kind !== 'home') {
     return (
