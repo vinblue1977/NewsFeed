@@ -117,3 +117,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cvt b { font-weight: 500; font-size: 15px; display: block; overflow-wrap: anywhere; }
 .cvt small { color: var(--muted); font-size: 12.5px; }
 .chev { color: var(--muted); }
+
+.art { padding: 0 0 8px; }
+.art .tag { padding: 4px 16px 0; }
+.art h1 { font-size: 28px; line-height: 1.15; font-weight: 700; margin: 4px 16px 8px; overflow-wrap: anywhere; }
+.art .art-src { margin: 0 16px 14px; }
+.art p { font: 18px/1.65 Georgia, 'Times New Roman', serif; margin: 0 16px 16px; color: var(--text); overflow-wrap: anywhere; }
+.infobox { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 14px; }
+.btns { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 16px; }
+.btns .btn { display: inline-block; }
