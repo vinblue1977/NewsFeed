@@ -82,7 +82,7 @@ class NewsStack(Stack):
         # index.html, the manifest and the data JSON must revalidate; Vite's content-hashed /assets/* never change.
         revalidate = headers_policy("SecurityHeaders", "no-cache")
         immutable = headers_policy("AssetHeaders", "public, max-age=31536000, immutable")
-        # The feed is rewritten every 30 minutes: let the edge keep it for at most a few minutes.
+        # The feed is rewritten every 15 minutes: let the edge keep it for at most a few minutes.
         data_cache = cloudfront.CachePolicy(
             self,
             "DataCache",
@@ -165,7 +165,7 @@ class NewsStack(Stack):
         events.Rule(
             self,
             "IngestSchedule",
-            schedule=events.Schedule.rate(Duration.minutes(30)),
+            schedule=events.Schedule.cron(minute="0/15"),  # on the quarter hours (:00, :15, :30, :45), as requested
             targets=[targets.LambdaFunction(fn)],  # pyright: ignore[reportArgumentType]
         )
 
