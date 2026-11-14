@@ -77,6 +77,7 @@ def collect(
     results = [f.result() if f.done() else (source, [], "timed out") for source, f in futures]
 
     items: dict[str, dict[str, Any]] = {}
+    headlines: set[tuple[str, str]] = set()
     status: dict[str, dict[str, Any]] = {}
     for source, parsed, error in results:
         kept = 0
@@ -96,15 +97,16 @@ def collect(
                 continue
             if source.topic == "local":
                 place = _mentions(item, place_re, places) if place_re else None
-                if not place and source.trusted:  # the search was scoped by its query; label it with the first place
-                    place = next(iter(places.values()), None)
-                if not place:
+                if not place and not source.trusted:
                     continue
-                item["place"] = place
+                if place:  # a trusted search (already scoped by its query) keeps items that name no place, unlabelled
+                    item["place"] = place
             key = _dedupe_key(item["url"])
-            if key in items:
+            same_headline = (item["source"].lower(), item["title"].lower())  # a direct feed and Google News carry one story
+            if key in items or same_headline in headlines:
                 continue
             items[key] = item
+            headlines.add(same_headline)
             kept += 1
         status[source.id] = {
             "ok": error is None,

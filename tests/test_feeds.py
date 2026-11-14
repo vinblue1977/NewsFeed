@@ -240,3 +240,24 @@ def test_google_news_items_use_the_real_publisher_and_are_headline_only() -> Non
 
 def test_plain_items_get_their_link_host_as_domain() -> None:
     assert parse_feed(RSS, SRC)[0]["domain"] == "example.com"
+
+
+def test_a_source_element_in_an_ordinary_feed_does_not_rename_the_publisher() -> None:
+    body = (
+        b"<rss><channel><item><title>Story - Feed Title</title><link>https://news.example.com/a</link>"
+        b'<pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate><source url="https://other.example/feed.xml">Feed Title</source>'
+        b"</item></channel></rss>"
+    )
+    item = parse_feed(body, SRC)[0]
+    assert item["source"] == "Test News" and item["domain"] == "news.example.com" and item["title"] == "Story - Feed Title"
+
+
+def test_google_news_item_without_a_source_element_falls_back_to_the_queried_site() -> None:
+    body = (
+        b"<rss><channel><item><title>Flights grounded</title><link>https://news.google.com/rss/articles/X</link>"
+        b"<pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate></item></channel></rss>"
+    )
+    src = Source("gn", "Reuters", "https://news.google.com/rss/search?q=x", "world", headline_only=True, site="reuters.com")
+    assert parse_feed(body, src)[0]["domain"] == "reuters.com"
+    unknown = Source("gl", "g", "https://news.google.com/rss/search?q=x", "local", trusted=True)
+    assert parse_feed(body, unknown)[0]["domain"] == "news.google.com"

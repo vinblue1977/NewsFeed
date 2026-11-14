@@ -171,12 +171,13 @@ def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
             continue
         domain = (urlsplit(link).hostname or "").lower()
         source_name = source.name
-        origin = node.find("source")  # Google News names the real publisher here (and in the title's " - Name" tail)
-        if origin is not None and origin.text:
-            source_name = clean_text(origin.text) or source_name
-            domain = (urlsplit(origin.get("url", "")).hostname or domain).lower()
-            tail = f" - {source_name}"
-            title = title.removesuffix(tail) if title.endswith(tail) else title
+        if domain == "news.google.com":  # Google News names the real publisher in <source> (and the title's " - Name" tail)
+            domain = source.site or domain  # a `site:` query already says which publisher it is
+            origin = node.find("source")
+            if origin is not None and origin.text:
+                source_name = clean_text(origin.text) or source_name
+                domain = (urlsplit(origin.get("url", "")).hostname or domain).lower()
+                title = title.removesuffix(f" - {source_name}")
         summary = clean_text(
             _child(node, f"{ATOM}summary", f"{ATOM}content") if atom else _child(node, "description"), SUMMARY_CHARS
         )

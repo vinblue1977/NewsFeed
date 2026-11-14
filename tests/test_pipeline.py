@@ -108,6 +108,9 @@ class FakeS3:
     def put_object(self, **kw: Any) -> None:
         self.puts.append(kw)
 
+    def get_object(self, **kw: Any) -> None:
+        raise OSError("no previous feed")
+
 
 def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
     s3 = FakeS3()
@@ -210,15 +213,66 @@ def test_blocked_items_are_dropped_and_counted() -> None:
     assert status["a"] == {"ok": True, "items": 1, "blocked": 2}
 
 
-def test_a_trusted_local_search_keeps_items_without_a_place_mention() -> None:
-    docs = {"https://g.example/f": rss(("Road work starts Monday", "https://x.example/1", "", "Fri, 13 Nov 2026 09:00:00 GMT"))}
+def test_a_trusted_local_search_keeps_items_without_a_place_mention_but_does_not_guess_one() -> None:
+    docs = {
+        "https://g.example/f": rss(
+            ("Road work starts Monday", "https://x.example/1", "", "Fri, 13 Nov 2026 09:00:00 GMT"),
+            ("Palatine council meets", "https://x.example/2", "", "Fri, 13 Nov 2026 10:00:00 GMT"),
+        )
+    }
     scoped = Source("g", "g", "https://g.example/f", "local", trusted=True)
     items, _ = collect([scoped], ["Buffalo Grove", "Palatine"], now=NOW, fetcher=docs.__getitem__)
-    assert items[0]["place"] == "Buffalo Grove"
+    by_title = {i["title"]: i for i in items}
+    assert "place" not in by_title["Road work starts Monday"]
+    assert by_title["Palatine council meets"]["place"] == "Palatine"
     items, _ = collect([scoped], [], now=NOW, fetcher=docs.__getitem__)
-    assert items == []  # nothing to label it with
+    assert len(items) == 2 and all("place" not in i for i in items)
+
+
+def test_a_story_in_both_a_direct_feed_and_google_news_is_shown_once() -> None:
+    docs = {
+        "https://a.example/f": rss(("Same story", "https://www.cnn.com/a", "", "Fri, 13 Nov 2026 11:00:00 GMT")),
+        "https://b.example/f": rss(("Same Story", "https://news.google.com/rss/articles/X", "", "Fri, 13 Nov 2026 11:00:00 GMT")),
+    }
+    direct = Source("cnn", "CNN", "https://a.example/f", "us")
+    via_google = Source("gn-cnn", "CNN", "https://b.example/f", "us")  # Google News reports the real publisher's name
+    items, _ = collect([direct, via_google], now=NOW, fetcher=docs.__getitem__)
+    assert len(items) == 1
 
 
 def test_only_google_news_local_feeds_are_trusted() -> None:
     made = local_sources(["https://news.google.com/rss/search?q=x", "https://wgntv.example/feed"])
     assert [s.trusted for s in made] == [True, False]
+
+
+def test_previous_clusters_reads_the_last_feed_and_fails_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATA_BUCKET", "bucket")
+    monkeypatch.setenv("DATA_PREFIX", "data")
+
+    class Body:
+        def read(self) -> bytes:
+            return json.dumps({"items": [{"id": "a", "cluster": "c1"}, {"id": "b"}]}).encode()
+
+    class Reader:
+        def get_object(self, **kw: Any) -> dict[str, Any]:
+            assert kw == {"Bucket": "bucket", "Key": "data/feed.json"}
+            return {"Body": Body()}
+
+    class Broken:
+        def get_object(self, **kw: Any) -> None:
+            raise OSError("no such key")
+
+    assert handler_module.previous_clusters(Reader()) == {"a": "c1"}
+    assert handler_module.previous_clusters(Broken()) == {}
+
+
+def test_a_clustering_failure_still_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(items: Any, previous: Any = None) -> None:
+        raise ValueError("bad item")
+
+    monkeypatch.setattr(handler_module, "SOURCES", (src("a", "a"),))
+    monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
+    monkeypatch.setattr(handler_module, "cluster_items", boom)
+    feed = handler_module.build_feed({"nearby": [], "feeds": []})
+    assert feed["clusters"] == [] and feed["items"]
+    assert all("cluster" not in i for i in feed["items"])

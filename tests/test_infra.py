@@ -202,3 +202,16 @@ def test_app_tags_reach_every_taggable_resource() -> None:
 def test_a_failed_ingest_is_not_retried_by_lambda() -> None:
     template = _synthesized(ACCOUNT)[1]
     template.has_resource_properties("AWS::Lambda::EventInvokeConfig", {"MaximumRetryAttempts": 0})
+
+
+def test_ingest_can_read_back_only_the_feed_object() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    statements = [
+        stmt
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        if stmt["Action"] == "s3:GetObject"
+    ]
+    assert len(statements) == 1
+    parts = statements[0]["Resource"]["Fn::Join"][1]
+    assert parts[-1] == "/data/feed.json"  # bucket ARN + exactly this key, no wildcard

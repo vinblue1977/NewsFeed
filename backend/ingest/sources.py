@@ -17,17 +17,18 @@ class Source:
     enabled: bool = True
     metered: bool = False
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
+    site: str | None = None  # Google News `site:` query: the publisher's domain when an item has no <source>
     trusted: bool = False  # a search the query already scoped (local Google News): skip the nearby-place filter
 
 
-def _s(id: str, name: str, url: str, topic: str, subtopic: str | None = None, **kw: bool) -> Source:  # noqa: A002
-    return Source(id, name, url, topic, subtopic, **kw)
+def _s(id: str, name: str, url: str, topic: str, subtopic: str | None = None, *, metered: bool = False) -> Source:  # noqa: A002
+    return Source(id, name, url, topic, subtopic, metered=metered)
 
 
 def _gnews(id: str, name: str, site: str, topic: str) -> Source:  # noqa: A002
     """Reuters, AP and CNN have no usable direct feed; Google News `site:` search is fresh and headline-only."""
     url = f"https://news.google.com/rss/search?q=site:{site}+when:1d&hl=en-US&gl=US&ceid=US:en"
-    return Source(id, name, url, topic, headline_only=True)
+    return Source(id, name, url, topic, headline_only=True, site=site)
 
 
 SOURCES: tuple[Source, ...] = (
