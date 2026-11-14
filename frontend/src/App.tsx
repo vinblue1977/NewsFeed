@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { loadArticles, loadFeed, loadWeather } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
+import { useChrome } from './chrome';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, parseRoute, readerPage, safeUrl, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Story } from './feed';
 import type { Feed, Topic } from './types';
@@ -85,7 +86,7 @@ function ArticleBody({ blocks }: { blocks: Block[] }) {
   );
 }
 
-function ReaderScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; now: Date; canGoBack: boolean }) {
+function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; id: string; now: Date; canGoBack: boolean; chromeHidden: boolean }) {
   const page = readerPage(feed, id);
   const wantsFull = page?.item.full === true;
   const [blocks, setBlocks] = useState<Block[] | undefined>();
@@ -108,7 +109,7 @@ function ReaderScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; no
   const canShare = typeof navigator.share === 'function' && url !== '#';
   return (
     <div class="wrap">
-      <div class="back">
+      <div class={chromeHidden ? 'back hide' : 'back'}>
         <button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button>
         {page && canShare && (
           <button type="button" class="ib" aria-label="Share" onClick={() => { void navigator.share({ title: page.item.title, url }).catch(() => undefined); }}>↗</button>
@@ -140,14 +141,14 @@ function ReaderScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; no
   );
 }
 
-function StoryScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; now: Date; canGoBack: boolean }) {
+function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; id: string; now: Date; canGoBack: boolean; chromeHidden: boolean }) {
   const page = storyPage(feed, id);
   const [all, setAll] = useState(false);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = ''; };  // a deep link has nothing in the app to go back to
   const shown = page && !all ? page.items.slice(0, COVERAGE_SHOWN) : (page?.items ?? []);
   return (
     <div class="wrap">
-      <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>
+      <div class={chromeHidden ? 'back hide' : 'back'}><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>
       {!page && <div class="empty"><b>Story not found</b><span>It may have dropped out of the latest news.</span></div>}
       {page && (
         <>
@@ -185,9 +186,9 @@ function StoryScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; now
   );
 }
 
-function TabBar() {
+function TabBar({ hidden = false }: { hidden?: boolean }) {
   return (
-    <nav class="tabbar" aria-label="Sections">
+    <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       <a class="on" href="#" aria-current="page">For you</a>
       {['Explore', 'Saved', 'Markets', 'Settings'].map((name) => (
         <button key={name} type="button" disabled>{name}</button>
@@ -269,6 +270,7 @@ export function App() {
   useEffect(() => {
     window.scrollTo(0, screenKey === 'home' ? homeScroll.current : 0);
   }, [screenKey]);
+  const chrome = useChrome(route.kind !== 'home', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   if (route.kind !== 'home') {
@@ -276,8 +278,8 @@ export function App() {
       <>
         {feed ? (
           route.kind === 'story'
-            ? <StoryScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} />
-            : <ReaderScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} />
+            ? <StoryScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
+            : <ReaderScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
         ) : (
           <div class="wrap">
             <div class="back"><a class="ib" href="#" aria-label="Home">‹</a></div>
@@ -287,7 +289,14 @@ export function App() {
             ) : <p class="note">Loading…</p>}
           </div>
         )}
-        <TabBar />
+        {feed && <div class="prog" aria-hidden="true" />}
+        {chrome.hidden && (
+          <>
+            <button type="button" class="zone top" aria-label="Show the top bar" onClick={chrome.show} />
+            <button type="button" class="zone bottom" aria-label="Show the tab bar" onClick={chrome.show} />
+          </>
+        )}
+        <TabBar hidden={chrome.hidden} />
       </>
     );
   }
