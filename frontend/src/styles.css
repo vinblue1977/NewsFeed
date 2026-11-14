@@ -162,6 +162,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .chg { font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .fine { margin: 14px 16px 90px; font-size: 12px; color: var(--muted); }
 
+/* Pictures and topic sections */
+.pic { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 12px; background: var(--chip); }
+.thumb { width: 84px; height: 84px; flex: none; object-fit: cover; border-radius: 10px; background: var(--chip); }
+.row.has-img { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.row.has-img .t { flex: 1; min-width: 0; }
+.lead { display: block; padding: 4px 16px 10px; }
+.lead .pic { margin-bottom: 8px; }
+.lead h2 { font-size: 19px; line-height: 1.25; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.sech { justify-content: flex-start; }
+.sech .all { margin-left: auto; background: none; border: 0; padding: 0; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; }
+.art .pic { margin: 0 16px 14px; width: calc(100% - 32px); }
+
 /* Settings */
 .set { list-style: none; margin: 0 16px 10px; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .set li { border-top: 1px solid var(--line); }

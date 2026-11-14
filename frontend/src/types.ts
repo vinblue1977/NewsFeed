@@ -13,6 +13,7 @@ export interface Item {
   subtopic?: string;
   metered?: boolean;
   full?: boolean;  // the article's full text is in articles.json
+  img?: string;  // file name of the picture, a copy in our own bucket (see imageSrc)
 }
 
 export interface Cluster {

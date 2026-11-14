@@ -60,6 +60,13 @@ function validItem(v: unknown): v is Item {
   return !!i && isText(i.id) && isText(i.title) && isText(i.url) && isText(i.published) && isText(i.source) && isText(i.topic);
 }
 
+const IMAGE_NAME = /^[0-9a-f]{16}\.(jpg|png|webp)$/;
+
+/** Where a story's picture is served from (our own site), or undefined. Only names of the exact shape the ingest writes are used. */
+export function imageSrc(item: Item): string | undefined {
+  return typeof item.img === 'string' && IMAGE_NAME.test(item.img) ? `/data/img/${item.img}` : undefined;
+}
+
 function validCluster(v: unknown): v is Cluster {
   const c = v as Partial<Cluster> | null;
   return !!c && isText(c.id) && isText(c.lead) && Array.isArray(c.items) && typeof c.sources === 'number';
@@ -165,6 +172,38 @@ export function briefing(feed: Feed, now: Date): { top: Story | undefined; group
     .map((g) => ({ ...g, stories: g.stories.slice(0, PER_GROUP) }))
     .filter((g) => g.stories.length > 0);
   return { top, groups, total: (top ? 1 : 0) + groups.reduce((n, g) => n + g.stories.length, 0) };
+}
+
+export const SECTION_TOPICS: { topic: Topic; color: string }[] = [
+  { topic: 'us', color: '#5b86c9' },
+  { topic: 'world', color: '#3fb6a8' },
+  { topic: 'india', color: '#e0a53f' },
+  { topic: 'sports', color: '#6fbf5c' },
+  { topic: 'tech', color: '#8a6fe0' },
+  { topic: 'business', color: '#c97aa8' },
+  { topic: 'local', color: '#e0705f' },
+];
+export const PER_SECTION = 3;  // the lead plus two more
+
+export interface Section {
+  topic: Topic;
+  label: string;
+  color: string;
+  lead: Story;
+  more: Story[];
+  total: number;  // stories in the topic, so "See all" can say how many
+}
+
+/** For You, grouped by topic: in each, a lead (the newest story that has a picture, else the newest) and the next few.
+ * `list` is newest first; the story shown as the top story is left out so it does not appear twice. */
+export function sections(list: Story[], top: Story | undefined): Section[] {
+  const rest = list.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
+  return SECTION_TOPICS.flatMap(({ topic, color }) => {
+    const here = rest.filter((s) => s.item.topic === topic);
+    const lead = here.find((s) => imageSrc(s.item)) ?? here[0];
+    if (!lead) return [];
+    return [{ topic, label: topicLabel(topic), color, lead, more: here.filter((s) => s !== lead).slice(0, PER_SECTION - 1), total: here.length }];
+  });
 }
 
 export type Route = { kind: 'home' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
