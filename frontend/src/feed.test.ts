@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, briefing, coverage, initial, parseFeed, parseRoute, storyLink, storyPage, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
+import { badgeColor, briefing, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -148,14 +148,26 @@ describe('feed helpers', () => {
     expect(parseRoute('#/story/')).toEqual({ kind: 'home' });
     expect(parseRoute('#/story/a/b')).toEqual({ kind: 'home' });
     expect(parseRoute('#/story/<script>')).toEqual({ kind: 'home' });
+    expect(parseRoute('#/read/abc_1')).toEqual({ kind: 'read', id: 'abc_1' });
+    expect(parseRoute('#/read/a b')).toEqual({ kind: 'home' });
+    expect(parseRoute('#/other/abc')).toEqual({ kind: 'home' });
   });
 
-  it('links a multi-source story to its screen and a single-source one to the article', () => {
+  it('links a multi-source story to its screen and a single-source one to the Reader', () => {
     const [multi] = stories(feed, 'us');
     if (!multi) throw new Error('no story');
-    expect(storyLink(multi)).toEqual({ href: '#/story/c1', external: false });
-    expect(storyLink({ item: item('x', { url: 'https://e.com/x' }), cluster: undefined, sources: 1 })).toEqual({ href: 'https://e.com/x', external: true });
-    expect(storyLink({ item: item('y', { url: 'not a url' }), cluster: feed.clusters[1], sources: 1 }).href).toBe('#');
+    expect(storyLink(multi)).toBe('#/story/c1');
+    expect(storyLink({ item: item('x'), cluster: undefined, sources: 1 })).toBe('#/read/x');
+    expect(storyLink({ item: item('y'), cluster: feed.clusters[1], sources: 1 })).toBe('#/read/y');
+  });
+
+  it('builds the Reader page, linking to full coverage only when several sources are present', () => {
+    expect(readerPage(feed, 'a')).toEqual({ item: feed.items[0], coverageId: 'c1' });
+    expect(readerPage(feed, 'e')?.coverageId).toBeUndefined();  // a cluster of one
+    expect(readerPage(feed, 'd')?.coverageId).toBeUndefined();  // not clustered
+    const oneSource: Feed = { ...feed, items: feed.items.map((i) => (i.cluster === 'c1' ? { ...i, source: 'same' } : i)) };
+    expect(readerPage(oneSource, 'a')?.coverageId).toBeUndefined();  // the cluster's other articles are from the same source
+    expect(readerPage(feed, 'nope')).toBeUndefined();
   });
 
   it('builds the story page: cluster articles newest first, and related stories from the topic', () => {

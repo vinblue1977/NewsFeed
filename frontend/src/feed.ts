@@ -167,18 +167,28 @@ export function briefing(feed: Feed, now: Date): { top: Story | undefined; group
   return { top, groups, total: (top ? 1 : 0) + groups.reduce((n, g) => n + g.stories.length, 0) };
 }
 
-export type Route = { kind: 'home' } | { kind: 'story'; id: string };
+export type Route = { kind: 'home' } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
-  const m = /^#\/story\/([A-Za-z0-9_-]{1,64})$/.exec(hash);
-  return m?.[1] ? { kind: 'story', id: m[1] } : { kind: 'home' };
+  const m = /^#\/(story|read)\/([A-Za-z0-9_-]{1,64})$/.exec(hash);
+  if (!m?.[2]) return { kind: 'home' };
+  return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
 }
 
-/** Where a story leads: the Story screen when several sources cover it, otherwise straight to the article. */
-export function storyLink(story: Story): { href: string; external: boolean } {
-  if (story.cluster && story.sources > 1) return { href: `#/story/${story.cluster.id}`, external: false };
-  return { href: safeUrl(story.item.url), external: true };
+/** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */
+export function storyLink(story: Story): string {
+  return story.cluster && story.sources > 1 ? `#/story/${story.cluster.id}` : `#/read/${story.item.id}`;
+}
+
+/** The Reader's article and, if other sources cover the same story, the cluster to link to. */
+export function readerPage(feed: Feed, itemId: string): { item: Item; coverageId: string | undefined } | undefined {
+  const item = feed.items.find((i) => i.id === itemId);
+  if (!item) return undefined;
+  const cluster = item.cluster ? feed.clusters.find((c) => c.id === item.cluster) : undefined;
+  if (!cluster) return { item, coverageId: undefined };
+  const sources = new Set(feed.items.filter((i) => i.cluster === cluster.id).map((i) => i.source)).size;
+  return { item, coverageId: sources > 1 ? cluster.id : undefined };
 }
 
 export interface StoryPage {
