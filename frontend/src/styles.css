@@ -133,3 +133,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .body li { margin-bottom: 6px; overflow-wrap: anywhere; }
 .body blockquote { margin: 0 16px 16px; padding-left: 14px; border-left: 3px solid var(--line); font: italic 18px/1.6 Georgia, 'Times New Roman', serif; color: var(--muted); overflow-wrap: anywhere; }
 .art p.wait { font: 14px/1.4 -apple-system, system-ui, sans-serif; color: var(--muted); }
+
+/* reading screens: the bars slide away while you scroll down and come back when you scroll up */
+.back, .tabbar { transition: transform .22s ease; }
+.back.hide { transform: translateY(-110%); }
+.tabbar.hide { transform: translateY(110%); }
+/* once slid away, hidden from taps, keyboard focus and screen readers too */
+.back.hide, .tabbar.hide { visibility: hidden; transition: transform .22s ease, visibility 0s .22s; }
+.prog { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); transform-origin: left; transform: scaleX(var(--read-progress, 0)); z-index: 9; pointer-events: none; }
+.zone { position: fixed; left: 0; right: 0; height: 40px; background: none; border: 0; padding: 0; z-index: 8; }
+.zone.top { top: 0; }
+.zone.bottom { bottom: 0; }
+@media (prefers-reduced-motion: reduce) { .back, .tabbar { transition: none; } }
