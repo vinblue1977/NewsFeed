@@ -126,3 +126,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .infobox { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 14px; }
 .btns { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 16px; }
 .btns .btn { display: inline-block; }
+
+.body h2 { font-size: 20px; line-height: 1.25; font-weight: 600; margin: 22px 16px 10px; overflow-wrap: anywhere; }
+.body p { font: 18px/1.65 Georgia, 'Times New Roman', serif; margin: 0 16px 16px; color: var(--text); overflow-wrap: anywhere; }
+.body ul { margin: 0 16px 16px; padding-left: 22px; font: 18px/1.6 Georgia, 'Times New Roman', serif; }
+.body li { margin-bottom: 6px; overflow-wrap: anywhere; }
+.body blockquote { margin: 0 16px 16px; padding-left: 14px; border-left: 3px solid var(--line); font: italic 18px/1.6 Georgia, 'Times New Roman', serif; color: var(--muted); overflow-wrap: anywhere; }
+.art p.wait { font: 14px/1.4 -apple-system, system-ui, sans-serif; color: var(--muted); }
