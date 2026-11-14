@@ -143,6 +143,7 @@ describe('feed helpers', () => {
 
   it('reads the route from the URL hash', () => {
     expect(parseRoute('#/markets')).toEqual({ kind: 'markets' });
+    expect(parseRoute('#/settings')).toEqual({ kind: 'settings' });
     expect(parseRoute('#/markets/x')).toEqual({ kind: 'home' });
     expect(parseRoute('')).toEqual({ kind: 'home' });
     expect(parseRoute('#')).toEqual({ kind: 'home' });

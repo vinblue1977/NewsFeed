@@ -167,11 +167,12 @@ export function briefing(feed: Feed, now: Date): { top: Story | undefined; group
   return { top, groups, total: (top ? 1 : 0) + groups.reduce((n, g) => n + g.stories.length, 0) };
 }
 
-export type Route = { kind: 'home' } | { kind: 'markets' } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
+export type Route = { kind: 'home' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/markets", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/markets", "#/settings", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
   if (hash === '#/markets') return { kind: 'markets' };
+  if (hash === '#/settings') return { kind: 'settings' };
   const m = /^#\/(story|read)\/([A-Za-z0-9_-]{1,64})$/.exec(hash);
   if (!m?.[2]) return { kind: 'home' };
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
