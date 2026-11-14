@@ -22,6 +22,8 @@ Deploys run from CI on every push to `main`, through GitHub OIDC (no stored keys
      '{"town": "...", "lat": 0.0, "lon": 0.0, "nearby": ["..."], "feeds": ["https://..."]}'
    ```
 
+   Optional: a private Markets watchlist. Add `"watch_key": "<16 to 64 random lowercase letters and digits>"`. Enter the same key once in the app's Settings, then add symbols there ("Edit watchlist symbols"). The symbols are stored in a private S3 object and the quotes in `data/watch-<sha256 of the key>.json` (so the key itself never appears in a URL); nothing about them is in a public file. The one endpoint (`POST /api/watchlist`, a Lambda Function URL behind CloudFront) refuses any request without the key. Without a key there is no watchlist.
+
 2. **Deploy role (once, by hand).** This is the one exception to "no deploys from a laptop": CI has no role until this stack exists, and later changes to it need the same manual step. `NewsDeployRole` trusts this repository's `main` branch and can only assume the CDK bootstrap roles. It reuses the account's existing GitHub OIDC provider.
 
    ```sh

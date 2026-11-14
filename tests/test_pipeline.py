@@ -1,12 +1,15 @@
+import io
 import json
 from datetime import UTC, datetime
 from typing import Any
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 
 from ingest import handler as handler_module
 from ingest import pipeline
+from ingest.config import watch_name
 from ingest.feeds import FeedError
 from ingest.pipeline import collect, local_sources
 from ingest.sources import Source
@@ -341,36 +344,102 @@ def test_weather_is_written_even_when_the_feed_run_is_rejected(monkeypatch: pyte
     assert [p["Key"] for p in s3.puts] == ["data/weather.json"]
 
 
-def test_handler_writes_markets_and_scores(monkeypatch: pytest.MonkeyPatch) -> None:
-    s3 = FakeS3()
+class WatchS3(FakeS3):
+    """A FakeS3 that holds the saved watchlist."""
+
+    def __init__(self, symbols: list[str] | None) -> None:
+        super().__init__()
+        self.symbols = symbols
+
+    def get_object(self, **kw: Any) -> Any:
+        if kw["Key"] != "private/watchlist.json" or self.symbols is None:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return {"Body": io.BytesIO(json.dumps({"symbols": self.symbols}).encode())}
+
+
+KEY = "k" * 20
+
+
+def _watch_setup(monkeypatch: pytest.MonkeyPatch, s3: FakeS3, markets: Any, *, key: str | None = KEY) -> list[list[str]]:
     _weather_handler_setup(monkeypatch, s3)
-    monkeypatch.setattr(
-        handler_module, "cached_location", lambda: {"nearby": [], "feeds": [], "lat": 40.0, "lon": -90.0, "tickers": ["AAA"]}
-    )
+    monkeypatch.setenv("WATCHLIST_KEY", "private/watchlist.json")
+    location = {"nearby": [], "feeds": [], "lat": 40.0, "lon": -90.0, **({"watch_key": key} if key else {})}
+    monkeypatch.setattr(handler_module, "cached_location", lambda: location)
     asked: list[list[str]] = []
 
-    def markets(tickers: list[str]) -> dict[str, Any]:
+    def build(tickers: list[str]) -> dict[str, Any]:
         asked.append(tickers)
-        return {"generated": "m"}
+        return markets
 
+    monkeypatch.setattr(handler_module, "build_markets", build)
+    return asked
+
+
+OPEN = {"generated": "m", "indexes": [{"symbol": "^X", "open": True}], "tickers": [{"symbol": "AAA"}]}
+CLOSED = {"generated": "m", "indexes": [{"symbol": "^X", "open": False}], "tickers": [{"symbol": "AAA"}]}
+
+
+def test_full_run_writes_the_quotes_to_the_private_file_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    asked = _watch_setup(monkeypatch, s3, CLOSED)  # the full run writes the quotes even when the market is closed
     monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "w"})
-    monkeypatch.setattr(handler_module, "build_markets", markets)
     monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})
     result = handler_module.handler({}, object())
     assert (result["weather"], result["markets"], result["scores"]) == ("ok", "ok", "ok")
     assert asked == [["AAA"]]
     written = {p["Key"]: json.loads(p["Body"]) for p in s3.puts}
-    assert written["data/markets.json"] == {"generated": "m"} and written["data/scores.json"] == {"generated": "s"}
-    assert set(written) == {"data/articles.json", "data/feed.json", "data/weather.json", "data/markets.json", "data/scores.json"}
+    assert written[f"data/{watch_name(KEY)}.json"] == {"generated": "m", "indexes": [], "tickers": [{"symbol": "AAA"}]}
+    assert "data/markets.json" not in written  # there is no public quotes file any more
+    assert set(written) == {
+        "data/articles.json",
+        "data/feed.json",
+        "data/weather.json",
+        "data/scores.json",
+        f"data/{watch_name(KEY)}.json",
+    }
 
 
-def test_handler_without_tickers_asks_for_the_indexes_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    s3 = FakeS3()
-    _weather_handler_setup(monkeypatch, s3)
-    asked: list[list[str]] = []
-    monkeypatch.setattr(handler_module, "build_markets", lambda tickers: asked.append(tickers) or {"generated": "m"})
-    assert handler_module.handler({}, object())["markets"] == "ok"
-    assert asked == [[]]
+@pytest.mark.parametrize("key", [None, KEY])
+def test_full_run_without_a_key_or_symbols_publishes_nothing(monkeypatch: pytest.MonkeyPatch, key: str | None) -> None:
+    s3 = WatchS3(["AAA"] if key is None else None)  # a key without symbols, or symbols without a key
+    asked = _watch_setup(monkeypatch, s3, CLOSED, key=key)
+    result = handler_module.handler({}, object())
+    assert result["markets"] == "skipped" and not any("watch" in p["Key"] for p in s3.puts)
+    assert asked == []  # nothing to show, so no quotes are fetched at all
+
+
+def test_markets_run_writes_only_while_a_market_is_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    _watch_setup(monkeypatch, s3, OPEN)
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "ok"
+    assert [p["Key"] for p in s3.puts] == [f"data/{watch_name(KEY)}.json"]  # and no feed, no other document
+
+
+def test_markets_run_with_every_market_closed_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    _watch_setup(monkeypatch, s3, CLOSED)
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "closed"
+    assert s3.puts == []
+
+
+def test_a_forced_markets_run_writes_even_when_closed_or_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    _watch_setup(monkeypatch, s3, CLOSED)
+    assert handler_module.handler({"only": "markets", "force": True}, object())["markets"] == "ok"
+    empty = WatchS3([])
+    _watch_setup(monkeypatch, empty, {"generated": "m", "indexes": [], "tickers": []})
+    assert handler_module.handler({"only": "markets", "force": True}, object())["markets"] == "ok"
+    assert json.loads(empty.puts[0]["Body"])["tickers"] == []  # a cleared list clears the file
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "skipped"  # unforced: nothing to do
+
+
+def test_markets_run_without_a_key_or_when_quotes_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    asked = _watch_setup(monkeypatch, s3, OPEN, key=None)
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "skipped" and asked == []
+    _watch_setup(monkeypatch, s3, OPEN)
+    monkeypatch.setattr(handler_module, "build_markets", lambda tickers: 1 / 0)
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "failed" and s3.puts == []
 
 
 def test_one_failing_side_document_does_not_affect_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,19 +448,18 @@ def test_one_failing_side_document_does_not_affect_the_others(monkeypatch: pytes
     monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "w"})
     monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})  # markets stays down
     result = handler_module.handler({}, object())
-    assert (result["weather"], result["markets"], result["scores"]) == ("ok", "failed", "ok")
+    assert (result["weather"], result["markets"], result["scores"]) == ("ok", "skipped", "ok")
     assert sorted(p["Key"] for p in s3.puts) == ["data/articles.json", "data/feed.json", "data/scores.json", "data/weather.json"]
 
 
-def test_markets_and_scores_are_written_even_when_the_feed_run_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    s3 = FakeS3()
-    _weather_handler_setup(monkeypatch, s3)
+def test_scores_and_the_watchlist_are_written_even_when_the_feed_run_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    _watch_setup(monkeypatch, s3, OPEN)
     monkeypatch.setattr(handler_module, "SOURCES", (src("bad", "missing"),))
-    monkeypatch.setattr(handler_module, "build_markets", lambda tickers: {"generated": "m"})
     monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})
     with pytest.raises(RuntimeError, match="keeping the previous feed"):
         handler_module.handler({}, object())
-    assert sorted(p["Key"] for p in s3.puts) == ["data/markets.json", "data/scores.json"]
+    assert sorted(p["Key"] for p in s3.puts) == ["data/scores.json", f"data/{watch_name(KEY)}.json"]
 
 
 def test_handler_writes_the_feed_without_pictures_when_that_step_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -405,3 +473,54 @@ def test_handler_writes_the_feed_without_pictures_when_that_step_fails(monkeypat
     assert handler_module.handler({}, object())["status"] == "ok"
     feed = json.loads(next(p for p in s3.puts if p["Key"] == "data/feed.json")["Body"])
     assert feed["items"] and all("_image" not in i and "img" not in i for i in feed["items"])
+
+
+def test_a_list_edited_during_the_run_is_not_overwritten(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Edited(WatchS3):
+        reads = 0
+
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == "private/watchlist.json":
+                self.reads += 1
+                self.symbols = ["AAA"] if self.reads == 1 else ["BBB"]  # saved again while the feed was being built
+            return super().get_object(**kw)
+
+    s3 = Edited(["AAA"])
+    _watch_setup(monkeypatch, s3, OPEN)
+    assert handler_module.handler({}, object())["markets"] == "superseded"
+    assert not any("watch-" in p["Key"] for p in s3.puts)
+
+
+def test_a_storage_error_is_not_an_empty_watchlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Denied(WatchS3):
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == "private/watchlist.json":
+                raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+            return super().get_object(**kw)
+
+    s3 = Denied(["AAA"])
+    _watch_setup(monkeypatch, s3, OPEN)
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "failed"
+    assert handler_module.handler({}, object())["markets"] == "skipped" and not any("watch-" in p["Key"] for p in s3.puts)
+
+
+def test_a_24_hour_symbol_counts_as_an_open_market() -> None:
+    doc = {"generated": "g", "indexes": [{"open": False}], "tickers": [{"symbol": "BTC-USD", "open": True}]}
+    assert handler_module.watch_doc(doc)[1] is True
+    assert handler_module.watch_doc({**doc, "tickers": [{"open": False}]})[1] is False
+
+
+def test_an_unreadable_list_at_write_time_does_not_discard_the_quotes(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Flaky(WatchS3):
+        reads = 0
+
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == "private/watchlist.json":
+                self.reads += 1
+                if self.reads > 1:
+                    raise ClientError({"Error": {"Code": "SlowDown"}}, "GetObject")
+            return super().get_object(**kw)
+
+    s3 = Flaky(["AAA"])
+    _watch_setup(monkeypatch, s3, OPEN)
+    assert handler_module.handler({}, object())["markets"] == "ok"

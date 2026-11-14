@@ -1,13 +1,14 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadFeed, loadMarkets, loadWeather } from './api';
+import { loadArticles, loadFeed, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Section, Story } from './feed';
 import { formatChange, isFresh as marketsFresh, type Markets, priceLabel, type Quote, sparkline } from './markets';
-import { loadSettings, readSize, saveSettings, type Settings, sourceNames, TEXT_SIZES, toggled, withoutSources } from './settings';
+import { usePullToRefresh } from './pull';
+import { loadSettings, readSize, saveSettings, type Settings, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
@@ -230,6 +231,16 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
   );
 }
 
+function PullIndicator({ distance, spinning }: { distance: number; spinning: boolean }) {
+  if (distance === 0 && !spinning) return null;
+  return (
+    <div class={spinning ? 'pull spin' : 'pull'} style={{ transform: `translateY(${spinning ? 36 : distance * 0.6}px)`, opacity: spinning ? 1 : Math.min(1, distance / 70) }}
+      role="status" aria-label={spinning ? 'Refreshing' : 'Pull to refresh'}>
+      <span aria-hidden="true">{spinning ? '↻' : distance >= 70 ? '↑' : '↓'}</span>
+    </div>
+  );
+}
+
 function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'markets' | 'settings' }) {
   const link = (tab: 'home' | 'markets' | 'settings', href: string, label: string) =>
     current === tab ? <a class="on" href={href} aria-current="page">{label}</a> : <a href={href}>{label}</a>;
@@ -259,28 +270,30 @@ function QuoteRow({ q, index = false }: { q: Quote; index?: boolean }) {
   );
 }
 
-function MarketsScreen({ markets, loaded, now, hidden }: { markets: Markets | undefined; loaded: boolean; now: Date; hidden: string[] }) {
+function MarketsScreen({ markets, hasKey, loaded, now, hidden, feed, onAllBusiness }: {
+  markets: Markets | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; feed: Feed | undefined; onAllBusiness: () => void;
+}) {
   const tickers = markets ? markets.tickers.filter((q) => !hidden.includes(q.symbol)) : [];
   const stale = markets ? !marketsFresh(markets.generated, now) : false;
-  const open = markets && !stale ? [...markets.indexes, ...tickers].some((q) => q.open) : false;  // `open` is frozen at build time
-  const traded = markets?.indexes.find((q) => q.lastTrade)?.lastTrade;
+  const open = markets && !stale ? tickers.some((q) => q.open) : false;  // `open` is frozen at build time
+  const traded = tickers.find((q) => q.lastTrade)?.lastTrade;
+  const news = useMemo(() => {
+    if (!feed) return [];
+    const top = topStory(stories(feed, 'all'), now);  // the For You top story is not repeated here
+    return stories(feed, 'business').filter((s) => s.item.id !== top?.item.id).slice(0, 5);
+  }, [feed, now]);
   return (
     <div class="wrap">
       <header class="hdr">
         <div>
-          <div class="e">{markets ? (open ? 'Some markets open' : 'Markets closed') : 'Quotes'}</div>
+          <div class="e">{tickers.length > 0 ? (open ? 'Market open' : 'Market closed') : 'Markets'}</div>
           <h1>Markets</h1>
         </div>
       </header>
-      {!markets && !loaded && <p class="note">Loading quotes…</p>}
-      {!markets && loaded && <div class="empty"><b>Quotes unavailable</b><span>They'll be back on the next update.</span></div>}
+      {!hasKey && <p class="note">Your watchlist is private. Add your key and symbols in Settings.</p>}
+      {hasKey && !markets && !loaded && <p class="note">Loading quotes…</p>}
+      {hasKey && !markets && loaded && <p class="note">No watchlist quotes yet. Add symbols in Settings; they appear within a few minutes.</p>}
       {markets && stale && <p class="note warn">Updated {timeAgo(markets.generated, now)}; prices may be out of date.</p>}
-      {markets && markets.indexes.length > 0 && (
-        <>
-          <div class="grp">Indexes</div>
-          <ul class="ql">{markets.indexes.map((q) => <QuoteRow key={q.symbol} q={q} index />)}</ul>
-        </>
-      )}
       {tickers.length > 0 && (
         <>
           <div class="grp">Watchlist</div>
@@ -288,17 +301,63 @@ function MarketsScreen({ markets, loaded, now, hidden }: { markets: Markets | un
         </>
       )}
       {markets && markets.missing > 0 && <p class="note">{markets.missing} {markets.missing === 1 ? 'quote is' : 'quotes are'} unavailable right now.</p>}
-      {markets && (
+      {tickers.length > 0 && (
         <p class="fine">
           {traded ? `Last trade ${timeAgo(traded, now)}. ` : ''}Delayed, unofficial data from Yahoo Finance. Not investment advice.
         </p>
+      )}
+      {news.length > 0 && (
+        <>
+          <div class="grp">Market news</div>
+          {news.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+          <div class="btns"><button type="button" class="btn g" onClick={onAllBusiness}>All Business ›</button></div>
+        </>
       )}
     </div>
   );
 }
 
-function SettingsScreen({ settings, update, sources, markets, marketsLoaded }: {
+function WatchlistEditor({ watchKey, update, onSaved }: { watchKey: string; update: (next: Partial<Settings>) => void; onSaved: (key: string) => void }) {
+  const [key, setKey] = useState(watchKey);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const keyOk = WATCH_KEY.test(key);
+  const parse = () => text.split(/[\s,]+/).filter(Boolean);
+  const run = async (symbols?: string[]) => {
+    setBusy(true);
+    setMsg('');
+    const saved = await watchlistSymbols(key, symbols);
+    setBusy(false);
+    if (!saved) { setMsg('Could not reach the watchlist. Check the key and the symbols.'); return; }
+    update({ watchKey: key });
+    setText(saved.join(' '));
+    onSaved(key);  // the quotes for this key (and, after a save, the fresh ones)
+    if (symbols) setMsg('Saved. Quotes appear within a minute.'); else setMsg(`${saved.length} symbols loaded.`);
+  };
+  return (
+    <details class="card fold">
+      <summary>Edit watchlist symbols</summary>
+      <label class="fld">Key
+        <input type="password" autocomplete="off" autocapitalize="none" spellcheck={false} value={key}
+          onInput={(e) => setKey((e.target as HTMLInputElement).value.trim())} />
+      </label>
+      <label class="fld">Symbols (spaces or commas)
+        <textarea rows={3} autocapitalize="characters" spellcheck={false} value={text}
+          onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
+      </label>
+      <div class="btns">
+        <button type="button" class="btn g" disabled={!keyOk || busy} onClick={() => void run()}>Load saved</button>
+        <button type="button" class="btn" disabled={!keyOk || busy} onClick={() => void run(parse())}>Save</button>
+      </div>
+      {msg && <p class="note" role="status">{msg}</p>}
+    </details>
+  );
+}
+
+function SettingsScreen({ settings, update, sources, markets, marketsLoaded, onSaved }: {
   settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; markets: Markets | undefined; marketsLoaded: boolean;
+  onSaved: (key: string) => void;
 }) {
   const symbols = [...new Map([...(markets?.tickers ?? []).map((q) => [q.symbol, `${q.name} · ${q.symbol}`] as const),
     ...settings.hiddenTickers.map((t) => [t, t] as const)]).entries()];  // a hidden symbol no longer in the list can still be switched back on
@@ -316,17 +375,21 @@ function SettingsScreen({ settings, update, sources, markets, marketsLoaded }: {
       <div class="grp">News sources</div>
       {sources.length === 0 && <p class="note">Sources appear once the news has loaded.</p>}
       {sources.length > 0 && (
-        <ul class="set">
-          {sources.map((name) => (
-            <li key={name}><label>{name}
-              <input type="checkbox" checked={!settings.hiddenSources.includes(name)}
-                onChange={() => update({ hiddenSources: toggled(settings.hiddenSources, name) })} />
-            </label></li>
-          ))}
-        </ul>
+        <details class="card fold">
+          <summary>Choose sources ({sources.length - settings.hiddenSources.filter((h) => sources.includes(h)).length} of {sources.length} shown)</summary>
+          <ul class="set inner">
+            {sources.map((name) => (
+              <li key={name}><label>{name}
+                <input type="checkbox" checked={!settings.hiddenSources.includes(name)}
+                  onChange={() => update({ hiddenSources: toggled(settings.hiddenSources, name) })} />
+              </label></li>
+            ))}
+          </ul>
+        </details>
       )}
       <div class="grp">Markets watchlist</div>
-      {symbols.length === 0 && <p class="note">{markets ? 'No watchlist symbols are configured.' : marketsLoaded ? 'Watchlist unavailable right now.' : 'Loading the watchlist…'}</p>}
+      <WatchlistEditor watchKey={settings.watchKey} update={update} onSaved={onSaved} />
+      {symbols.length === 0 && <p class="note">{!settings.watchKey ? 'Add your key above to see your watchlist.' : markets ? 'No symbols yet.' : marketsLoaded ? 'Watchlist unavailable right now.' : 'Loading the watchlist…'}</p>}
       {symbols.length > 0 && (
         <ul class="set">
           {symbols.map(([symbol, label]) => (
@@ -337,7 +400,7 @@ function SettingsScreen({ settings, update, sources, markets, marketsLoaded }: {
           ))}
         </ul>
       )}
-      <p class="fine">Saved on this device only. Hiding a source or symbol does not delete it. Symbols themselves are set up outside the app.</p>
+      <p class="fine">Saved on this device only. Hiding a source or symbol does not delete it. The symbol list itself is kept privately on the server.</p>
     </div>
   );
 }
@@ -379,12 +442,22 @@ export function App() {
       () => { if (mine === latest.current) setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' })); },
     );
   };
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const timers = useRef<number[]>([]);
+  const afterSave = (key: string) => {  // the refresh runs in the background: look again a few times
+    timers.current.forEach(clearTimeout);
+    timers.current = [0, 5000, 15000, 40000].map((ms) => window.setTimeout(() => refreshMarkets(key), ms));
+  };
   const latestMarkets = useRef(0);
-  const refreshMarkets = () => {
+  const refreshMarkets = (keyNow?: string) => {
     const mine = ++latestMarkets.current;  // a slower, older response must not overwrite a newer one
-    void loadMarkets().then((m) => {
+    const key = keyNow ?? settingsRef.current.watchKey;
+    if (!key) { setMarkets(undefined); setMarketsLoaded(true); return; }
+    void loadWatchlist(key).then((m) => {
       if (mine !== latestMarkets.current) return;
       if (m) setMarkets(m);  // a failed refresh keeps the last good quotes
+      else if (keyNow !== undefined) setMarkets(undefined);  // ...but never another key's quotes
       setMarketsLoaded(true);
     });
   };
@@ -408,12 +481,17 @@ export function App() {
       setRoute(next);
     };
     window.addEventListener('hashchange', onHash);
+    const quotes = setInterval(() => {  // quotes move every 5 minutes in market hours
+      if (document.visibilityState === 'visible' && routeRef.current.kind === 'markets') refreshMarkets();
+    }, 5 * 60 * 1000);
     const tick = setInterval(() => setNow(new Date()), TICK_MS);  // "x min ago" and the stale banner keep moving
     return () => {
       latest.current = -1;
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('hashchange', onHash);
       clearInterval(tick);
+      clearInterval(quotes);
+      timers.current.forEach(clearTimeout);
     };
   }, []);
 
@@ -424,6 +502,7 @@ export function App() {
     setSettings((prev) => {  // from the latest state, so two quick taps both count
       const merged = { ...prev, ...next };
       saveSettings(merged);
+      settingsRef.current = merged;
       return merged;
     });
   };
@@ -450,13 +529,20 @@ export function App() {
   useEffect(() => {
     window.scrollTo(0, screenKey === 'home' ? homeScroll.current : 0);
   }, [screenKey]);
+  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'markets', () => {
+    setNow(new Date());
+    if (routeRef.current.kind === 'markets') refreshMarkets();
+    else refresh();
+  });
   const chrome = useChrome(route.kind === 'story' || route.kind === 'read', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   if (route.kind === 'markets') {
     return (
       <>
-        <MarketsScreen markets={markets} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers} />
+        <PullIndicator {...pull} />
+        <MarketsScreen markets={markets} hasKey={settings.watchKey !== ''} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers}
+          feed={feed} onAllBusiness={() => { setTopic('business'); setView('feed'); location.hash = '#'; }} />
         <TabBar current="markets" />
       </>
     );
@@ -465,7 +551,8 @@ export function App() {
   if (route.kind === 'settings') {
     return (
       <>
-        <SettingsScreen settings={settings} update={update} sources={sources} markets={markets} marketsLoaded={marketsLoaded} />
+        <SettingsScreen settings={settings} update={update} sources={sources} markets={markets} marketsLoaded={marketsLoaded}
+          onSaved={(key) => afterSave(key)} />
         <TabBar current="settings" />
       </>
     );
@@ -592,6 +679,7 @@ export function App() {
           <div class="more"><button type="button" class="btn g" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>
         )}
       </div>
+      <PullIndicator {...pull} />
       <TabBar />
     </>
   );

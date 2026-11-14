@@ -54,6 +54,10 @@ def test_buckets_are_private() -> None:
 def test_ingest_runs_on_a_schedule() -> None:
     template = _synthesized(ACCOUNT)[1]
     template.has_resource_properties("AWS::Events::Rule", {"ScheduleExpression": "cron(0/15 * * * ? *)"})
+    for hours in ("3-10", "13-21"):  # quotes every 5 minutes while an exchange may be open, weekdays only
+        template.has_resource_properties(
+            "AWS::Events::Rule", {"ScheduleExpression": f"cron(0/5 {hours} ? * MON-FRI *)", "Targets": Match.any_value()}
+        )
 
 
 def test_data_bucket_is_retained_and_site_bucket_is_not() -> None:
@@ -204,7 +208,7 @@ def test_a_failed_ingest_is_not_retried_by_lambda() -> None:
     template.has_resource_properties("AWS::Lambda::EventInvokeConfig", {"MaximumRetryAttempts": 0})
 
 
-def test_ingest_can_read_back_only_the_feed_object() -> None:
+def test_ingest_can_read_back_only_the_feed_and_the_watchlist_objects() -> None:
     template = _synthesized(ACCOUNT)[1]
     statements = [
         stmt
@@ -213,8 +217,8 @@ def test_ingest_can_read_back_only_the_feed_object() -> None:
         if stmt["Action"] == "s3:GetObject"
     ]
     assert len(statements) == 1
-    parts = statements[0]["Resource"]["Fn::Join"][1]
-    assert parts[-1] == "/data/feed.json"  # bucket ARN + exactly this key, no wildcard
+    keys = sorted(r["Fn::Join"][1][-1] for r in statements[0]["Resource"])
+    assert keys == ["/data/feed.json", "/private/watchlist.json"]  # bucket ARN + exactly this key, no wildcard
 
 
 def test_headers_policy_has_permissions_policy_and_no_remote_images() -> None:
@@ -246,3 +250,20 @@ def test_story_pictures_expire_and_are_cached_long() -> None:
     )
     csp = json.dumps(template.find_resources("AWS::CloudFront::ResponseHeadersPolicy"))
     assert "img-src 'self';" in csp  # pictures are our own copies; no publisher host is ever allowed
+
+
+def test_watchlist_endpoint_is_behind_cloudfront_and_cannot_be_cached() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    template.has_resource_properties("AWS::Lambda::Url", {"AuthType": "NONE"})  # the secret key is the credential
+    template.has_resource_properties("AWS::Lambda::Function", {"ReservedConcurrentExecutions": 1})
+    behaviors = next(iter(template.find_resources("AWS::CloudFront::Distribution").values()))["Properties"]["DistributionConfig"]
+    api = next(b for b in behaviors["CacheBehaviors"] if b["PathPattern"] == "/api/*")
+    assert api["ViewerProtocolPolicy"] == "https-only" and "POST" in api["AllowedMethods"]
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+    assert "private/watchlist.json" in policies and "lambda:InvokeFunction" in policies
+
+
+def test_both_functions_may_list_the_data_bucket_so_a_missing_watchlist_is_not_access_denied() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    policies = json.dumps(template.find_resources("AWS::IAM::Policy"))
+    assert policies.count('"s3:ListBucket"') == 2

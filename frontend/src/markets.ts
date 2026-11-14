@@ -51,13 +51,12 @@ function parseList(value: unknown): { quotes: Quote[]; missing: number } {
   return { quotes, missing };
 }
 
-/** The markets document, reduced to what the screen shows; undefined if it does not look like one or has no readable quote. */
+/** The markets document, reduced to what the screen shows; undefined if it does not look like one. An empty watchlist is valid. */
 export function parseMarkets(value: unknown): Markets | undefined {
   const v = value as Record<string, unknown> | null;
   if (!v || typeof v.generated !== 'string') return undefined;
   const indexes = parseList(v.indexes);
   const tickers = parseList(v.tickers);
-  if (indexes.quotes.length + tickers.quotes.length === 0) return undefined;
   return { generated: v.generated, indexes: indexes.quotes, tickers: tickers.quotes, missing: indexes.missing + tickers.missing };
 }
 

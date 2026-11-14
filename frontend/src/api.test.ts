@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadMarkets, loadWeather, resetArticlesCache } from './api';
+import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) });
 
@@ -44,17 +44,47 @@ describe('loadWeather', () => {
   });
 });
 
-describe('loadMarkets', () => {
+describe('loadWatchlist', () => {
+  const key = 'a1b2c3d4e5f6a7b8';
+  it('names the file by the SHA-256 of the key', async () => {
+    expect(await watchFile('abc')).toBe('watch-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
   it('returns the parsed quotes, or undefined for any problem', async () => {
-    const quote = { symbol: '^GSPC', ok: true, price: 1 };
-    vi.stubGlobal('fetch', reply({ generated: 'g', indexes: [quote], tickers: [] }));
-    expect((await loadMarkets())?.indexes[0]?.price).toBe(1);
+    const quote = { symbol: 'AAA', ok: true, price: 1 };
+    const fetchMock = reply({ generated: 'g', indexes: [], tickers: [quote] });
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await loadWatchlist(key))?.tickers[0]?.price).toBe(1);
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toBe(`/data/${await watchFile(key)}.json`);
+    expect(url).not.toContain(key);  // the key never goes into a URL
+    expect((await loadWatchlist(key))?.missing).toBe(0);
+    expect(await loadWatchlist('../feed')).toBeUndefined();  // a bad key never reaches a URL
     vi.stubGlobal('fetch', reply({}, false, 403));
-    expect(await loadMarkets()).toBeUndefined();
-    vi.stubGlobal('fetch', reply({ nope: 1 }));
-    expect(await loadMarkets()).toBeUndefined();
+    expect(await loadWatchlist(key)).toBeUndefined();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
-    expect(await loadMarkets()).toBeUndefined();
+    expect(await loadWatchlist(key)).toBeUndefined();
+  });
+});
+
+describe('watchlistSymbols', () => {
+  const key = 'a1b2c3d4e5f6a7b8';
+  it('reads and saves through the endpoint, with the key in the body', async () => {
+    const fetchMock = reply({ symbols: ['AAA'] });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await watchlistSymbols(key)).toEqual(['AAA']);
+    expect(await watchlistSymbols(key, ['AAA'])).toEqual(['AAA']);
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('/api/watchlist');
+    expect(JSON.parse(init.body as string)).toEqual({ key, symbols: ['AAA'] });
+  });
+  it('is undefined for a bad key, a refusal, a bad answer or no network', async () => {
+    expect(await watchlistSymbols('short')).toBeUndefined();
+    vi.stubGlobal('fetch', reply({ error: 'forbidden' }, false, 403));
+    expect(await watchlistSymbols(key)).toBeUndefined();
+    vi.stubGlobal('fetch', reply({ symbols: [1] }));
+    expect(await watchlistSymbols(key)).toBeUndefined();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await watchlistSymbols(key)).toBeUndefined();
   });
 });
 
