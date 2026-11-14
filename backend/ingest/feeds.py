@@ -13,6 +13,7 @@ from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlsplit
 
+from ingest.articles import MAX_INPUT_CHARS, MIN_CHARS
 from ingest.sources import Source
 
 USER_AGENT = "Mozilla/5.0 (compatible; NewsPWA/1.0; personal reader)"
@@ -22,6 +23,7 @@ DEADLINE_SECONDS = 20  # total wall-clock budget per feed (the socket timeout al
 MAX_BYTES = 2_000_000  # the largest feed seen is about 1.1 MB
 SUMMARY_CHARS = 400
 ATOM = "{http://www.w3.org/2005/Atom}"
+CONTENT = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
 
 class FeedError(Exception):
@@ -150,6 +152,37 @@ def check_safe_xml(body: bytes) -> None:
         raise FeedError("feed declares a DOCTYPE or entities; refusing to parse it")
 
 
+def _inner_html(element: ET.Element) -> str:
+    """Markup for an element's children, for Atom xhtml content (itertext alone would fuse its paragraphs into one run)."""
+    parts = [html.escape(element.text or "", quote=False)]
+    for child in element:
+        tag = child.tag.rsplit("}", 1)[-1] if isinstance(child.tag, str) else "span"
+        parts.append(f"<{tag}>{_inner_html(child)}</{tag}>{html.escape(child.tail or '', quote=False)}")
+    return "".join(parts)
+
+
+def _element_html(found: ET.Element | None) -> str:
+    """The text of an entry's body element: escaped HTML arrives as text; xhtml arrives as child elements."""
+    if found is None:
+        return ""
+    if len(found) == 0:
+        return (found.text or "").strip()
+    try:
+        return _inner_html(found).strip()
+    except RecursionError:  # an absurdly deep document: fall back to the bare text
+        return "".join(found.itertext()).strip()
+
+
+def _body_html(node: ET.Element, atom: bool) -> str | None:
+    """The longest article HTML the entry carries (content:encoded, Atom content or summary, a long description)."""
+    names = (f"{ATOM}content", f"{ATOM}summary") if atom else (CONTENT, "description")
+    best = ""
+    for name in names:
+        text = _element_html(node.find(name))
+        best = text if len(text) > len(best) else best
+    return best[:MAX_INPUT_CHARS] if len(best) >= MIN_CHARS else None
+
+
 def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
     """Parse an RSS 2.0 or Atom document into items. Entries without a title, a safe link or a date are dropped."""
     check_safe_xml(body)
@@ -196,5 +229,9 @@ def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
             item["subtopic"] = source.subtopic
         if source.metered:
             item["metered"] = True
+        elif not source.headline_only and urlsplit(link).hostname != "news.google.com":  # Google News carries only link lists
+            html_body = _body_html(node, atom)
+            if html_body:
+                item["_html"] = html_body  # private: the ingest turns it into articles.json and removes it from the feed
         items.append(item)
     return items
