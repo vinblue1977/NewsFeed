@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, coverage, initial, parseFeed, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
+import { badgeColor, briefing, coverage, initial, parseFeed, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -90,5 +90,54 @@ describe('feed helpers', () => {
     if (!lead) throw new Error('no lead');
     expect(coverage(feed, lead).map((i) => i.id)).toEqual(['b']);
     expect(coverage(feed, { item: item('q'), cluster: undefined, sources: 1 })).toEqual([]);
+  });
+
+  it('builds a briefing: lead story, then a few recent stories per topic group, no repeats', () => {
+    const b = briefing(feed, NOW);
+    expect(b.top?.item.id).toBe('a');
+    expect(b.groups.map((g) => g.label)).toEqual(['World · India']);
+    expect(b.groups[0]?.stories.map((s) => s.item.id)).toEqual(['d']);
+    expect(b.total).toBe(2);  // 'e' is days old, so left out
+    const many: Feed = {
+      ...feed,
+      clusters: [],
+      items: Array.from({ length: 6 }, (_, n) => item(`t${n}`, { topic: 'tech', published: `2026-11-13T11:0${n}:00+00:00` })),
+    };
+    expect(briefing(many, NOW).groups[0]?.stories).toHaveLength(3);
+    expect(briefing({ ...feed, items: [], clusters: [] }, NOW)).toEqual({ top: undefined, groups: [], total: 0 });
+  });
+
+  it('keeps stories from topics it has no group for, in a "More" group', () => {
+    const odd: Feed = {
+      ...feed,
+      clusters: [],
+      items: [item('s1', { topic: 'us', published: '2026-11-13T11:30:00+00:00' }), item('s2', { topic: 'science' as never })],
+    };
+    const b = briefing(odd, NOW);
+    expect(b.top?.item.id).toBe('s1');
+    expect(b.groups.map((g) => [g.label, g.stories.map((s) => s.item.id)])).toEqual([['More', ['s2']]]);
+    expect(b.total).toBe(2);
+  });
+
+  it('ignores unparseable dates, treats future dates as now, and cuts off at 24 hours', () => {
+    const dated: Feed = {
+      ...feed,
+      clusters: [],
+      items: [
+        item('bad', { published: 'sometime yesterday' }),
+        item('future', { published: '2026-11-14T09:00:00+00:00' }),
+        item('edge', { published: '2026-11-12T12:00:01+00:00' }),
+        item('old', { published: '2026-11-12T11:59:59+00:00' }),
+      ],
+    };
+    const b = briefing(dated, NOW);
+    const ids = [b.top?.item.id, ...b.groups.flatMap((g) => g.stories.map((s) => s.item.id))].sort();
+    expect(ids).toEqual(['edge', 'future']);
+  });
+
+  it('does not repeat the lead story\'s cluster further down', () => {
+    const b = briefing(feed, NOW);
+    const shown = [b.top, ...b.groups.flatMap((g) => g.stories)].map((s) => s?.cluster?.id).filter(Boolean);
+    expect(new Set(shown).size).toBe(shown.length);
   });
 });
