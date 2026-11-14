@@ -9,7 +9,6 @@ export interface Item {
   source: string;
   topic: Topic;
   cluster?: string;
-  place?: string;
   subtopic?: string;
   metered?: boolean;
   full?: boolean;  // the article's full text is in articles.json
