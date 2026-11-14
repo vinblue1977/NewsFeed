@@ -166,3 +166,34 @@ export function briefing(feed: Feed, now: Date): { top: Story | undefined; group
     .filter((g) => g.stories.length > 0);
   return { top, groups, total: (top ? 1 : 0) + groups.reduce((n, g) => n + g.stories.length, 0) };
 }
+
+export type Route = { kind: 'home' } | { kind: 'story'; id: string };
+
+/** The screen named by the URL hash: "#/story/<cluster id>", anything else is the home screen. */
+export function parseRoute(hash: string): Route {
+  const m = /^#\/story\/([A-Za-z0-9_-]{1,64})$/.exec(hash);
+  return m?.[1] ? { kind: 'story', id: m[1] } : { kind: 'home' };
+}
+
+/** Where a story leads: the Story screen when several sources cover it, otherwise straight to the article. */
+export function storyLink(story: Story): { href: string; external: boolean } {
+  if (story.cluster && story.sources > 1) return { href: `#/story/${story.cluster.id}`, external: false };
+  return { href: safeUrl(story.item.url), external: true };
+}
+
+export interface StoryPage {
+  cluster: Cluster;
+  items: Item[];
+  sources: number;  // distinct sources among the articles actually present
+  related: Story[];
+}
+
+/** Everything the Story screen shows: the articles in the cluster (newest first) and a few other stories on the topic. */
+export function storyPage(feed: Feed, clusterId: string, relatedLimit = 3): StoryPage | undefined {
+  const cluster = feed.clusters.find((c) => c.id === clusterId);
+  if (!cluster) return undefined;
+  const items = feed.items.filter((i) => i.cluster === clusterId).sort((a, b) => b.published.localeCompare(a.published));
+  if (items.length === 0) return undefined;
+  const related = stories(feed, cluster.topic).filter((s) => s.cluster?.id !== clusterId).slice(0, relatedLimit);
+  return { cluster, items, sources: new Set(items.map((i) => i.source)).size, related };
+}

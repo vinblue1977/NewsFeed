@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, briefing, coverage, initial, parseFeed, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
+import { badgeColor, briefing, coverage, initial, parseFeed, parseRoute, storyLink, storyPage, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -139,5 +139,33 @@ describe('feed helpers', () => {
     const b = briefing(feed, NOW);
     const shown = [b.top, ...b.groups.flatMap((g) => g.stories)].map((s) => s?.cluster?.id).filter(Boolean);
     expect(new Set(shown).size).toBe(shown.length);
+  });
+
+  it('reads the route from the URL hash', () => {
+    expect(parseRoute('')).toEqual({ kind: 'home' });
+    expect(parseRoute('#')).toEqual({ kind: 'home' });
+    expect(parseRoute('#/story/c1')).toEqual({ kind: 'story', id: 'c1' });
+    expect(parseRoute('#/story/')).toEqual({ kind: 'home' });
+    expect(parseRoute('#/story/a/b')).toEqual({ kind: 'home' });
+    expect(parseRoute('#/story/<script>')).toEqual({ kind: 'home' });
+  });
+
+  it('links a multi-source story to its screen and a single-source one to the article', () => {
+    const [multi] = stories(feed, 'us');
+    if (!multi) throw new Error('no story');
+    expect(storyLink(multi)).toEqual({ href: '#/story/c1', external: false });
+    expect(storyLink({ item: item('x', { url: 'https://e.com/x' }), cluster: undefined, sources: 1 })).toEqual({ href: 'https://e.com/x', external: true });
+    expect(storyLink({ item: item('y', { url: 'not a url' }), cluster: feed.clusters[1], sources: 1 }).href).toBe('#');
+  });
+
+  it('builds the story page: cluster articles newest first, and related stories from the topic', () => {
+    const page = storyPage(feed, 'c1');
+    expect(page?.items.map((i) => i.id)).toEqual(['c', 'b', 'a']);
+    expect(page?.related).toEqual([]);
+    expect(page?.sources).toBe(2);  // the cluster says 3, but the articles present come from only 2 distinct sources
+    const more: Feed = { ...feed, items: [...feed.items, item('r1'), item('r2', { published: '2026-11-13T09:00:00+00:00' })] };
+    expect(storyPage(more, 'c1', 1)?.related.map((s) => s.item.id)).toEqual(['r1']);
+    expect(storyPage(feed, 'nope')).toBeUndefined();
+    expect(storyPage({ ...feed, items: [] }, 'c1')).toBeUndefined();
   });
 });

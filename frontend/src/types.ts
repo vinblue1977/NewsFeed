@@ -11,6 +11,7 @@ export interface Item {
   cluster?: string;
   place?: string;
   subtopic?: string;
+  metered?: boolean;
 }
 
 export interface Cluster {
