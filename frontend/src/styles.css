@@ -1,11 +1,80 @@
 :root {
   color-scheme: dark;
+  --bg: #17191c;
+  --card: #1f2226;
+  --line: #2a2d32;
+  --text: #e8eaed;
+  --muted: #9aa0a6;
+  --accent: #8ab4f8;
+  --on-accent: #0b1b33;
 }
+
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
-  background: #0b0f14;
-  color: #e6edf3;
-  font-family: -apple-system, system-ui, sans-serif;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.35 -apple-system, system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
 }
+
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+
+.wrap {
+  max-width: 430px;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) calc(86px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+}
+
+.hdr { padding: 14px 16px 6px; }
+.hdr .e { font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.hdr h1 { margin: 2px 0 0; font-size: 30px; font-weight: 600; line-height: 1.1; }
+
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 12px 16px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chips button { flex: none; background: none; border: 1px solid #4a4f56; border-radius: 8px; padding: 6px 12px; font-size: 14px; color: #c4c7cc; }
+.chips button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+
+.sec { display: flex; justify-content: space-between; align-items: center; padding: 6px 16px; }
+.sec b { font-size: 19px; font-weight: 600; }
+
+.src { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin: 10px 0 4px; }
+.fav { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; flex: none; }
+
+.big { display: block; margin: 0 16px; padding: 18px 16px; background: linear-gradient(160deg, #26364d, var(--card)); border-radius: 14px; }
+.big .src { margin-top: 0; }
+.big h2 { font-size: 22px; line-height: 1.22; margin: 0; font-weight: 600; }
+
+.full { margin: 14px 16px; border: 1px solid #33373d; border-radius: 14px; padding: 12px 14px; }
+.full .lab { font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: .3px; margin-bottom: 8px; }
+.full .it { display: block; padding: 9px 0; border-top: 1px solid var(--line); }
+.full .it:first-of-type { border-top: 0; padding-top: 0; }
+.full .it .src { margin-top: 0; }
+.full .it b { font-weight: 500; font-size: 14.5px; display: block; }
+
+.row { display: flex; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--line); }
+.row .t { flex: 1; min-width: 0; }
+.row .src { margin-top: 0; }
+.row h3 { font-size: 16px; line-height: 1.28; margin: 0 0 4px; font-weight: 600; overflow-wrap: anywhere; }
+
+.more { padding: 14px 16px; text-align: center; }
+.btn { padding: 9px 18px; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 14px; }
+.btn.g { background: #26292e; color: var(--text); }
+
+.note { margin: 8px 16px; background: var(--card); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; color: var(--muted); }
+.note.warn { background: #3a2e12; color: #ffd48a; }
+.empty { margin: 14px 16px; background: var(--card); border-radius: 16px; padding: 26px 18px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.empty b { font-size: 19px; }
+.empty span { color: var(--muted); font-size: 14px; }
+
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--bg); border-top: 1px solid #33373d;
+  display: flex; justify-content: space-around;
+  padding: 10px env(safe-area-inset-right) calc(10px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+}
+.tabbar button { flex: 1; background: none; border: 0; padding: 0; font-size: 11px; color: var(--muted); }
+.tabbar button.on { color: var(--accent); font-weight: 600; }
+.tabbar button:disabled { opacity: .45; cursor: default; }

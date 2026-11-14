@@ -8,7 +8,7 @@ import struct
 import zlib
 from pathlib import Path
 
-BG = (11, 15, 20)  # #0b0f14, the app background
+BG = (23, 25, 28)  # #17191c, the app background
 FG = (59, 130, 246)  # blue accent
 SS = 3  # supersampling per axis, for smooth edges
 
