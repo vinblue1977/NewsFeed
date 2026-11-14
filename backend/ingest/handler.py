@@ -10,6 +10,7 @@ from typing import Any
 
 import boto3
 
+from ingest.articles import build_articles, dumps
 from ingest.cluster import cluster_items
 from ingest.config import cached_location
 from ingest.markets import build_markets
@@ -31,8 +32,10 @@ def previous_clusters(s3: Any) -> dict[str, str]:
         return {}
 
 
-def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None) -> dict[str, Any]:
+def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The feed and the articles document (None if it could not be built). Items flagged `full` are exactly those in it."""
     items, status = collect([*SOURCES, *local_sources(location["feeds"])], location["nearby"])
+    bodies = {i["id"]: i.pop("_html") for i in items if "_html" in i}  # the raw HTML never goes into feed.json or clustering
     try:
         clusters = cluster_items(items, previous)
     except Exception:  # noqa: BLE001  (stories without "Full coverage" beat a stale feed)
@@ -40,7 +43,19 @@ def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None)
         clusters = []
         for item in items:
             item.pop("cluster", None)
-    return {"generated": datetime.now(UTC).isoformat(timespec="seconds"), "items": items, "clusters": clusters, "sources": status}
+    generated = datetime.now(UTC).isoformat(timespec="seconds")
+    articles: dict[str, Any] | None = None
+    try:
+        articles, with_text = build_articles(items, bodies, generated)
+        for item in items:
+            if item["id"] in with_text:
+                item["full"] = True
+    except Exception:  # noqa: BLE001  (a feed without full text beats no feed)
+        logger.exception("articles failed; writing the feed without full text")
+        articles = None
+        for item in items:
+            item.pop("full", None)
+    return {"generated": generated, "items": items, "clusters": clusters, "sources": status}, articles
 
 
 def soft(name: str, build: Callable[[], dict[str, Any]]) -> dict[str, Any] | None:
@@ -60,7 +75,7 @@ def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
         s3.put_object(
             Bucket=os.environ["DATA_BUCKET"],
             Key=f"{os.environ['DATA_PREFIX']}/{name}.json",
-            Body=json.dumps(doc, separators=(",", ":")).encode(),
+            Body=dumps(doc),
             ContentType="application/json",
         )
     except Exception:  # noqa: BLE001
@@ -82,15 +97,20 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         "scores": pool.submit(soft, "scores", build_scores),
     }
     statuses: dict[str, str] = {}
+    articles_status = "failed"
     try:
-        feed = build_feed(location, previous_clusters(s3))
+        feed, articles = build_feed(location, previous_clusters(s3))
         failed = [sid for sid, s in feed["sources"].items() if not s["ok"]]
         if len(failed) * 2 > len(feed["sources"]) or not feed["items"]:  # a bad run must not replace a good feed
             raise RuntimeError(f"{len(failed)} of {len(feed['sources'])} sources failed; keeping the previous feed")
+        articles_status = write_doc(s3, "articles", articles)  # first, so a `full` flag in the feed always has its text
+        if articles_status != "ok":
+            for item in feed["items"]:
+                item.pop("full", None)  # the flag must never promise text that is not there
         s3.put_object(
             Bucket=os.environ["DATA_BUCKET"],
             Key=f"{os.environ['DATA_PREFIX']}/feed.json",
-            Body=json.dumps(feed, separators=(",", ":")).encode(),
+            Body=dumps(feed),
             ContentType="application/json",
         )
     finally:
@@ -98,6 +118,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         pool.shutdown(wait=False)
     return {
         "status": "ok",
+        "articles": articles_status,
         **statuses,
         "items": len(feed["items"]),
         "clusters": len(feed["clusters"]),

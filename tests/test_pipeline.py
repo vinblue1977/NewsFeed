@@ -136,7 +136,9 @@ def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "t", "lat_seen": lat})
     result = handler_module.handler({}, object())
     assert result["status"] == "ok" and result["failed"] == [] and result["weather"] == "ok"
-    put, weather_put = s3.puts
+    articles_put, put, weather_put = s3.puts  # the articles first, so a `full` flag in the feed always has its text
+    assert articles_put["Key"] == "data/articles.json" and result["articles"] == "ok"
+    assert set(json.loads(articles_put["Body"])) == {"generated", "articles"}
     assert weather_put["Bucket"] == "bucket" and weather_put["Key"] == "data/weather.json"
     assert weather_put["ContentType"] == "application/json"
     assert json.loads(weather_put["Body"]) == {"generated": "t", "lat_seen": 40.0}
@@ -166,7 +168,7 @@ def test_handler_survives_a_weather_failure(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(handler_module, "build_weather", boom)
     result = handler_module.handler({}, object())
     assert result["status"] == "ok" and result["weather"] == "failed"
-    assert [p["Key"] for p in s3.puts] == ["data/feed.json"]
+    assert [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
 
 
 def test_handler_survives_a_weather_write_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +182,7 @@ def test_handler_survives_a_weather_write_failure(monkeypatch: pytest.MonkeyPatc
     _weather_handler_setup(monkeypatch, s3)
     monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "t"})
     assert handler_module.handler({}, object())["weather"] == "failed"
-    assert [p["Key"] for p in s3.puts] == ["data/feed.json"]
+    assert [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
 
 
 def test_handler_refuses_to_overwrite_with_an_all_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,7 +328,7 @@ def test_a_clustering_failure_still_writes_the_feed(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(handler_module, "SOURCES", (src("a", "a"),))
     monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
     monkeypatch.setattr(handler_module, "cluster_items", boom)
-    feed = handler_module.build_feed({"nearby": [], "feeds": []})
+    feed, _ = handler_module.build_feed({"nearby": [], "feeds": []})
     assert feed["clusters"] == [] and feed["items"]
     assert all("cluster" not in i for i in feed["items"])
 
@@ -361,7 +363,7 @@ def test_handler_writes_markets_and_scores(monkeypatch: pytest.MonkeyPatch) -> N
     assert asked == [["AAA"]]
     written = {p["Key"]: json.loads(p["Body"]) for p in s3.puts}
     assert written["data/markets.json"] == {"generated": "m"} and written["data/scores.json"] == {"generated": "s"}
-    assert set(written) == {"data/feed.json", "data/weather.json", "data/markets.json", "data/scores.json"}
+    assert set(written) == {"data/articles.json", "data/feed.json", "data/weather.json", "data/markets.json", "data/scores.json"}
 
 
 def test_handler_without_tickers_asks_for_the_indexes_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -380,7 +382,7 @@ def test_one_failing_side_document_does_not_affect_the_others(monkeypatch: pytes
     monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})  # markets stays down
     result = handler_module.handler({}, object())
     assert (result["weather"], result["markets"], result["scores"]) == ("ok", "failed", "ok")
-    assert sorted(p["Key"] for p in s3.puts) == ["data/feed.json", "data/scores.json", "data/weather.json"]
+    assert sorted(p["Key"] for p in s3.puts) == ["data/articles.json", "data/feed.json", "data/scores.json", "data/weather.json"]
 
 
 def test_markets_and_scores_are_written_even_when_the_feed_run_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
