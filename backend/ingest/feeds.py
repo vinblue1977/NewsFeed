@@ -169,6 +169,15 @@ def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
         )
         if not (title and link and published):
             continue
+        domain = (urlsplit(link).hostname or "").lower()
+        source_name = source.name
+        if domain == "news.google.com":  # Google News names the real publisher in <source> (and the title's " - Name" tail)
+            domain = source.site or domain  # a `site:` query already says which publisher it is
+            origin = node.find("source")
+            if origin is not None and origin.text:
+                source_name = clean_text(origin.text) or source_name
+                domain = (urlsplit(origin.get("url", "")).hostname or domain).lower()
+                title = title.removesuffix(f" - {source_name}")
         summary = clean_text(
             _child(node, f"{ATOM}summary", f"{ATOM}content") if atom else _child(node, "description"), SUMMARY_CHARS
         )
@@ -176,9 +185,10 @@ def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
             "id": hashlib.sha256(link.encode()).hexdigest()[:16],
             "title": title,
             "url": link,
-            "summary": "" if summary == title else summary,
+            "summary": "" if source.headline_only or summary == title else summary,
             "published": published.isoformat(timespec="seconds"),
-            "source": source.name,
+            "source": source_name,
+            "domain": domain.removeprefix("www."),
             "source_id": source.id,
             "topic": source.topic,
         }

@@ -173,6 +173,9 @@ def test_source_list_is_sane() -> None:
     assert len(ids) == len(set(ids))
     assert all(s.url.startswith("https://") for s in SOURCES)
     assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business"}
+    headline_only = {s.id for s in SOURCES if s.headline_only}
+    assert headline_only == {"gn-ap", "gn-cnn", "gn-reuters"}
+    assert all("news.google.com" in s.url for s in SOURCES if s.id in headline_only)
     assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
 
 
@@ -214,3 +217,47 @@ def test_atom_xhtml_summary_and_padded_values() -> None:
     <summary type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">Hello <b>there</b></div></summary></entry></feed>"""
     item = parse_feed(body, SRC)[0]
     assert item["title"] == "Padded" and item["summary"] == "Hello there"
+
+
+GNEWS = b"""<rss><channel>
+<item><title>Flights grounded across US - Reuters</title><link>https://news.google.com/rss/articles/CBM1?oc=5</link>
+<description>&lt;a href="x"&gt;Flights grounded across US&lt;/a&gt;&amp;nbsp;&lt;font&gt;Reuters&lt;/font&gt;</description>
+<pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate><source url="https://www.reuters.com">Reuters</source></item>
+<item><title>Palatine police charge man - Journal &amp;amp; Topics</title><link>https://news.google.com/rss/articles/CBM2?oc=5</link>
+<pubDate>Fri, 13 Nov 2026 11:00:00 GMT</pubDate>
+<source url="https://www.journal-topics.com">Journal &amp;amp; Topics</source></item>
+</channel></rss>"""
+
+
+def test_google_news_items_use_the_real_publisher_and_are_headline_only() -> None:
+    src = Source("gn", "Reuters", "https://news.google.com/rss/search?q=x", "world", headline_only=True)
+    first, second = parse_feed(GNEWS, src)
+    assert first["title"] == "Flights grounded across US"  # the " - Reuters" tail is dropped
+    assert first["source"] == "Reuters" and first["domain"] == "reuters.com" and first["summary"] == ""
+    assert second["title"] == "Palatine police charge man" and second["source"] == "Journal & Topics"
+    assert second["domain"] == "journal-topics.com"
+
+
+def test_plain_items_get_their_link_host_as_domain() -> None:
+    assert parse_feed(RSS, SRC)[0]["domain"] == "example.com"
+
+
+def test_a_source_element_in_an_ordinary_feed_does_not_rename_the_publisher() -> None:
+    body = (
+        b"<rss><channel><item><title>Story - Feed Title</title><link>https://news.example.com/a</link>"
+        b'<pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate><source url="https://other.example/feed.xml">Feed Title</source>'
+        b"</item></channel></rss>"
+    )
+    item = parse_feed(body, SRC)[0]
+    assert item["source"] == "Test News" and item["domain"] == "news.example.com" and item["title"] == "Story - Feed Title"
+
+
+def test_google_news_item_without_a_source_element_falls_back_to_the_queried_site() -> None:
+    body = (
+        b"<rss><channel><item><title>Flights grounded</title><link>https://news.google.com/rss/articles/X</link>"
+        b"<pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate></item></channel></rss>"
+    )
+    src = Source("gn", "Reuters", "https://news.google.com/rss/search?q=x", "world", headline_only=True, site="reuters.com")
+    assert parse_feed(body, src)[0]["domain"] == "reuters.com"
+    unknown = Source("gl", "g", "https://news.google.com/rss/search?q=x", "local", trusted=True)
+    assert parse_feed(body, unknown)[0]["domain"] == "news.google.com"

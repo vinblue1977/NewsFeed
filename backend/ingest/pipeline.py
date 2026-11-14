@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ingest.feeds import FeedError, fetch, parse_feed
+from ingest.filters import block_reason
 from ingest.sources import Source
 
 MAX_AGE = timedelta(hours=72)
@@ -19,7 +20,10 @@ RUN_BUDGET_SECONDS = 40  # whole run; the Lambda timeout is 60 s and the feed mu
 
 def local_sources(urls: Iterable[str]) -> list[Source]:
     """Sources for the feed URLs in the location parameter. Their items are kept only if they mention a nearby place."""
-    return [Source(id=f"local-{i}", name=_host(url), url=url, topic="local") for i, url in enumerate(urls)]
+    return [
+        Source(id=f"local-{i}", name=_host(url), url=url, topic="local", trusted=urlsplit(url).hostname == "news.google.com")
+        for i, url in enumerate(urls)
+    ]
 
 
 def _host(url: str) -> str:
@@ -73,9 +77,11 @@ def collect(
     results = [f.result() if f.done() else (source, [], "timed out") for source, f in futures]
 
     items: dict[str, dict[str, Any]] = {}
+    headlines: set[tuple[str, str]] = set()
     status: dict[str, dict[str, Any]] = {}
     for source, parsed, error in results:
         kept = 0
+        blocked = 0
         for item in sorted(parsed, key=lambda i: i["published"], reverse=True):
             if kept >= MAX_PER_SOURCE:  # the cap counts stories that survive the filters, not raw entries
                 break
@@ -86,15 +92,26 @@ def collect(
                 continue
             if published > now:  # a small clock or timezone slip: never show a story from the future
                 item["published"] = now.isoformat(timespec="seconds")
+            if block_reason(item):
+                blocked += 1
+                continue
             if source.topic == "local":
                 place = _mentions(item, place_re, places) if place_re else None
-                if not place:
+                if not place and not source.trusted:
                     continue
-                item["place"] = place
+                if place:  # a trusted search (already scoped by its query) keeps items that name no place, unlabelled
+                    item["place"] = place
             key = _dedupe_key(item["url"])
-            if key in items:
+            same_headline = (item["source"].lower(), item["title"].lower())  # a direct feed and Google News carry one story
+            if key in items or same_headline in headlines:
                 continue
             items[key] = item
+            headlines.add(same_headline)
             kept += 1
-        status[source.id] = {"ok": error is None, "items": kept, **({"error": error} if error else {})}
+        status[source.id] = {
+            "ok": error is None,
+            "items": kept,
+            **({"blocked": blocked} if blocked else {}),
+            **({"error": error} if error else {}),
+        }
     return sorted(items.values(), key=lambda i: i["published"], reverse=True), status

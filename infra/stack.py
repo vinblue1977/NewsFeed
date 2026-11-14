@@ -153,6 +153,9 @@ class NewsStack(Stack):
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )
         data_bucket.grant_put(fn, f"{DATA_PREFIX}/*")  # pyright: ignore[reportArgumentType]
+        fn.add_to_role_policy(  # reads back last run's feed so story clusters keep their ids: one object, one action
+            iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/feed.json")])
+        )
         fn.add_to_role_policy(  # exactly one parameter, one action
             iam.PolicyStatement(
                 actions=["ssm:GetParameter"],
