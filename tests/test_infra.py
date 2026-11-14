@@ -218,7 +218,7 @@ def test_ingest_can_read_back_only_the_feed_object() -> None:
 
 
 def test_headers_policy_has_permissions_policy_and_no_remote_images() -> None:
-    template = Template.from_stack(NewsStack(cdk.App(), "T", env=cdk.Environment(account="123456789012", region="us-east-2")))
+    template = _synthesized(ACCOUNT)[1]
     for policy in template.find_resources("AWS::CloudFront::ResponseHeadersPolicy").values():
         config = policy["Properties"]["ResponseHeadersPolicyConfig"]
         assert "img-src 'self';" in config["SecurityHeadersConfig"]["ContentSecurityPolicy"]["ContentSecurityPolicy"]
