@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadFeed } from './api';
+import { loadFeed, loadWeather } from './api';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, safeUrl, stories, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Feed, Topic } from './types';
+import { degrees, describe, isFresh, type Weather } from './weather';
 
 const PAGE = 30;
 const TICK_MS = 60_000;
@@ -28,6 +29,30 @@ function saveView(view: View): void {
 
 type Load = { state: 'loading' } | { state: 'error' } | { state: 'ready'; feed: Feed };
 
+function WeatherStrip({ weather, stale }: { weather: Weather; stale: boolean }) {
+  if (stale) {  // never present an old forecast or its alerts as current
+    return (
+      <section class="wx" aria-label="Local weather">
+        <div><div class="wx-k">LOCAL WEATHER</div><div class="wx-sub">Forecast is out of date. Check the National Weather Service for alerts.</div></div>
+      </section>
+    );
+  }
+  const { label, icon } = describe(weather.code, weather.isDay);
+  const range = weather.high !== null && weather.low !== null ? ` · H ${degrees(weather.high)} L ${degrees(weather.low)}` : '';
+  const alert = weather.alerts[0];
+  return (
+    <section class="wx" aria-label="Local weather">
+      <div>
+        <div class="wx-k">LOCAL WEATHER</div>
+        <div>{icon} {label}{range}</div>
+        {alert && <div class="wx-alert">⚠ {alert.event}{weather.alerts.length > 1 ? ` +${weather.alerts.length - 1}` : ''} · National Weather Service</div>}
+        {!weather.alertsOk && <div class="wx-sub">Weather alerts unavailable</div>}
+      </div>
+      <b>{degrees(weather.temp)}</b>
+    </section>
+  );
+}
+
 function Source({ name, when, extra }: { name: string; when: string; extra?: string }) {
   return (
     <div class="src">
@@ -43,10 +68,12 @@ export function App() {
   const [view, setView] = useState<View>(savedView);
   const [shown, setShown] = useState(PAGE);
   const [now, setNow] = useState(() => new Date());
+  const [weather, setWeather] = useState<Weather | undefined>();
 
   const latest = useRef(0);
   const refresh = () => {
     const mine = ++latest.current;  // a slower, older response must not overwrite a newer one
+    void loadWeather().then((w) => { if (w) setWeather(w); });  // independent of the feed; a failed refresh keeps the last good one
     loadFeed().then(
       (feed) => { if (mine === latest.current) setLoad({ state: 'ready', feed }); },
       () => { if (mine === latest.current) setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' })); },
@@ -81,6 +108,7 @@ export function App() {
     setTopic('all');  // the Briefing covers everything, so a topic chosen earlier must not stay hidden behind it
     setShown(PAGE);
   };
+  const weatherStale = weather ? !isFresh(weather.generated, now) : false;
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   return (
@@ -116,6 +144,7 @@ export function App() {
 
         {isBrief && brief && (
           <>
+            {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
             {brief.top && (
               <>
                 <div class="grp"><i style={{ background: BRIEF_TOP_COLOR }} />Top story</div>
@@ -163,6 +192,7 @@ export function App() {
           </>
         )}
 
+        {!isBrief && weather && <WeatherStrip weather={weather} stale={weatherStale} />}
         {!isBrief && rest.slice(0, shown).map((s) => (
           <a class="row" key={s.item.id} href={safeUrl(s.item.url)} target="_blank" rel="noopener noreferrer">
             <div class="t">
