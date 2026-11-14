@@ -10,21 +10,24 @@ freshness itself."""
 
 import json
 import math
-from concurrent.futures import ThreadPoolExecutor, wait
+import time
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
-from ingest.config import MAX_TICKERS, SYMBOL
+from ingest.config import SYMBOL
 from ingest.feeds import USER_AGENT, FeedError, clean_text, fetch
 
 YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
 JSON_ACCEPT = "application/json"
 INDEXES = ("^GSPC", "^IXIC", "^DJI", "^NSEI", "^BSESN")
 SERIES_POINTS = 40  # sparklines need no more than this
+HISTORY_TTL_SECONDS = 6 * 3600  # daily closes change once a day: refetch a few times a day, not every 5 minutes
+_HISTORY: dict[str, tuple[float, list[float]]] = {}  # per Lambda container; a cold start simply fetches again
+HISTORY_POINTS = 70  # the 3-month graph: about 63 trading days
 WAIT_SECONDS = 8  # a hard cap on the whole fetch; the socket timeout alone can run longer than the fetch deadline
 DEADLINE_SECONDS = 6
-MAX_WORKERS = len(INDEXES) + MAX_TICKERS  # one worker per symbol, so no symbol waits in a queue for a slot
 RECENT_TRADE_SECONDS = 30 * 60  # the last trade must be this recent for the market to count as open
 
 
@@ -39,8 +42,21 @@ def _num(value: Any, places: int = 2) -> float | None:
     return round(float(value), places)
 
 
-def chart_url(symbol: str) -> str:
-    return f"{YAHOO_CHART}/{quote(symbol, safe='')}?interval=5m&range=1d"
+def chart_url(symbol: str, interval: str = "5m", span: str = "1d") -> str:
+    return f"{YAHOO_CHART}/{quote(symbol, safe='')}?interval={interval}&range={span}"
+
+
+def history_url(symbol: str) -> str:
+    return chart_url(symbol, "1d", "3mo")
+
+
+def parse_history(body: bytes) -> list[float]:
+    """The daily closes of a 3-month chart, oldest first (empty if the document is not usable)."""
+    try:
+        closes = json.loads(body)["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        return downsample([v for v in (_num(c) for c in closes) if v is not None], HISTORY_POINTS)
+    except ValueError, KeyError, IndexError, TypeError, AttributeError:
+        return []
 
 
 def downsample(values: list[float], points: int = SERIES_POINTS) -> list[float]:
@@ -75,6 +91,9 @@ def parse_quote(symbol: str, body: bytes, now: datetime) -> dict[str, Any]:
         name = clean_text(meta.get("shortName") or meta.get("longName"), 60)
         currency = clean_text(meta.get("currency"), 8)
         series = [v for v in (_num(c) for c in closes) if v is not None]
+        opens = ((result.get("indicators") or {}).get("quote") or [{}])[0].get("open") or []
+        day_open = next((v for v in (_num(o) for o in opens) if v is not None), None)  # the session's first 5-minute open
+        day_high, day_low = _num(meta.get("regularMarketDayHigh")), _num(meta.get("regularMarketDayLow"))
     except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
         raise MarketsError(f"{symbol}: quote is not usable ({type(exc).__name__})") from exc
     if price is None:
@@ -89,6 +108,9 @@ def parse_quote(symbol: str, body: bytes, now: datetime) -> dict[str, Any]:
         "change": change,
         "change_pct": round(change / prev * 100, 2) if change is not None and prev else None,
         "currency": currency,
+        "day_open": day_open,
+        "day_high": day_high,
+        "day_low": day_low,
         "last_trade": _iso(traded),
         # open = inside the regular session AND traded recently (on an exchange holiday the session window still looks current,
         # but the last trade is from the previous day)
@@ -108,18 +130,36 @@ def _fetch_quote(symbol: str, now: datetime, get: Any) -> dict[str, Any]:
         return {"symbol": symbol, "ok": False}
 
 
+def _fetch_history(symbol: str, get: Any) -> list[float]:
+    cached = _HISTORY.get(symbol)
+    if cached and time.monotonic() - cached[0] < HISTORY_TTL_SECONDS:
+        return cached[1]
+    try:
+        values = parse_history(get(history_url(symbol)))
+    except FeedError:
+        return cached[1] if cached else []  # an old graph beats none
+    if values:
+        _HISTORY[symbol] = (time.monotonic(), values)
+    return values
+
+
 def build_markets(tickers: list[str] | None = None, *, getter: Any = None, now: datetime | None = None) -> dict[str, Any]:
-    """The markets document: {"generated", "indexes": [...], "tickers": [...]}. Raises MarketsError if nothing could be read."""
+    """The markets document: {"generated", "indexes": [...], "tickers": [...]}; each watchlist quote also carries a 3-month
+    daily `history`. Raises MarketsError if no more than half of the quotes could be read."""
     now = now or datetime.now(UTC)
     get = getter or (lambda url: fetch(url, accept=JSON_ACCEPT, deadline_seconds=DEADLINE_SECONDS, user_agent=USER_AGENT))
     # Case-insensitive, and an index named in the watchlist is not shown twice (it is already in the strip).
     extra = [t for t in dict.fromkeys(t.upper() for t in tickers or []) if SYMBOL.fullmatch(t) and t not in INDEXES]
     symbols = [*INDEXES, *extra]
-    pool = ThreadPoolExecutor(max_workers=min(len(symbols), MAX_WORKERS))
+    pool = ThreadPoolExecutor(max_workers=len(symbols) + len(extra))
     try:
         futures = {s: pool.submit(_fetch_quote, s, now, get) for s in symbols}
-        wait(futures.values(), timeout=WAIT_SECONDS)
+        histories = {s: pool.submit(_fetch_history, s, get) for s in extra}  # a missing graph never fails the quote
+        everything: list[Future[Any]] = [*futures.values(), *histories.values()]
+        wait(everything, timeout=WAIT_SECONDS)
         quotes = {s: f.result() if f.done() else {"symbol": s, "ok": False} for s, f in futures.items()}
+        for s in extra:
+            quotes[s]["history"] = histories[s].result() if histories[s].done() else []
     finally:
         pool.shutdown(wait=False, cancel_futures=True)  # a stalled request is abandoned, not waited for
     good = sum(q["ok"] for q in quotes.values())

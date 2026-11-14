@@ -9,6 +9,12 @@ from ingest import markets
 from ingest.feeds import FeedError
 from ingest.markets import INDEXES, MarketsError, build_markets, chart_url, downsample, parse_quote
 
+
+@pytest.fixture(autouse=True)
+def fresh_history_cache() -> None:
+    markets._HISTORY.clear()
+
+
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=UTC)
 TS = int(NOW.timestamp())
 
@@ -21,13 +27,20 @@ def chart(price: Any = 105.5, prev: Any = 100.0, closes: Any = None, **meta: Any
         "regularMarketPrice": price,
         "regularMarketTime": TS - 60,  # traded a minute ago
         "chartPreviousClose": prev,
+        "regularMarketDayHigh": 106.0,
+        "regularMarketDayLow": 99.0,
         "currentTradingPeriod": {"regular": {"start": TS - 3600, "end": TS + 3600}},
         **meta,
     }
     doc_meta = {k: v for k, v in doc_meta.items() if v is not _MISSING}
     closes = [101.0, 102.5, None, 105.5] if closes is None else closes
     return json.dumps(
-        {"chart": {"result": [{"meta": doc_meta, "indicators": {"quote": [{"close": closes}]}}], "error": None}}
+        {
+            "chart": {
+                "result": [{"meta": doc_meta, "indicators": {"quote": [{"close": closes, "open": [None, 100.5, 101.0, 102.0]}]}}],
+                "error": None,
+            }
+        }
     ).encode()
 
 
@@ -45,6 +58,9 @@ def test_parse_quote_computes_the_change() -> None:
         "change": 5.5,
         "change_pct": 5.5,
         "currency": "USD",
+        "day_open": 100.5,  # the first open that is not a gap
+        "day_high": 106.0,
+        "day_low": 99.0,
         "last_trade": "2026-11-13T14:59:00+00:00",
         "open": True,
         "series": [101.0, 102.5, 105.5],  # the gap is dropped
@@ -185,7 +201,7 @@ def test_one_bad_symbol_does_not_sink_the_others() -> None:
     by_symbol = {q["symbol"]: q["ok"] for q in [*doc["indexes"], *doc["tickers"]]}
     assert by_symbol["^DJI"] is False and by_symbol["BAD"] is False and by_symbol["MISSING"] is False
     assert by_symbol["^GSPC"] is True
-    assert {"symbol": "BAD", "ok": False} in doc["tickers"]
+    assert {"symbol": "BAD", "ok": False, "history": []} in doc["tickers"]
 
 
 def test_tickers_are_deduplicated_and_validated() -> None:
@@ -197,7 +213,7 @@ def test_tickers_are_deduplicated_and_validated() -> None:
 
     doc = build_markets(["AAA", "aaa", "AAA", "^GSPC", "^gspc", "bad symbol", "x" * 40, "..", "-AAA"], getter=get, now=NOW)
     assert [q["symbol"] for q in doc["tickers"]] == ["AAA"]  # case-insensitive, no index repeats, no odd symbols
-    assert len(seen) == len(INDEXES) + 1
+    assert len(seen) == len(INDEXES) + 2  # each index once; the one ticker twice (quote and 3-month history)
 
 
 def test_no_tickers_is_fine() -> None:
@@ -231,8 +247,8 @@ def test_a_stalled_request_times_out_instead_of_hanging(monkeypatch: pytest.Monk
 
 
 def test_every_symbol_gets_a_worker_so_none_waits_in_a_queue_and_times_out() -> None:
-    symbols = len(INDEXES) + 20
-    barrier = threading.Barrier(symbols, timeout=3)  # releases only if all 25 requests are in flight at the same time
+    symbols = len(INDEXES) + 2 * 20  # a quote request for every symbol and a history request for every ticker
+    barrier = threading.Barrier(symbols, timeout=3)  # releases only if all 45 requests are in flight at the same time
 
     def together(url: str) -> bytes:
         barrier.wait()  # with fewer workers than symbols this never completes, and BrokenBarrierError fails the quote
@@ -240,7 +256,6 @@ def test_every_symbol_gets_a_worker_so_none_waits_in_a_queue_and_times_out() -> 
 
     doc = build_markets([f"T{i}" for i in range(20)], getter=together, now=NOW)
     assert all(q["ok"] for q in [*doc["indexes"], *doc["tickers"]]) and len(doc["tickers"]) == 20
-    assert markets.MAX_WORKERS == symbols
 
 
 def test_default_getter_uses_json_accept_and_short_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,3 +270,65 @@ def test_default_getter_uses_json_accept_and_short_deadline(monkeypatch: pytest.
     assert len(calls) == len(INDEXES)
     expected = {"accept": markets.JSON_ACCEPT, "deadline_seconds": markets.DEADLINE_SECONDS, "user_agent": markets.USER_AGENT}
     assert all(kw == expected for _, kw in calls)
+
+
+def history_chart(closes: list[Any]) -> bytes:
+    return json.dumps({"chart": {"result": [{"meta": {}, "indicators": {"quote": [{"close": closes}]}}]}}).encode()
+
+
+def test_parse_history_keeps_the_finite_daily_closes() -> None:
+    assert markets.parse_history(history_chart([1.0, None, 2.5, "x", 3.0])) == [1.0, 2.5, 3.0]
+    assert len(markets.parse_history(history_chart([float(i) for i in range(200)]))) == markets.HISTORY_POINTS
+    for bad in (b"not json", b"{}", b'{"chart": {"result": []}}'):
+        assert markets.parse_history(bad) == []
+
+
+def test_watchlist_quotes_carry_a_three_month_history_and_indexes_do_not() -> None:
+    def get(url: str) -> bytes:
+        return history_chart([10.0, 11.0, 12.0]) if "range=3mo" in url else chart()
+
+    doc = build_markets(["AAA"], getter=get, now=NOW)
+    assert doc["tickers"][0]["history"] == [10.0, 11.0, 12.0] and doc["tickers"][0]["ok"]
+    assert all("history" not in q for q in doc["indexes"])
+
+
+def test_a_failed_history_request_leaves_the_quote_without_a_graph() -> None:
+    def get(url: str) -> bytes:
+        if "range=3mo" in url:
+            raise FeedError("fetch failed: 500")
+        return chart()
+
+    doc = build_markets(["AAA"], getter=get, now=NOW)
+    assert doc["tickers"][0]["ok"] and doc["tickers"][0]["history"] == []
+
+
+def test_history_is_fetched_once_then_reused_until_it_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+
+    def get(url: str) -> bytes:
+        urls.append(url)
+        return history_chart([1.0, 2.0]) if "range=3mo" in url else chart()
+
+    clock = [1000.0]
+    monkeypatch.setattr(markets.time, "monotonic", lambda: clock[0])
+    build_markets(["AAA"], getter=get, now=NOW)
+    build_markets(["AAA"], getter=get, now=NOW)
+    assert sum("range=3mo" in u for u in urls) == 1  # the second refresh reused it
+    clock[0] += markets.HISTORY_TTL_SECONDS + 1
+    build_markets(["AAA"], getter=get, now=NOW)
+    assert sum("range=3mo" in u for u in urls) == 2
+
+
+def test_an_old_graph_is_kept_when_the_refetch_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [1000.0]
+    monkeypatch.setattr(markets.time, "monotonic", lambda: clock[0])
+    ok = lambda url: history_chart([1.0, 2.0]) if "range=3mo" in url else chart()  # noqa: E731
+    build_markets(["AAA"], getter=ok, now=NOW)
+    clock[0] += markets.HISTORY_TTL_SECONDS + 1
+
+    def down(url: str) -> bytes:
+        if "range=3mo" in url:
+            raise FeedError("fetch failed: 429")
+        return chart()
+
+    assert build_markets(["AAA"], getter=down, now=NOW)["tickers"][0]["history"] == [1.0, 2.0]

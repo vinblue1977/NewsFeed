@@ -13,7 +13,7 @@ class Source:
     name: str
     url: str
     topic: str  # us | world | india | sports | tech | business | local
-    subtopic: str | None = None  # sports: nfl | cricket | tennis
+    subtopic: str | None = None  # sports: nfl | cricket | tennis; business: markets
     enabled: bool = True
     metered: bool = False
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
@@ -67,6 +67,9 @@ SOURCES: tuple[Source, ...] = (
     _s("bbc-tech", "BBC News", "https://feeds.bbci.co.uk/news/technology/rss.xml", "tech"),
     # Business
     _s("marketwatch", "MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "business"),
+    # Markets-only feeds come first: a story in both lists keeps the first one's "markets" tag
+    _s("cnbc-finance", "CNBC", "https://www.cnbc.com/id/10000664/device/rss/rss.html", "business", "markets"),
+    _s("cnbc-investing", "CNBC", "https://www.cnbc.com/id/15839069/device/rss/rss.html", "business", "markets"),
     _s("cnbc", "CNBC", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "business"),
     _s("et", "Economic Times", "https://economictimes.indiatimes.com/rssfeedstopstories.cms", "business"),
 )

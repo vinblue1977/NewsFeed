@@ -6,13 +6,13 @@ import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Section, Story } from './feed';
-import { formatChange, isFresh as marketsFresh, type Markets, priceLabel, type Quote, sparkline } from './markets';
+import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
 import { loadSettings, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
-const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings';
+const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings' || kind === 'quote';
 const PAGE = 30;
 const TICK_MS = 60_000;
 const COVERAGE_SHOWN = 8;
@@ -255,18 +255,67 @@ function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; curren
 }
 
 function QuoteRow({ q, index = false }: { q: Quote; index?: boolean }) {
-  const { text, dir } = formatChange(q.change, q.changePct);
+  const { text, dir } = formatMove(q.change, q.changePct, q.currency);
   const points = sparkline(q.series);
   return (
-    <li class="q">
-      <div class="qn"><b>{q.name}</b><span>{q.symbol.replace('^', '')}</span></div>
-      {points && (
-        <svg class={`qs ${dir}`} viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
-          <polyline points={points} fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" />
-        </svg>
-      )}
-      <div class="qp"><b>{priceLabel(q.price, q.currency, index)}</b><span class={`chg ${dir}`}>{text}</span></div>
+    <li>
+      <a class="q" href={`#/quote/${encodeURIComponent(q.symbol)}`}>
+        <div class="qn"><b>{q.name}</b><span>{q.symbol.replace('^', '')}</span></div>
+        {points && (
+          <svg class={`qs ${dir}`} viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+            <polyline points={points} fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" />
+          </svg>
+        )}
+        <div class="qp"><b>{priceLabel(q.price, q.currency, index)}</b><span class={`chg ${dir}`}>{text}</span></div>
+      </a>
     </li>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return value ? <li><span>{label}</span><b>{value}</b></li> : null;
+}
+
+/** One watchlist symbol: today's numbers and the 3-month graph. */
+function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Markets | undefined; loaded: boolean; symbol: string; now: Date; canGoBack: boolean }) {
+  const q = markets?.tickers.find((t) => t.symbol === symbol);
+  const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/markets'; };
+  const move = q ? formatMove(q.change, q.changePct, q.currency) : undefined;
+  const trend = q ? historyChange(q.history) : undefined;
+  const trendMove = trend && q ? formatMove(trend.change, trend.pct, q.currency) : undefined;
+  const points = q ? sparkline(q.history, 300, 120) : '';
+  const lo = q && q.history.length > 1 ? Math.min(...q.history) : undefined;
+  const hi = q && q.history.length > 1 ? Math.max(...q.history) : undefined;
+  return (
+    <div class="wrap">
+      <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>
+      <header class="hdr"><div><div class="e">{symbol}</div><h1>{q?.name ?? symbol}</h1></div></header>
+      {!q && <p class="note">{markets || loaded ? 'No quote for this symbol right now.' : 'Loading…'}</p>}
+      {q && move && (
+        <>
+          <div class="big"><b>{priceLabel(q.price, q.currency, false)}</b><span class={`chg ${move.dir}`}>{move.text}</span></div>
+          <div class="grp">3 months</div>
+          {points ? (
+            <div class="card gr">
+              <svg class={`qs ${trendMove?.dir ?? 'flat'}`} viewBox="0 0 300 120" preserveAspectRatio="none" role="img"
+                aria-label={`Price over the last three months${trendMove ? `, ${trendMove.text}` : ''}`}>
+                <polyline points={points} fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" />
+              </svg>
+              <div class="gl"><span>Low {lo !== undefined ? priceLabel(lo, q.currency, false) : ''}</span><span>High {hi !== undefined ? priceLabel(hi, q.currency, false) : ''}</span></div>
+              {trendMove && <div class={`chg ${trendMove.dir}`}>{trendMove.text} over 3 months</div>}
+            </div>
+          ) : <p class="note">The 3-month history is not available right now.</p>}
+          <div class="grp">Today</div>
+          <ul class="set stats">
+            <Stat label="Previous close" value={q.prevClose !== null ? priceLabel(q.prevClose, q.currency, false) : ''} />
+            <Stat label="Open" value={q.dayOpen !== null ? priceLabel(q.dayOpen, q.currency, false) : ''} />
+            <Stat label="Day range" value={dayRange(q.dayLow, q.dayHigh, q.currency)} />
+            <Stat label="Last trade" value={q.lastTrade ? timeAgo(q.lastTrade, now) : ''} />
+          </ul>
+          <p class="fine">Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -280,8 +329,9 @@ function MarketsScreen({ markets, hasKey, loaded, now, hidden, feed, onAllBusine
   const news = useMemo(() => {
     if (!feed) return [];
     const top = topStory(stories(feed, 'all'), now);  // the For You top story is not repeated here
-    return stories(feed, 'business').filter((s) => s.item.id !== top?.item.id).slice(0, 5);
-  }, [feed, now]);
+    const terms = watchTerms(markets?.tickers ?? []);
+    return stories(feed, 'business').filter((s) => s.item.id !== top?.item.id && isMarketNews(s.item, terms)).slice(0, 5);
+  }, [feed, now, markets]);
   return (
     <div class="wrap">
       <header class="hdr">
@@ -546,6 +596,15 @@ export function App() {
         <PullIndicator {...pull} />
         <MarketsScreen markets={markets} hasKey={settings.watchKey !== ''} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers}
           feed={feed} onAllBusiness={() => { setTopic('business'); setView('feed'); location.hash = '#'; }} />
+        <TabBar current="markets" />
+      </>
+    );
+  }
+
+  if (route.kind === 'quote') {
+    return (
+      <>
+        <QuoteScreen key={route.id} markets={markets} loaded={marketsLoaded} symbol={route.id} now={now} canGoBack={inAppNavs.current > 0} />
         <TabBar current="markets" />
       </>
     );
