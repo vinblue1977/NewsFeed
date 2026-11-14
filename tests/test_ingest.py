@@ -62,3 +62,17 @@ def test_cached_location_reads_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cached_location() == cached_location() == LOCATION
     assert len(calls) == 1
     cached_location.cache_clear()
+
+
+@pytest.mark.parametrize("tickers", [[], ["^GSPC", "AAA.NS", "BTC-USD", "EURUSD=X"]])
+def test_parse_location_accepts_optional_tickers(tickers: list[str]) -> None:
+    assert parse_location(json.dumps({**LOCATION, "tickers": tickers}))["tickers"] == tickers
+
+
+@pytest.mark.parametrize(
+    "tickers",
+    ["AAA", [1], [""], ["has space"], ["x" * 16], ["AAA;rm"], [".."], ["."], ["-AAA"], [f"T{i}" for i in range(21)], None],
+)
+def test_parse_location_rejects_bad_tickers(tickers: object) -> None:
+    with pytest.raises(ConfigError, match="tickers"):
+        parse_location(json.dumps({**LOCATION, "tickers": tickers}))

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
@@ -11,7 +12,9 @@ import boto3
 
 from ingest.cluster import cluster_items
 from ingest.config import cached_location
+from ingest.markets import build_markets
 from ingest.pipeline import collect, local_sources
+from ingest.scores import build_scores
 from ingest.sources import SOURCES
 from ingest.weather import build_weather
 
@@ -40,40 +43,45 @@ def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None)
     return {"generated": datetime.now(UTC).isoformat(timespec="seconds"), "items": items, "clusters": clusters, "sources": status}
 
 
-def fetch_weather(location: dict[str, Any]) -> dict[str, Any] | None:
-    """The weather document, or None. Fail-soft: weather trouble is logged, never raised, so the feed is unaffected."""
+def soft(name: str, build: Callable[[], dict[str, Any]]) -> dict[str, Any] | None:
+    """A side document (weather, markets, scores), or None. Fail-soft: trouble is logged, never raised; the feed is unaffected."""
     try:
-        return build_weather(location["lat"], location["lon"])
-    except Exception:  # noqa: BLE001  (a missing forecast must not fail the ingest run; the old weather.json stays)
-        logger.exception("weather update failed")
+        return build()
+    except Exception:  # noqa: BLE001  (a missing side document must not fail the ingest run; its old file stays)
+        logger.exception("%s update failed", name)
         return None
 
 
-def write_weather(s3: Any, weather: dict[str, Any] | None) -> str:
-    """Write data/weather.json ("failed" if there is nothing to write or the write fails). The page shows its `generated` age."""
-    if weather is None:
+def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
+    """Write data/<name>.json ("failed" if there is nothing to write or the write fails). Each document carries `generated`."""
+    if doc is None:
         return "failed"
     try:
         s3.put_object(
             Bucket=os.environ["DATA_BUCKET"],
-            Key=f"{os.environ['DATA_PREFIX']}/weather.json",
-            Body=json.dumps(weather, separators=(",", ":")).encode(),
+            Key=f"{os.environ['DATA_PREFIX']}/{name}.json",
+            Body=json.dumps(doc, separators=(",", ":")).encode(),
             ContentType="application/json",
         )
     except Exception:  # noqa: BLE001
-        logger.exception("could not write weather.json")
+        logger.exception("could not write %s.json", name)
         return "failed"
     return "ok"
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed) and data/weather.json.
-    The weather is fetched alongside the feed and written even when the feed run is rejected, so one never holds up the other."""
+    """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
+    markets.json and scores.json. Those three are fetched alongside the feed and written even when the feed run is rejected,
+    so none of them holds up another."""
     s3 = boto3.client("s3")
     location = cached_location()
-    pool = ThreadPoolExecutor(max_workers=1)
-    weather_future = pool.submit(fetch_weather, location)
-    weather_status = "failed"
+    pool = ThreadPoolExecutor(max_workers=3)
+    side = {
+        "weather": pool.submit(soft, "weather", lambda: build_weather(location["lat"], location["lon"])),
+        "markets": pool.submit(soft, "markets", lambda: build_markets(location.get("tickers", []))),
+        "scores": pool.submit(soft, "scores", build_scores),
+    }
+    statuses: dict[str, str] = {}
     try:
         feed = build_feed(location, previous_clusters(s3))
         failed = [sid for sid, s in feed["sources"].items() if not s["ok"]]
@@ -86,11 +94,11 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             ContentType="application/json",
         )
     finally:
-        weather_status = write_weather(s3, weather_future.result())
+        statuses = {name: write_doc(s3, name, future.result()) for name, future in side.items()}
         pool.shutdown(wait=False)
     return {
         "status": "ok",
-        "weather": weather_status,
+        **statuses,
         "items": len(feed["items"]),
         "clusters": len(feed["clusters"]),
         "sources": len(feed["sources"]),

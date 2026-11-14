@@ -1,0 +1,216 @@
+import json
+import threading
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+
+from ingest import markets
+from ingest.feeds import FeedError
+from ingest.markets import INDEXES, MarketsError, build_markets, chart_url, downsample, parse_quote
+
+NOW = datetime(2026, 11, 13, 15, 0, tzinfo=UTC)
+TS = int(NOW.timestamp())
+
+
+def chart(price: Any = 105.5, prev: Any = 100.0, closes: Any = None, **meta: Any) -> bytes:
+    doc_meta: dict[str, Any] = {
+        "currency": "USD",
+        "symbol": "AAA",
+        "shortName": "Example Corp",
+        "regularMarketPrice": price,
+        "regularMarketTime": TS - 60,  # traded a minute ago
+        "chartPreviousClose": prev,
+        "currentTradingPeriod": {"regular": {"start": TS - 3600, "end": TS + 3600}},
+        **meta,
+    }
+    doc_meta = {k: v for k, v in doc_meta.items() if v is not _MISSING}
+    closes = [101.0, 102.5, None, 105.5] if closes is None else closes
+    return json.dumps(
+        {"chart": {"result": [{"meta": doc_meta, "indicators": {"quote": [{"close": closes}]}}], "error": None}}
+    ).encode()
+
+
+_MISSING = object()
+
+
+def test_parse_quote_computes_the_change() -> None:
+    q = parse_quote("AAA", chart(), NOW)
+    assert q == {
+        "symbol": "AAA",
+        "name": "Example Corp",
+        "ok": True,
+        "price": 105.5,
+        "prev_close": 100.0,
+        "change": 5.5,
+        "change_pct": 5.5,
+        "currency": "USD",
+        "open": True,
+        "series": [101.0, 102.5, 105.5],  # the gap is dropped
+    }
+
+
+def test_parse_quote_knows_when_the_market_is_closed() -> None:
+    later = datetime(2026, 11, 13, 21, 0, tzinfo=UTC)
+    assert parse_quote("AAA", chart(), later)["open"] is False
+
+
+def test_parse_quote_without_a_trading_period_is_not_open() -> None:
+    assert parse_quote("AAA", chart(currentTradingPeriod=_MISSING), NOW)["open"] is False
+
+
+def test_an_exchange_holiday_is_not_open_even_inside_the_session_window() -> None:
+    assert parse_quote("AAA", chart(regularMarketTime=TS - 86400), NOW)["open"] is False
+
+
+@pytest.mark.parametrize("traded", [_MISSING, TS + 600, "x"])
+def test_open_needs_a_sane_last_trade_time(traded: Any) -> None:
+    assert parse_quote("AAA", chart(regularMarketTime=traded), NOW)["open"] is False
+
+
+def test_parse_quote_falls_back_to_previous_close() -> None:
+    q = parse_quote("AAA", chart(prev=None, chartPreviousClose=None, previousClose=50.0, regularMarketPrice=55.0), NOW)
+    assert q["prev_close"] == 50.0 and q["change"] == 5.0 and q["change_pct"] == 10.0
+
+
+def test_parse_quote_without_any_previous_close_has_no_change() -> None:
+    q = parse_quote("AAA", chart(prev=None, chartPreviousClose=None), NOW)
+    assert q["prev_close"] is None and q["change"] is None and q["change_pct"] is None
+
+
+def test_parse_quote_name_falls_back_to_long_name_then_symbol() -> None:
+    assert parse_quote("AAA", chart(shortName=None, longName="Long Name Inc"), NOW)["name"] == "Long Name Inc"
+    assert parse_quote("AAA", chart(shortName=None), NOW)["name"] == "AAA"
+
+
+def test_parse_quote_strips_markup_from_names() -> None:
+    assert parse_quote("AAA", chart(shortName="<b>Bold</b> Co"), NOW)["name"] == "Bold Co"
+
+
+def test_parse_quote_tolerates_missing_series() -> None:
+    assert parse_quote("AAA", chart(closes=[]), NOW)["series"] == []
+    doc = json.loads(chart())
+    doc["chart"]["result"][0]["indicators"] = {}
+    assert parse_quote("AAA", json.dumps(doc).encode(), NOW)["series"] == []
+    doc["chart"]["result"][0]["indicators"] = {"quote": [{"close": None}]}
+    assert parse_quote("AAA", json.dumps(doc).encode(), NOW)["series"] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"not json",
+        b"[]",
+        b"{}",
+        json.dumps({"chart": {"result": []}}).encode(),
+        json.dumps({"chart": {"result": None}}).encode(),
+        json.dumps({"chart": {"result": [{"meta": {}}]}}).encode(),
+        chart(price=None),
+        chart(price="105"),
+        chart(price=True),
+        chart(price=float("nan")),
+    ],
+)
+def test_parse_quote_rejects_bad_input(body: bytes) -> None:
+    with pytest.raises(MarketsError):
+        parse_quote("AAA", body, NOW)
+
+
+def test_downsample_keeps_short_series_and_both_ends_of_long_ones() -> None:
+    short = [1.0, 2.0, 3.0]
+    assert downsample(short) == short
+    long = [float(i) for i in range(100)]
+    got = downsample(long)
+    assert len(got) == markets.SERIES_POINTS and got[0] == 0.0 and got[-1] == 99.0
+    assert got == sorted(got)
+
+
+def test_chart_url_quotes_the_symbol() -> None:
+    assert chart_url("^GSPC") == "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=5m&range=1d"
+
+
+def make_getter(bodies: dict[str, bytes | Exception]) -> Any:
+    def get(url: str) -> bytes:
+        symbol = url.split("/chart/")[1].split("?")[0].replace("%5E", "^")
+        body = bodies.get(symbol, FeedError("fetch failed: 404"))
+        if isinstance(body, Exception):
+            raise body
+        return body
+
+    return get
+
+
+def test_build_markets_reports_indexes_and_tickers() -> None:
+    bodies = {s: chart() for s in (*INDEXES, "AAA", "BBB.NS")}
+    doc = build_markets(["AAA", "BBB.NS"], getter=make_getter(bodies), now=NOW)
+    assert doc["generated"] == "2026-11-13T15:00:00+00:00"
+    assert [q["symbol"] for q in doc["indexes"]] == list(INDEXES)
+    assert [q["symbol"] for q in doc["tickers"]] == ["AAA", "BBB.NS"]
+    assert all(q["ok"] for q in [*doc["indexes"], *doc["tickers"]])
+
+
+def test_one_bad_symbol_does_not_sink_the_others() -> None:
+    bodies: dict[str, bytes | Exception] = {s: chart() for s in INDEXES}
+    bodies["^DJI"] = FeedError("fetch failed: 500")
+    bodies["BAD"] = b"garbage"
+    doc = build_markets(["BAD", "MISSING"], getter=make_getter(bodies), now=NOW)
+    by_symbol = {q["symbol"]: q["ok"] for q in [*doc["indexes"], *doc["tickers"]]}
+    assert by_symbol["^DJI"] is False and by_symbol["BAD"] is False and by_symbol["MISSING"] is False
+    assert by_symbol["^GSPC"] is True
+    assert {"symbol": "BAD", "ok": False} in doc["tickers"]
+
+
+def test_tickers_are_deduplicated_and_validated() -> None:
+    seen: list[str] = []
+
+    def get(url: str) -> bytes:
+        seen.append(url)
+        return chart()
+
+    doc = build_markets(["AAA", "aaa", "AAA", "^GSPC", "^gspc", "bad symbol", "x" * 40, "..", "-AAA"], getter=get, now=NOW)
+    assert [q["symbol"] for q in doc["tickers"]] == ["AAA"]  # case-insensitive, no index repeats, no odd symbols
+    assert len(seen) == len(INDEXES) + 1
+
+
+def test_no_tickers_is_fine() -> None:
+    assert build_markets(getter=lambda url: chart(), now=NOW)["tickers"] == []
+
+
+def test_build_markets_raises_when_nothing_could_be_read() -> None:
+    with pytest.raises(MarketsError, match="previous file"):
+        build_markets(["AAA"], getter=make_getter({}), now=NOW)
+
+
+def test_a_mostly_failed_run_keeps_the_previous_file() -> None:
+    with pytest.raises(MarketsError, match="only 1 of 5"):
+        build_markets(getter=make_getter({"^GSPC": chart()}), now=NOW)
+    doc = build_markets(getter=make_getter({s: chart() for s in INDEXES[:3]}), now=NOW)  # 3 of 5 is enough
+    assert [q["ok"] for q in doc["indexes"]] == [True, True, True, False, False]
+
+
+def test_a_stalled_request_times_out_instead_of_hanging(monkeypatch: pytest.MonkeyPatch) -> None:
+    release = threading.Event()
+    monkeypatch.setattr(markets, "WAIT_SECONDS", 0.05)
+
+    def get(url: str) -> bytes:
+        if not any(s in url for s in ("%5EGSPC", "%5EIXIC", "%5EDJI")):
+            release.wait(5)
+        return chart()
+
+    doc = build_markets(getter=get, now=NOW)
+    release.set()
+    assert [q["ok"] for q in doc["indexes"]] == [True, True, True, False, False]
+
+
+def test_default_getter_uses_json_accept_and_short_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_fetch(url: str, **kw: Any) -> bytes:
+        calls.append((url, kw))
+        return chart()
+
+    monkeypatch.setattr(markets, "fetch", fake_fetch)
+    build_markets(now=NOW)
+    assert len(calls) == len(INDEXES)
+    expected = {"accept": markets.JSON_ACCEPT, "deadline_seconds": markets.DEADLINE_SECONDS, "user_agent": markets.USER_AGENT}
+    assert all(kw == expected for _, kw in calls)
