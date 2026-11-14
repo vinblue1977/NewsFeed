@@ -45,9 +45,37 @@ def test_parse_quote_computes_the_change() -> None:
         "change": 5.5,
         "change_pct": 5.5,
         "currency": "USD",
+        "last_trade": "2026-11-13T14:59:00+00:00",
         "open": True,
         "series": [101.0, 102.5, 105.5],  # the gap is dropped
     }
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"currentTradingPeriod": None},
+        {"currentTradingPeriod": {"regular": None}},
+        {"currentTradingPeriod": {}},
+    ],
+)
+def test_explicit_nulls_in_the_trading_period_do_not_fail_a_valid_quote(meta: dict[str, Any]) -> None:
+    q = parse_quote("AAA", chart(**meta), NOW)
+    assert q["ok"] is True and q["price"] == 105.5 and q["open"] is False
+
+
+def test_null_indicators_do_not_fail_a_valid_quote() -> None:
+    doc = json.loads(chart())
+    doc["chart"]["result"][0]["indicators"] = None
+    q = parse_quote("AAA", json.dumps(doc).encode(), NOW)
+    assert q["ok"] is True and q["series"] == []
+
+
+def test_last_trade_is_an_iso_utc_time_or_none() -> None:
+    assert parse_quote("AAA", chart(regularMarketTime=TS - 86400), NOW)["last_trade"] == "2026-11-12T15:00:00+00:00"
+    assert parse_quote("AAA", chart(regularMarketTime=_MISSING), NOW)["last_trade"] is None
+    assert parse_quote("AAA", chart(regularMarketTime=1e20), NOW)["last_trade"] is None  # out of range, not a crash
+    assert parse_quote("AAA", chart(regularMarketTime=0), NOW)["last_trade"] is None  # 0 means "no trades", not 1970
 
 
 def test_parse_quote_knows_when_the_market_is_closed() -> None:
@@ -200,6 +228,19 @@ def test_a_stalled_request_times_out_instead_of_hanging(monkeypatch: pytest.Monk
     doc = build_markets(getter=get, now=NOW)
     release.set()
     assert [q["ok"] for q in doc["indexes"]] == [True, True, True, False, False]
+
+
+def test_every_symbol_gets_a_worker_so_none_waits_in_a_queue_and_times_out() -> None:
+    symbols = len(INDEXES) + 20
+    barrier = threading.Barrier(symbols, timeout=3)  # releases only if all 25 requests are in flight at the same time
+
+    def together(url: str) -> bytes:
+        barrier.wait()  # with fewer workers than symbols this never completes, and BrokenBarrierError fails the quote
+        return chart()
+
+    doc = build_markets([f"T{i}" for i in range(20)], getter=together, now=NOW)
+    assert all(q["ok"] for q in [*doc["indexes"], *doc["tickers"]]) and len(doc["tickers"]) == 20
+    assert markets.MAX_WORKERS == symbols
 
 
 def test_default_getter_uses_json_accept_and_short_deadline(monkeypatch: pytest.MonkeyPatch) -> None:

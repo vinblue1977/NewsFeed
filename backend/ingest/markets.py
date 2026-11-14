@@ -2,7 +2,11 @@
 
 The endpoint is unofficial and has no terms or SLA, so everything here fails soft: a symbol that cannot be read is reported
 with `ok: false` and never sinks the others. Only when fewer than half of the symbols could be read does the build raise, so the
-previous file stays in place instead of being replaced by a mostly empty one."""
+previous file stays in place instead of being replaced by a mostly empty one.
+
+`open` is a snapshot taken when the file is built (inside the regular session and traded in the last 30 minutes), so it can
+be up to one ingest interval out of date. `last_trade` (UTC, ISO) is the time of the last trade, so a client can judge
+freshness itself."""
 
 import json
 import math
@@ -11,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
-from ingest.config import SYMBOL
+from ingest.config import MAX_TICKERS, SYMBOL
 from ingest.feeds import USER_AGENT, FeedError, clean_text, fetch
 
 YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
@@ -20,7 +24,7 @@ INDEXES = ("^GSPC", "^IXIC", "^DJI", "^NSEI", "^BSESN")
 SERIES_POINTS = 40  # sparklines need no more than this
 WAIT_SECONDS = 8  # a hard cap on the whole fetch; the socket timeout alone can run longer than the fetch deadline
 DEADLINE_SECONDS = 6
-WORKERS = 8
+MAX_WORKERS = len(INDEXES) + MAX_TICKERS  # one worker per symbol, so no symbol waits in a queue for a slot
 RECENT_TRADE_SECONDS = 30 * 60  # the last trade must be this recent for the market to count as open
 
 
@@ -47,6 +51,16 @@ def downsample(values: list[float], points: int = SERIES_POINTS) -> list[float]:
     return [values[round(i * step)] for i in range(points)]
 
 
+def _iso(timestamp: float | None) -> str | None:
+    """A Unix time as an ISO UTC string, or None if it is missing or out of range."""
+    if timestamp is None or timestamp <= 0:  # Yahoo sends 0 for an instrument with no trades: that is "unknown", not 1970
+        return None
+    try:
+        return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="seconds")
+    except OverflowError, OSError, ValueError:
+        return None
+
+
 def parse_quote(symbol: str, body: bytes, now: datetime) -> dict[str, Any]:
     """Yahoo chart JSON -> one quote. Raises MarketsError if it has no usable price."""
     try:
@@ -54,8 +68,8 @@ def parse_quote(symbol: str, body: bytes, now: datetime) -> dict[str, Any]:
         meta = result["meta"]
         price = _num(meta["regularMarketPrice"])
         prev = _num(meta["chartPreviousClose"] if meta.get("chartPreviousClose") is not None else meta.get("previousClose"))
-        closes = (result.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
-        period = meta.get("currentTradingPeriod", {}).get("regular", {})
+        closes = ((result.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+        period = (meta.get("currentTradingPeriod") or {}).get("regular") or {}  # null for some instruments (crypto, FX, funds)
         start, end = _num(period.get("start"), 0), _num(period.get("end"), 0)
         traded = _num(meta.get("regularMarketTime"), 0)
         name = clean_text(meta.get("shortName") or meta.get("longName"), 60)
@@ -75,6 +89,7 @@ def parse_quote(symbol: str, body: bytes, now: datetime) -> dict[str, Any]:
         "change": change,
         "change_pct": round(change / prev * 100, 2) if change is not None and prev else None,
         "currency": currency,
+        "last_trade": _iso(traded),
         # open = inside the regular session AND traded recently (on an exchange holiday the session window still looks current,
         # but the last trade is from the previous day)
         "open": start is not None
@@ -100,7 +115,7 @@ def build_markets(tickers: list[str] | None = None, *, getter: Any = None, now: 
     # Case-insensitive, and an index named in the watchlist is not shown twice (it is already in the strip).
     extra = [t for t in dict.fromkeys(t.upper() for t in tickers or []) if SYMBOL.fullmatch(t) and t not in INDEXES]
     symbols = [*INDEXES, *extra]
-    pool = ThreadPoolExecutor(max_workers=WORKERS)
+    pool = ThreadPoolExecutor(max_workers=min(len(symbols), MAX_WORKERS))
     try:
         futures = {s: pool.submit(_fetch_quote, s, now, get) for s in symbols}
         wait(futures.values(), timeout=WAIT_SECONDS)

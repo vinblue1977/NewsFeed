@@ -3,7 +3,9 @@
 ESPN's API is unofficial, so each sport fails soft: `ok` says whether it could be read, and one broken sport never hides the
 others. Only when fewer than half could be read does the build raise, so the previous file stays in place."""
 
+import hashlib
 import json
+import re
 import xml.etree.ElementTree as ET  # noqa: S405  (DOCTYPE/ENTITY declarations are rejected first; see check_safe_xml)
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import UTC, datetime
@@ -49,7 +51,16 @@ def _event_link(links: Any) -> str | None:
     return None
 
 
-def _score(competitor: dict[str, Any]) -> int | None:
+def _not_started(status: Any) -> bool:
+    """True only when ESPN itself says the event has not started. An unrecognised status is not "not started": showing a
+    real score is better than hiding it."""
+    return bool(status["type"].get("state") == "pre")
+
+
+def _score(competitor: dict[str, Any], *, started: bool) -> int | None:
+    """The score, or None: a game that has not started has no score (ESPN sends 0 for it)."""
+    if not started:
+        return None
     try:
         return int(competitor["score"])
     except KeyError, TypeError, ValueError:
@@ -78,18 +89,29 @@ def parse_nfl(body: bytes) -> list[dict[str, Any]]:
     try:
         events = json.loads(body)["events"]
         games = []
+        attempted = 0
         for event in events:
             try:  # one malformed game is skipped; the others are still shown
+                if not event["competitions"]:
+                    continue  # announced, but no game data yet
+                attempted += 1
                 teams = {c["homeAway"]: c for c in event["competitions"][0]["competitors"]}
                 state, detail = _state(event["status"])
+                started = not _not_started(event["status"])
                 games.append(
                     {
                         "id": str(event["id"]),
                         "state": state,
                         "detail": detail,
                         "start": str(event["date"]),
-                        "home": {"name": clean_text(teams["home"]["team"]["displayName"], 40), "score": _score(teams["home"])},
-                        "away": {"name": clean_text(teams["away"]["team"]["displayName"], 40), "score": _score(teams["away"])},
+                        "home": {
+                            "name": clean_text(teams["home"]["team"]["displayName"], 40),
+                            "score": _score(teams["home"], started=started),
+                        },
+                        "away": {
+                            "name": clean_text(teams["away"]["team"]["displayName"], 40),
+                            "score": _score(teams["away"], started=started),
+                        },
                         "url": _event_link(event.get("links")),
                     }
                 )
@@ -97,6 +119,8 @@ def parse_nfl(body: bytes) -> list[dict[str, Any]]:
                 continue
     except (ValueError, KeyError, TypeError) as exc:
         raise ScoresError(f"nfl: not usable ({type(exc).__name__})") from exc
+    if attempted and not games:  # games came with data but none could be read: the payload shape changed, not "no games"
+        raise ScoresError("nfl: games present but none could be read")
     return _order(games)[:MAX_PER_SPORT]
 
 
@@ -105,11 +129,14 @@ def parse_tennis(body: bytes) -> list[dict[str, Any]]:
     try:
         events = json.loads(body)["events"]
         matches = []
+        attempted = 0
         for event in events:
             for group in event.get("groupings") or []:
                 for comp in group.get("competitions") or []:
+                    attempted += 1
                     try:  # one malformed match is skipped; the others are still shown
                         state, detail = _state(comp["status"])
+                        started = not _not_started(comp["status"])
                         players = sorted(comp["competitors"], key=lambda c: c.get("order", 0))
                         matches.append(
                             {
@@ -121,7 +148,7 @@ def parse_tennis(body: bytes) -> list[dict[str, Any]]:
                                 "players": [
                                     {
                                         "name": clean_text(p["athlete"]["displayName"], 40),
-                                        "sets": [int(s["value"]) for s in p.get("linescores") or []],
+                                        "sets": [int(s["value"]) for s in p.get("linescores") or []] if started else [],
                                         "winner": bool(p.get("winner")),
                                     }
                                     for p in players
@@ -132,7 +159,25 @@ def parse_tennis(body: bytes) -> list[dict[str, Any]]:
                         continue
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise ScoresError(f"tennis: not usable ({type(exc).__name__})") from exc
+    if attempted and not matches:  # matches came with data but none could be read: the payload shape changed
+        raise ScoresError("tennis: matches present but none could be read")
     return _order(matches)[:MAX_PER_SPORT]
+
+
+_SCORE_TOKENS = re.compile(r"\d+(?:/\d+)?\*?|&")  # runs/wickets, the batting star and the innings separator
+
+
+def _cricket_id(line: str, taken: set[str], position: int) -> str:
+    """An id from the team names only, so it survives score updates and reordering of the feed. Two matches with the same
+    teams get a numbered suffix; a line with no letters at all falls back to its position."""
+    names = " ".join(_SCORE_TOKENS.sub(" ", line).lower().split())
+    base = f"cricket-{hashlib.sha256(names.encode()).hexdigest()[:10]}" if names else f"cricket-pos{position}"
+    ident, n = base, 1
+    while ident in taken:
+        n += 1
+        ident = f"{base}-{n}"
+    taken.add(ident)
+    return ident
 
 
 def parse_cricket(body: bytes) -> list[dict[str, Any]]:
@@ -143,13 +188,16 @@ def parse_cricket(body: bytes) -> list[dict[str, Any]]:
     except (FeedError, ET.ParseError) as exc:
         raise ScoresError(f"cricket: not usable ({type(exc).__name__})") from exc
     matches = []
-    for item in root.iter("item"):
+    taken: set[str] = set()
+    for n, item in enumerate(root.iter("item")):
         line = clean_text(item.findtext("title"))
         if line:
             ident = clean_text(item.findtext("guid") or item.findtext("link"), 200)  # stable; the score line changes every update
             matches.append(
                 {
-                    "id": ident if _link(ident) else line,
+                    "id": ident
+                    if _link(ident)
+                    else _cricket_id(line, taken, n),  # never the raw score line: it changes constantly
                     "line": line,
                     "live": "*" in line,
                     "url": _link(item.findtext("link")),
