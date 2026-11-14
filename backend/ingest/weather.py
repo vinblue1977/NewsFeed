@@ -49,8 +49,8 @@ def _series(block: Any, key: str, count: int) -> list[Any]:
 
 def forecast_url(lat: float, lon: float) -> str:
     query = {
-        "latitude": f"{lat:.4f}",
-        "longitude": f"{lon:.4f}",
+        "latitude": f"{lat:.2f}",
+        "longitude": f"{lon:.2f}",
         "current": _CURRENT,
         "hourly": _HOURLY,
         "daily": _DAILY,
@@ -158,7 +158,7 @@ def parse_alerts(body: bytes) -> list[dict[str, Any]]:
 def build_weather(lat: float, lon: float, *, getter: Any = None, now: datetime | None = None) -> dict[str, Any]:
     """The weather document. Raises WeatherError if the forecast is unavailable; alerts failing only sets alerts_ok false."""
     get = getter or (lambda url: fetch(url, accept=JSON_ACCEPT, deadline_seconds=DEADLINE_SECONDS, user_agent=WEATHER_USER_AGENT))
-    alerts_url = f"{NWS_ALERTS}?{urlencode({'point': f'{lat:.4f},{lon:.4f}'}, safe=',')}"
+    alerts_url = f"{NWS_ALERTS}?{urlencode({'point': f'{lat:.2f},{lon:.2f}'}, safe=',')}"
     pool = ThreadPoolExecutor(max_workers=2)
     try:
         forecast_future = pool.submit(get, forecast_url(lat, lon))

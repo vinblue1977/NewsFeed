@@ -39,3 +39,7 @@ def test_free_items_pass() -> None:
     assert block_reason(item("https://economictimes.indiatimes.com/markets/stocks/news/x")) is None
     assert block_reason(item("https://www.npr.org/2026/11/13/story", "npr.org")) is None
     assert block_reason(item("not a url")) is None
+
+
+def test_a_claimed_domain_cannot_hide_the_links_own_host() -> None:
+    assert block_reason(item("https://www.wsj.com/a", "example.org")) == "paywalled"

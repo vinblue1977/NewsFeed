@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
-from ingest.feeds import FeedError, check_safe_xml, clean_text, fetch
+from ingest.feeds import FeedError, check_safe_xml, clean_text, fetch, parse_xml
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports"
 NFL_URL = f"{ESPN}/football/nfl/scoreboard"
@@ -184,7 +184,7 @@ def parse_cricket(body: bytes) -> list[dict[str, Any]]:
     """ESPNcricinfo live-scores RSS -> matches. The title is one score line; a '*' marks the side now batting."""
     try:
         check_safe_xml(body)
-        root = ET.fromstring(body)  # noqa: S314
+        root = parse_xml(body)
     except (FeedError, ET.ParseError) as exc:
         raise ScoresError(f"cricket: not usable ({type(exc).__name__})") from exc
     matches = []

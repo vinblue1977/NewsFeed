@@ -25,12 +25,15 @@ if [ "$bad" != 0 ]; then
 fi
 
 # AWS account IDs, except the docs example used in tests.
-if git grep -nwE '[0-9]{12}' -- ':!*package-lock.json' | grep -v '123456789012'; then
+if git grep -nowE '[0-9]{12}' -- ':!*package-lock.json' | grep -vE ':123456789012$'; then
   echo "::error::Found 12-digit numbers above that look like AWS account IDs. The deploy reads the account from AWS."
   status=1
 fi
 
 # Names from the PII_DENYLIST secret (comma-separated, never printed).
+if [ -z "${PII_DENYLIST:-}" ] && [ -n "${CI:-}" ]; then
+  echo "::warning::PII_DENYLIST is not set, so the name check was skipped (expected on fork PRs)."
+fi
 if [ -n "${PII_DENYLIST:-}" ]; then
   IFS=',' read -r -a words <<<"$PII_DENYLIST"
   history="$(git log --format='%an %ae %cn %ce %B' ${PRIVACY_LOG_RANGE:+"$PRIVACY_LOG_RANGE"})" || { echo "::error::git log failed: history not scanned."; exit 1; }  # read once: grep -q on a pipe can SIGPIPE git under pipefail
