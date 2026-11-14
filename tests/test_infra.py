@@ -53,7 +53,7 @@ def test_buckets_are_private() -> None:
 
 def test_ingest_runs_on_a_schedule() -> None:
     template = _synthesized(ACCOUNT)[1]
-    template.has_resource_properties("AWS::Events::Rule", {"ScheduleExpression": "rate(30 minutes)"})
+    template.has_resource_properties("AWS::Events::Rule", {"ScheduleExpression": "cron(0/15 * * * ? *)"})
 
 
 def test_data_bucket_is_retained_and_site_bucket_is_not() -> None:
