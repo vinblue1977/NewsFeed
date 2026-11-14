@@ -27,6 +27,9 @@ MAX_TITLE_CHARS = 300
 MAX_URL_CHARS = 2000
 ATOM = "{http://www.w3.org/2005/Atom}"
 CONTENT = "{http://purl.org/rss/1.0/modules/content/}encoded"
+MEDIA = "{http://search.yahoo.com/mrss/}"
+MIN_IMAGE_WIDTH = 100
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
 
 class FeedError(Exception):
@@ -106,6 +109,35 @@ def _safe_url(url: str | None) -> str | None:
     # No userinfo (a "user:pw@host" authority can make a link read as another site) and a sane length.
     ok = parts.scheme in ("http", "https") and parts.netloc and "@" not in parts.netloc and len(url) <= MAX_URL_CHARS
     return url if ok else None
+
+
+def _image_url(node: ET.Element) -> str | None:
+    """The widest picture the entry names (media:content, media:thumbnail or an image enclosure), as an https URL."""
+    best: tuple[int, str] | None = None
+    for el in node.iter():
+        kind = el.get("type") or ""
+        url = el.get("url")
+        if el.tag == f"{MEDIA}thumbnail":
+            ok = True
+        elif el.tag == f"{MEDIA}content":
+            ok = (
+                el.get("medium") == "image"
+                or kind.startswith("image/")
+                or bool(url and urlsplit(url).path.lower().endswith(IMAGE_SUFFIXES))
+            )
+        elif el.tag == "enclosure":
+            ok = kind.startswith("image/")
+        else:
+            continue
+        safe = _safe_url(url) if ok else None
+        if not safe or not safe.startswith("https://"):
+            continue
+        width = int(el.get("width", "0")) if el.get("width", "").isdigit() else 0
+        if 0 < width < MIN_IMAGE_WIDTH:
+            continue  # a tracking pixel or a logo, not a story picture
+        if best is None or width > best[0]:
+            best = (width, safe)
+    return best[1] if best else None
 
 
 def _parse_date(raw: str | None) -> datetime | None:
@@ -250,6 +282,9 @@ def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
             "source_id": source.id,
             "topic": source.topic,
         }
+        image = _image_url(node)
+        if image:
+            item["_image"] = image  # private: the ingest swaps it for `img`, a copy in our own bucket
         if source.subtopic:
             item["subtopic"] = source.subtopic
         if source.metered:

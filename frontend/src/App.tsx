@@ -4,11 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadFeed, loadMarkets, loadWeather } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, parseRoute, readerPage, safeUrl, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
-import type { Story } from './feed';
+import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import type { Section, Story } from './feed';
 import { formatChange, isFresh as marketsFresh, type Markets, priceLabel, type Quote, sparkline } from './markets';
 import { loadSettings, readSize, saveSettings, type Settings, sourceNames, TEXT_SIZES, toggled, withoutSources } from './settings';
-import type { Feed, Topic } from './types';
+import type { Feed, Item, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
 const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings';
@@ -58,6 +58,46 @@ function WeatherStrip({ weather, stale }: { weather: Weather; stale: boolean }) 
         {!weather.alertsOk && <div class="wx-sub">Weather alerts unavailable</div>}
       </div>
       <b>{degrees(weather.temp)}</b>
+    </section>
+  );
+}
+
+/** A story's picture; nothing at all if it has none or it fails to load, so a broken image never shows. */
+function Pic({ item, class: cls, onFail }: { item: Item; class: string; onFail?: () => void }) {
+  const src = imageSrc(item);
+  const [failed, setFailed] = useState<string | undefined>();  // which picture failed, so a new story's picture still gets its chance
+  if (!src || failed === src) return null;
+  return <img class={cls} src={src} alt="" loading="lazy" decoding="async" onError={() => { setFailed(src); onFail?.(); }} />;
+}
+
+/** One story in a list: text, with a small picture beside it when there is one. */
+function StoryRow({ s, now }: { s: Story; now: Date }) {
+  const [broken, setBroken] = useState<string | undefined>();  // the picture that failed to load: then the row is text only
+  const hasImg = imageSrc(s.item) !== undefined && broken !== imageSrc(s.item);
+  return (
+    <StoryAnchor story={s} class={hasImg ? 'row has-img' : 'row'}>
+      <div class="t">
+        <Source name={s.item.source} when={timeAgo(s.item.published, now)}
+          extra={[topicLabel(s.item.topic), s.item.place, s.sources > 1 ? `${s.sources} sources` : ''].filter(Boolean).join(' · ')} />
+        <h3>{s.item.title}</h3>
+      </div>
+      <Pic item={s.item} class="thumb" onFail={() => setBroken(imageSrc(s.item))} />
+    </StoryAnchor>
+  );
+}
+
+function TopicSection({ section, now, onAll }: { section: Section; now: Date; onAll: () => void }) {
+  const { lead } = section;
+  return (
+    <section aria-label={section.label}>
+      <div class="grp sech"><i style={{ background: section.color }} />{section.label}
+        <button type="button" class="all" onClick={onAll}>See all {section.total} ›</button></div>
+      <StoryAnchor story={lead} class="lead">
+        <Pic item={lead.item} class="pic" />
+        <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
+        <h2>{lead.item.title}</h2>
+      </StoryAnchor>
+      {section.more.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
     </section>
   );
 }
@@ -123,6 +163,7 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
         <article class="art">
           <div class="tag">{topicLabel(page.item.topic)}{page.item.place ? ` · ${page.item.place}` : ''}</div>
           <h1>{page.item.title}</h1>
+          <Pic item={page.item} class="pic" />
           <div class="src art-src">
             <span class="fav" style={{ background: badgeColor(page.item.source) }}>{initial(page.item.source)}</span>
             {page.item.source} · {timeAgo(page.item.published, now)}{blocks ? ` · ${minutes} min read` : ''}{page.item.metered ? ' · Metered' : ''}
@@ -395,6 +436,7 @@ export function App() {
   const lead = useMemo(() => (feed && !isBrief ? topStory(list, now) : undefined), [feed, list, now, isBrief]);
   const full = useMemo(() => (feed && lead ? coverage(feed, lead) : []), [feed, lead]);
   const rest = list.filter((s) => s.item.id !== lead?.item.id);
+  const grouped = useMemo(() => (topic === 'all' && !isBrief ? sections(list, lead) : []), [list, lead, topic, isBrief]);
   const brief = useMemo(() => (feed && isBrief ? briefing(feed, now) : undefined), [feed, now, isBrief]);
   const toggleView = () => {
     const next = isBrief ? 'feed' : 'brief';
@@ -523,6 +565,7 @@ export function App() {
           <>
             <div class="sec"><b>Top story</b></div>
             <StoryAnchor story={lead} class="big">
+              <Pic item={lead.item} class="pic" />
               <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
               <h2>{lead.item.title}</h2>
             </StoryAnchor>
@@ -541,16 +584,11 @@ export function App() {
         )}
 
         {!isBrief && weather && <WeatherStrip weather={weather} stale={weatherStale} />}
-        {!isBrief && rest.slice(0, shown).map((s) => (
-          <StoryAnchor story={s} key={s.item.id} class="row">
-            <div class="t">
-              <Source name={s.item.source} when={timeAgo(s.item.published, now)}
-                extra={[topicLabel(s.item.topic), s.item.place, s.sources > 1 ? `${s.sources} sources` : ''].filter(Boolean).join(' · ')} />
-              <h3>{s.item.title}</h3>
-            </div>
-          </StoryAnchor>
+        {!isBrief && topic === 'all' && grouped.map((g) => (
+          <TopicSection key={g.topic} section={g} now={now} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
         ))}
-        {!isBrief && rest.length > shown && (
+        {!isBrief && topic !== 'all' && rest.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        {!isBrief && topic !== 'all' && rest.length > shown && (
           <div class="more"><button type="button" class="btn g" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>
         )}
       </div>

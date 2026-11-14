@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ import boto3
 from ingest.articles import build_articles, dumps
 from ingest.cluster import cluster_items
 from ingest.config import cached_location
+from ingest.images import attach_images, known_images
 from ingest.markets import build_markets
 from ingest.pipeline import collect, local_sources
 from ingest.scores import build_scores
@@ -20,16 +22,19 @@ from ingest.sources import SOURCES
 from ingest.weather import build_weather
 
 logger = logging.getLogger()
+PICTURE_CUTOFF_SECONDS = 50  # past this, no new pictures are fetched (the Lambda timeout is 90 s)
 
 
-def previous_clusters(s3: Any) -> dict[str, str]:
-    """item id -> cluster id from the feed written last time, so clusters keep their ids. Empty if there is none."""
+def previous_state(s3: Any) -> tuple[dict[str, str], dict[str, str]]:
+    """(item id -> cluster id, item id -> picture file) from the feed written last time, so clusters keep their ids and
+    pictures are not fetched twice. Both empty if there is no usable feed."""
     try:
         body = s3.get_object(Bucket=os.environ["DATA_BUCKET"], Key=f"{os.environ['DATA_PREFIX']}/feed.json")["Body"].read()
-        return {i["id"]: i["cluster"] for i in json.loads(body)["items"] if "cluster" in i}
+        items = json.loads(body)["items"]
+        return {i["id"]: i["cluster"] for i in items if "cluster" in i}, known_images(items)
     except Exception:  # noqa: BLE001  (first run, bad file, no permission: ids are then simply derived afresh)
         logger.warning("could not read the previous feed", exc_info=True)
-        return {}
+        return {}, {}
 
 
 def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -88,6 +93,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
     markets.json and scores.json. Those three are fetched alongside the feed and written even when the feed run is rejected,
     so none of them holds up another."""
+    started = time.monotonic()
     s3 = boto3.client("s3")
     location = cached_location()
     pool = ThreadPoolExecutor(max_workers=3)
@@ -99,7 +105,8 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     statuses: dict[str, str] = {}
     articles_status = "failed"
     try:
-        feed, articles = build_feed(location, previous_clusters(s3))
+        clusters_before, images_before = previous_state(s3)
+        feed, articles = build_feed(location, clusters_before)
         failed = [sid for sid, s in feed["sources"].items() if not s["ok"]]
         if len(failed) * 2 > len(feed["sources"]) or not feed["items"]:  # a bad run must not replace a good feed
             raise RuntimeError(f"{len(failed)} of {len(feed['sources'])} sources failed; keeping the previous feed")
@@ -107,6 +114,20 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         if articles_status != "ok":
             for item in feed["items"]:
                 item.pop("full", None)  # the flag must never promise text that is not there
+        try:
+            attach_images(
+                s3,
+                os.environ["DATA_BUCKET"],
+                os.environ["DATA_PREFIX"],
+                feed["items"],
+                images_before,
+                fetch_new=time.monotonic() - started < PICTURE_CUTOFF_SECONDS,  # a late run must still write the feed
+            )
+        except Exception:  # noqa: BLE001  (a feed without pictures beats no feed)
+            logger.exception("pictures failed; writing the feed without them")
+            for item in feed["items"]:
+                item.pop("_image", None)
+                item.pop("img", None)
         s3.put_object(
             Bucket=os.environ["DATA_BUCKET"],
             Key=f"{os.environ['DATA_PREFIX']}/feed.json",

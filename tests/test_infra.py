@@ -224,3 +224,25 @@ def test_headers_policy_has_permissions_policy_and_no_remote_images() -> None:
         assert "img-src 'self';" in config["SecurityHeadersConfig"]["ContentSecurityPolicy"]["ContentSecurityPolicy"]
         names = {h["Header"] for h in config["CustomHeadersConfig"]["Items"]}
         assert {"Permissions-Policy", "Cross-Origin-Opener-Policy"} <= names
+
+
+def test_story_pictures_expire_and_are_cached_long() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    template.has_resource_properties(
+        "AWS::S3::Bucket",
+        {
+            "LifecycleConfiguration": {
+                "Rules": [Match.object_like({"Prefix": "data/img/", "ExpirationInDays": 3, "Status": "Enabled"})]
+            }
+        },
+    )
+    template.has_resource_properties(
+        "AWS::CloudFront::Distribution",
+        {
+            "DistributionConfig": Match.object_like(
+                {"CacheBehaviors": Match.array_with([Match.object_like({"PathPattern": "/data/img/*"})])}
+            )
+        },
+    )
+    csp = json.dumps(template.find_resources("AWS::CloudFront::ResponseHeadersPolicy"))
+    assert "img-src 'self';" in csp  # pictures are our own copies; no publisher host is ever allowed

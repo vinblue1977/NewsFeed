@@ -300,7 +300,7 @@ def test_only_google_news_local_feeds_are_trusted() -> None:
     assert [s.trusted for s in made] == [True, False]
 
 
-def test_previous_clusters_reads_the_last_feed_and_fails_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_previous_state_reads_the_last_feed_and_fails_soft(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATA_BUCKET", "bucket")
     monkeypatch.setenv("DATA_PREFIX", "data")
 
@@ -317,8 +317,8 @@ def test_previous_clusters_reads_the_last_feed_and_fails_soft(monkeypatch: pytes
         def get_object(self, **kw: Any) -> None:
             raise OSError("no such key")
 
-    assert handler_module.previous_clusters(Reader()) == {"a": "c1"}
-    assert handler_module.previous_clusters(Broken()) == {}
+    assert handler_module.previous_state(Reader()) == ({"a": "c1"}, {})
+    assert handler_module.previous_state(Broken()) == ({}, {})
 
 
 def test_a_clustering_failure_still_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -394,3 +394,16 @@ def test_markets_and_scores_are_written_even_when_the_feed_run_is_rejected(monke
     with pytest.raises(RuntimeError, match="keeping the previous feed"):
         handler_module.handler({}, object())
     assert sorted(p["Key"] for p in s3.puts) == ["data/markets.json", "data/scores.json"]
+
+
+def test_handler_writes_the_feed_without_pictures_when_that_step_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+
+    def boom(*args: Any) -> None:
+        raise ValueError("pictures broke")
+
+    monkeypatch.setattr(handler_module, "attach_images", boom)
+    assert handler_module.handler({}, object())["status"] == "ok"
+    feed = json.loads(next(p for p in s3.puts if p["Key"] == "data/feed.json")["Body"])
+    assert feed["items"] and all("_image" not in i and "img" not in i for i in feed["items"])

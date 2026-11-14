@@ -20,11 +20,14 @@ from constructs import Construct
 
 MANIFEST = "manifest.webmanifest"
 DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
+IMAGE_DAYS = 3  # story pictures (data/img/*) are deleted after this; the stories they belong to are gone by then
 LOCATION_PARAM = "/news/location"  # created by hand (see README); holds the home town, so it stays out of the repo
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
-def _bucket(scope: Construct, construct_id: str, *, retain: bool = False) -> s3.Bucket:
+def _bucket(
+    scope: Construct, construct_id: str, *, retain: bool = False, lifecycle_rules: list[s3.LifecycleRule] | None = None
+) -> s3.Bucket:
     """Private, encrypted, TLS-only bucket. `retain` keeps the contents if the stack or construct is ever removed."""
     return s3.Bucket(
         scope,
@@ -35,6 +38,7 @@ def _bucket(scope: Construct, construct_id: str, *, retain: bool = False) -> s3.
         object_ownership=s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
         removal_policy=RemovalPolicy.RETAIN if retain else RemovalPolicy.DESTROY,
         auto_delete_objects=not retain,
+        lifecycle_rules=lifecycle_rules,
     )
 
 
@@ -44,7 +48,14 @@ class NewsStack(Stack):
         site_dir = str(self.node.try_get_context("siteDir") or "frontend/dist")
 
         site_bucket = _bucket(self, "SiteBucket")
-        data_bucket = _bucket(self, "DataBucket", retain=True)  # feed JSON survives a replace or rename
+        data_bucket = _bucket(  # feed JSON survives a replace or rename; story pictures expire
+            self,
+            "DataBucket",
+            retain=True,
+            lifecycle_rules=[
+                s3.LifecycleRule(id="ExpireStoryPictures", prefix=f"{DATA_PREFIX}/img/", expiration=Duration.days(IMAGE_DAYS))
+            ],
+        )
 
         def headers_policy(construct_id: str, cache_control: str) -> cloudfront.ResponseHeadersPolicy:
             return cloudfront.ResponseHeadersPolicy(
@@ -98,6 +109,7 @@ class NewsStack(Stack):
             enable_accept_encoding_gzip=True,
             enable_accept_encoding_brotli=True,
         )
+        data_origin = origins.S3BucketOrigin.with_origin_access_control(data_bucket)  # pyright: ignore[reportArgumentType]
         site_origin = origins.S3BucketOrigin.with_origin_access_control(site_bucket)  # pyright: ignore[reportArgumentType]
         distribution = cloudfront.Distribution(
             self,
@@ -113,8 +125,14 @@ class NewsStack(Stack):
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     response_headers_policy=immutable,
                 ),
+                f"/{DATA_PREFIX}/img/*": cloudfront.BehaviorOptions(  # before /data/*, which would match it first
+                    origin=data_origin,
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                    response_headers_policy=immutable,  # a story's picture never changes under its name
+                ),
                 f"/{DATA_PREFIX}/*": cloudfront.BehaviorOptions(
-                    origin=origins.S3BucketOrigin.with_origin_access_control(data_bucket),  # pyright: ignore[reportArgumentType]
+                    origin=data_origin,
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     cache_policy=data_cache,
                     response_headers_policy=revalidate,
@@ -154,7 +172,7 @@ class NewsStack(Stack):
             code=lambda_.Code.from_asset("backend", exclude=["**/__pycache__"]),
             memory_size=256,
             retry_attempts=0,  # the schedule is the retry; a failed run must not triple the outbound fetches
-            timeout=Duration.seconds(60),
+            timeout=Duration.seconds(90),  # feeds (40 s budget), then pictures (12 s), then the writes
             environment={"DATA_BUCKET": data_bucket.bucket_name, "DATA_PREFIX": DATA_PREFIX, "LOCATION_PARAM": LOCATION_PARAM},
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )

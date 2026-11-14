@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, briefing, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
+import { badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -182,5 +182,39 @@ describe('feed helpers', () => {
     expect(storyPage(more, 'c1', 1)?.related.map((s) => s.item.id)).toEqual(['r1']);
     expect(storyPage(feed, 'nope')).toBeUndefined();
     expect(storyPage({ ...feed, items: [] }, 'c1')).toBeUndefined();
+  });
+});
+
+describe('pictures and sections', () => {
+  const NAME = 'a1b2c3d4e5f60718.jpg';
+  it('serves a picture only from our own site and only for names the ingest writes', () => {
+    expect(imageSrc(item('x', { img: NAME }))).toBe(`/data/img/${NAME}`);
+    for (const bad of ['../x.jpg', 'https://evil.example/a.jpg', 'A1B2C3D4E5F60718.jpg', 'a1b2c3d4e5f60718.svg', '']) {
+      expect(imageSrc(item('x', { img: bad }))).toBeUndefined();
+    }
+    expect(imageSrc(item('x'))).toBeUndefined();
+    expect(imageSrc(item('x', { img: 5 as unknown as string }))).toBeUndefined();
+  });
+
+  const story = (id: string, topic: Item['topic'], over: Partial<Item> = {}) => ({ item: item(id, { topic, ...over }), cluster: undefined, sources: 1 });
+  it('groups by topic in a fixed order; the lead prefers a story with a picture; the top story is left out', () => {
+    const list = [
+      story('w1', 'world'), story('u1', 'us'), story('u2', 'us', { img: NAME }), story('u3', 'us'), story('u4', 'us'),
+      story('top', 'sports'), story('s1', 'sports'),
+    ];
+    const out = sections(list, list[5]);
+    expect(out.map((s) => s.topic)).toEqual(['us', 'world', 'sports']);
+    const us = out[0];
+    expect(us?.lead.item.id).toBe('u2');  // the one with a picture
+    expect(us?.more.map((s) => s.item.id)).toEqual(['u1', 'u3']);  // then the newest others, two at most
+    expect(us?.total).toBe(4);
+    expect(out[2]?.lead.item.id).toBe('s1');
+  });
+  it('leaves out a topic with nothing and the whole cluster of the top story', () => {
+    const c = { id: 'c', title: '', topic: 'us' as const, lead: 'a', published: '', sources: 2, items: [] };
+    const a = { item: item('a'), cluster: c, sources: 2 };
+    const b = { item: item('b'), cluster: c, sources: 2 };
+    expect(sections([a, b], a)).toEqual([]);
+    expect(sections([], undefined)).toEqual([]);
   });
 });
