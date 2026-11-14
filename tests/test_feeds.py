@@ -3,6 +3,7 @@ import io
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -175,7 +176,7 @@ def test_source_list_is_sane() -> None:
     assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business"}
     headline_only = {s.id for s in SOURCES if s.headline_only}
     assert headline_only == {"gn-ap", "gn-cnn", "gn-reuters"}
-    assert all("news.google.com" in s.url for s in SOURCES if s.id in headline_only)
+    assert all(urlsplit(s.url).hostname == "news.google.com" for s in SOURCES if s.id in headline_only)
     assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
 
 
