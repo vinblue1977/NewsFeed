@@ -1,6 +1,7 @@
 """The News stack: a private site bucket and a private data bucket behind CloudFront, and a scheduled ingest Lambda.
 
-No API, no auth, no user table: the app is static files plus feed JSON that the ingest Lambda writes to S3.
+No login, no user table: the app is static files plus feed JSON that the ingest Lambda writes to S3. The one endpoint
+(/api/watchlist, a Lambda Function URL behind CloudFront) edits the private watchlist, guarded by a secret key.
 """
 
 from typing import Any
@@ -21,6 +22,7 @@ from constructs import Construct
 MANIFEST = "manifest.webmanifest"
 DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
 IMAGE_DAYS = 3  # story pictures (data/img/*) are deleted after this; the stories they belong to are gone by then
+WATCHLIST_KEY = "private/watchlist.json"  # outside data/, so CloudFront never serves it
 LOCATION_PARAM = "/news/location"  # created by hand (see README); holds the home town, so it stays out of the repo
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
@@ -162,7 +164,9 @@ class NewsStack(Stack):
         )
         manifest_deploy.node.add_dependency(site_deploy)  # one after the other, not in parallel
 
-        # ---- scheduled ingest: EventBridge -> Lambda -> JSON in the data bucket (stub until Phase 2)
+        # ---- scheduled ingest: EventBridge -> Lambda -> JSON in the data bucket
+        env = {"DATA_BUCKET": data_bucket.bucket_name, "LOCATION_PARAM": LOCATION_PARAM, "WATCHLIST_KEY": WATCHLIST_KEY}
+        location_param_arn = self.format_arn(service="ssm", resource="parameter", resource_name=LOCATION_PARAM.lstrip("/"))
         fn = lambda_.Function(
             self,
             "Ingest",
@@ -173,7 +177,7 @@ class NewsStack(Stack):
             memory_size=256,
             retry_attempts=0,  # the schedule is the retry; a failed run must not triple the outbound fetches
             timeout=Duration.seconds(90),  # feeds (40 s budget), then pictures (12 s), then the writes
-            environment={"DATA_BUCKET": data_bucket.bucket_name, "DATA_PREFIX": DATA_PREFIX, "LOCATION_PARAM": LOCATION_PARAM},
+            environment={**env, "DATA_PREFIX": DATA_PREFIX},
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )
         fn.add_to_role_policy(  # write only: no ACL, retention or legal-hold actions that `grant_put` would add
@@ -182,10 +186,13 @@ class NewsStack(Stack):
         fn.add_to_role_policy(  # reads back last run's feed so story clusters keep their ids: one object, one action
             iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/feed.json")])
         )
+        fn.add_to_role_policy(  # the saved watchlist symbols
+            iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(WATCHLIST_KEY)])
+        )
         fn.add_to_role_policy(  # exactly one parameter, one action
             iam.PolicyStatement(
                 actions=["ssm:GetParameter"],
-                resources=[self.format_arn(service="ssm", resource="parameter", resource_name=LOCATION_PARAM.lstrip("/"))],
+                resources=[location_param_arn],
             )
         )
         events.Rule(
@@ -193,6 +200,53 @@ class NewsStack(Stack):
             "IngestSchedule",
             schedule=events.Schedule.cron(minute="0/15"),  # on the quarter hours (:00, :15, :30, :45), as requested
             targets=[targets.LambdaFunction(fn)],  # pyright: ignore[reportArgumentType]
+        )
+
+        # Quotes every 5 minutes while an exchange may be open (weekdays, UTC): India 03:00-10:55, US 13:00-21:55. The run
+        # writes nothing if no market is open, so the wide windows (DST, holidays) cost a probe, not a write.
+        for rule_id, hours in (("MarketsIndia", "3-10"), ("MarketsUS", "13-21")):
+            events.Rule(
+                self,
+                rule_id,
+                schedule=events.Schedule.cron(minute="0/5", hour=hours, week_day="MON-FRI"),
+                targets=[
+                    targets.LambdaFunction(
+                        fn,  # pyright: ignore[reportArgumentType]
+                        event=events.RuleTargetInput.from_object({"only": "markets"}),
+                    )
+                ],
+            )
+
+        # ---- the one endpoint: read or replace the private watchlist (same origin as the app, so no CORS)
+        api_fn = lambda_.Function(
+            self,
+            "WatchlistApi",
+            runtime=lambda_.Runtime.PYTHON_3_14,
+            architecture=lambda_.Architecture.ARM_64,
+            handler="ingest.api.handler",
+            code=lambda_.Code.from_asset("backend", exclude=["**/__pycache__"]),
+            memory_size=128,
+            timeout=Duration.seconds(10),
+            reserved_concurrent_executions=1,  # one request at a time; the 16+ character random key is what stops guessing
+            environment={**env, "INGEST_FUNCTION": fn.function_name},
+            log_group=logs.LogGroup(self, "WatchlistApiLogs", retention=logs.RetentionDays.ONE_WEEK),
+        )
+        api_fn.add_to_role_policy(
+            iam.PolicyStatement(actions=["s3:GetObject", "s3:PutObject"], resources=[data_bucket.arn_for_objects(WATCHLIST_KEY)])
+        )
+        for role_fn in (fn, api_fn):  # without ListBucket, S3 answers a missing key with AccessDenied instead of NoSuchKey
+            role_fn.add_to_role_policy(iam.PolicyStatement(actions=["s3:ListBucket"], resources=[data_bucket.bucket_arn]))
+        api_fn.add_to_role_policy(iam.PolicyStatement(actions=["ssm:GetParameter"], resources=[location_param_arn]))
+        api_fn.add_to_role_policy(iam.PolicyStatement(actions=["lambda:InvokeFunction"], resources=[fn.function_arn]))
+        api_url = api_fn.add_function_url(auth_type=lambda_.FunctionUrlAuthType.NONE)  # the key is the credential
+        distribution.add_behavior(
+            "/api/*",
+            origins.FunctionUrlOrigin(api_url),  # pyright: ignore[reportArgumentType]
+            allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+            viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+            cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+            origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            response_headers_policy=revalidate,
         )
 
         CfnOutput(self, "SiteUrl", value=f"https://{distribution.distribution_domain_name}")
@@ -227,6 +281,13 @@ class NewsStack(Stack):
                     "Write access is limited to the data/ prefix of one bucket",
                     [RegexAppliesTo(regex=r"/^Resource::.*/data/\*$/g")],
                 ),
+            ],
+            apply_to_children=True,
+        )
+        NagSuppressions.add_resource_suppressions(
+            api_fn,
+            [
+                reason("AwsSolutions-IAM4", "Basic execution role only writes this function's logs", [LOGS_POLICY]),
             ],
             apply_to_children=True,
         )

@@ -7,10 +7,12 @@ export interface Settings {
   textSize: TextSize;
   hiddenSources: string[];
   hiddenTickers: string[];
+  watchKey: string;  // names the private watchlist file; empty when not set
 }
 
 export const SETTINGS_KEY = 'news.settings';
-export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [] };
+export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
+export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchKey: '' };
 export const TEXT_SIZES: { id: TextSize; label: string; px: number }[] = [
   { id: 'small', label: 'Small', px: 16 },
   { id: 'medium', label: 'Medium', px: 18 },
@@ -28,7 +30,8 @@ export function parseSettings(raw: string | null): Settings {
     const v = JSON.parse(raw) as Partial<Record<keyof Settings, unknown>> | null;
     if (!v || typeof v !== 'object') return DEFAULTS;
     const size = TEXT_SIZES.find((t) => t.id === v.textSize)?.id ?? DEFAULTS.textSize;
-    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers) };
+    const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
+    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchKey: key };
   } catch {
     return DEFAULTS;
   }

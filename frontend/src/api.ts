@@ -2,6 +2,7 @@ import { parseFeed } from './feed';
 import type { Feed } from './types';
 import { type Articles, parseArticles } from './article';
 import { type Markets, parseMarkets } from './markets';
+import { WATCH_KEY } from './settings';
 import { parseWeather, type Weather } from './weather';
 
 export const FEED_URL = '/data/feed.json';
@@ -26,12 +27,17 @@ export async function loadWeather(): Promise<Weather | undefined> {
   }
 }
 
-export const MARKETS_URL = '/data/markets.json';
+/** The quotes file name: the SHA-256 of the key, as the ingest names it, so the key itself never appears in a URL. */
+export async function watchFile(key: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+  return `watch-${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
 
-/** The market quotes, or undefined for any problem (the Markets screen then says they are unavailable). */
-export async function loadMarkets(): Promise<Markets | undefined> {
+/** The private watchlist quotes, or undefined (no key, a bad key or any problem). */
+export async function loadWatchlist(key: string): Promise<Markets | undefined> {
+  if (!WATCH_KEY.test(key)) return undefined;
   try {
-    const response = await fetch(MARKETS_URL, { cache: 'no-cache' });
+    const response = await fetch(`/data/${await watchFile(key)}.json`, { cache: 'no-cache' });
     return response.ok ? parseMarkets(await response.json()) : undefined;
   } catch {
     return undefined;
@@ -69,4 +75,24 @@ export function loadArticles(id?: string, now = Date.now()): Promise<Articles | 
 export function resetArticlesCache(): void {
   cached = undefined;
   inflight = undefined;
+}
+
+export const WATCHLIST_API = '/api/watchlist';
+
+/** Read (no `symbols`) or replace the saved watchlist symbols. Resolves to the saved list, or undefined for any problem
+ * (a wrong key answers 403). The key goes in the request body, never in a URL. */
+export async function watchlistSymbols(key: string, symbols?: string[]): Promise<string[] | undefined> {
+  if (!WATCH_KEY.test(key)) return undefined;
+  try {
+    const response = await fetch(WATCHLIST_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(symbols ? { key, symbols } : { key }),
+    });
+    if (!response.ok) return undefined;
+    const saved = ((await response.json()) as { symbols?: unknown }).symbols;
+    return Array.isArray(saved) && saved.every((v) => typeof v === 'string') ? (saved as string[]) : undefined;
+  } catch {
+    return undefined;
+  }
 }

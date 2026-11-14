@@ -13,12 +13,13 @@ import boto3
 
 from ingest.articles import build_articles, dumps
 from ingest.cluster import cluster_items
-from ingest.config import cached_location
+from ingest.config import cached_location, watch_name
 from ingest.images import attach_images, known_images
 from ingest.markets import build_markets
 from ingest.pipeline import collect, local_sources
 from ingest.scores import build_scores
 from ingest.sources import SOURCES
+from ingest.watchlist import read_watchlist
 from ingest.weather import build_weather
 
 logger = logging.getLogger()
@@ -72,6 +73,42 @@ def soft(name: str, build: Callable[[], dict[str, Any]]) -> dict[str, Any] | Non
         return None
 
 
+def saved_symbols(s3: Any, key: str | None) -> list[str] | None:
+    """The saved watchlist, [] without a key, None if it could not be read (logged; the old quotes file then stays)."""
+    if not key:
+        return []
+    try:
+        return read_watchlist(s3)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not read the watchlist")
+        return None
+
+
+def watch_doc(markets: dict[str, Any] | None) -> tuple[dict[str, Any] | None, bool]:
+    """(the watchlist quotes as their own document, whether any market is open). The indexes are fetched only to tell
+    whether a market is open; they are not published."""
+    if markets is None:
+        return None, False
+    is_open = any(q.get("open") for q in [*markets.get("indexes", []), *markets["tickers"]])  # a 24-hour symbol counts too
+    return {"generated": markets["generated"], "indexes": [], "tickers": markets["tickers"]}, is_open
+
+
+def run_markets(s3: Any, location: dict[str, Any], force: bool = False) -> dict[str, Any]:
+    """The markets-only run (every 5 minutes in market hours): writes the quotes only if a market is open (or forced)."""
+    key = location.get("watch_key")
+    symbols = saved_symbols(s3, key)
+    if symbols is None:
+        return {"status": "ok", "markets": "failed"}
+    if not key or (not symbols and not force):
+        return {"status": "ok", "markets": "skipped"}
+    doc, is_open = watch_doc(soft("markets", lambda: build_markets(symbols)))
+    if doc is None:
+        return {"status": "ok", "markets": "failed"}
+    if not is_open and not force:
+        return {"status": "ok", "markets": "closed"}
+    return {"status": "ok", "markets": write_doc(s3, watch_name(key), doc)}
+
+
 def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     """Write data/<name>.json ("failed" if there is nothing to write or the write fails). Each document carries `generated`."""
     if doc is None:
@@ -91,17 +128,22 @@ def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
-    markets.json and scores.json. Those three are fetched alongside the feed and written even when the feed run is rejected,
-    so none of them holds up another."""
+    scores.json and the private watchlist quotes. Those are fetched alongside the feed and written even when the feed run
+    is rejected, so none of them holds up another."""
     started = time.monotonic()
     s3 = boto3.client("s3")
     location = cached_location()
+    if event.get("only") == "markets":
+        return run_markets(s3, location, force=event.get("force") is True)
+    watch_key = location.get("watch_key")
+    symbols = saved_symbols(s3, watch_key) or []
     pool = ThreadPoolExecutor(max_workers=3)
     side = {
         "weather": pool.submit(soft, "weather", lambda: build_weather(location["lat"], location["lon"])),
-        "markets": pool.submit(soft, "markets", lambda: build_markets(location.get("tickers", []))),
         "scores": pool.submit(soft, "scores", build_scores),
     }
+    if watch_key and symbols:  # no watchlist, no quotes to fetch
+        side["markets"] = pool.submit(soft, "markets", lambda: build_markets(symbols))
     statuses: dict[str, str] = {}
     articles_status = "failed"
     try:
@@ -135,7 +177,17 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             ContentType="application/json",
         )
     finally:
-        statuses = {name: write_doc(s3, name, future.result()) for name, future in side.items()}
+        docs = {name: future.result() for name, future in side.items()}
+        watch, _ = watch_doc(docs.pop("markets", None))  # no public markets file: the quotes go to one only you can name
+        statuses = {name: write_doc(s3, name, doc) for name, doc in docs.items()}
+        if not (watch_key and symbols):
+            statuses["markets"] = "skipped"
+        elif (
+            now_saved := saved_symbols(s3, watch_key)
+        ) is not None and now_saved != symbols:  # the list was edited meanwhile: the refresh that edit started wins
+            statuses["markets"] = "superseded"
+        else:
+            statuses["markets"] = write_doc(s3, watch_name(watch_key), watch)
         pool.shutdown(wait=False)
     return {
         "status": "ok",

@@ -184,3 +184,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .seg button { flex: 1; padding: 9px 0; border: 1px solid var(--line); border-radius: 8px; background: none; font-size: 14px; }
 .seg button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .sample { margin: 0; padding: 0 14px 14px; font: var(--read-size, 18px)/1.5 Georgia, 'Times New Roman', serif; color: var(--muted); }
+
+.fold { margin: 0 16px 10px; padding: 0 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.fold summary { padding: 13px 0; font-size: 15px; cursor: pointer; }
+.fold[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.fld { display: block; font-size: 13px; color: var(--muted); margin: 8px 0; }
+.fld input, .fld textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 10px; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.fold .btns { padding: 4px 0 12px; }
+.set.inner { margin: 0 -14px; border: 0; border-radius: 0; background: none; }
+.pull { position: fixed; top: 0; left: 50%; margin: -32px 0 0 -16px; width: 32px; height: 32px; border-radius: 50%; background: var(--card); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--text); z-index: 5; pointer-events: none; }
+.pull.spin span { animation: pull-spin .8s linear infinite; }
+@keyframes pull-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pull.spin span { animation: none; } }

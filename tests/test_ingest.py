@@ -64,15 +64,19 @@ def test_cached_location_reads_once(monkeypatch: pytest.MonkeyPatch) -> None:
     cached_location.cache_clear()
 
 
-@pytest.mark.parametrize("tickers", [[], ["^GSPC", "AAA.NS", "BTC-USD", "EURUSD=X"]])
-def test_parse_location_accepts_optional_tickers(tickers: list[str]) -> None:
-    assert parse_location(json.dumps({**LOCATION, "tickers": tickers}))["tickers"] == tickers
+def test_parse_location_accepts_an_optional_watch_key() -> None:
+    assert parse_location(json.dumps({**LOCATION, "watch_key": "a1" * 10}))["watch_key"] == "a1" * 10
+    assert "watch_key" not in parse_location(json.dumps(LOCATION))
 
 
-@pytest.mark.parametrize(
-    "tickers",
-    ["AAA", [1], [""], ["has space"], ["x" * 16], ["AAA;rm"], [".."], ["."], ["-AAA"], [f"T{i}" for i in range(21)], None],
-)
-def test_parse_location_rejects_bad_tickers(tickers: object) -> None:
-    with pytest.raises(ConfigError, match="tickers"):
-        parse_location(json.dumps({**LOCATION, "tickers": tickers}))
+@pytest.mark.parametrize("key", ["short", "UPPERCASE" * 3, "has-dash-in-it-xxxx", "x" * 65, 5, ""])
+def test_parse_location_rejects_a_bad_watch_key(key: object) -> None:
+    with pytest.raises(ConfigError, match="watch_key"):
+        parse_location(json.dumps({**LOCATION, "watch_key": key}))
+
+
+def test_the_quotes_file_is_named_by_a_hash_not_by_the_key() -> None:
+    from ingest.config import watch_name
+
+    name = watch_name("abc")
+    assert name == "watch-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

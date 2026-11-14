@@ -20,11 +20,12 @@ describe('parseMarkets', () => {
     const m = parseMarkets({ generated: 'g', indexes: [quote({ last_trade: undefined, series: [1, null, 'x', 2], name: 5, currency: 3 })] });
     expect(m?.indexes[0]).toMatchObject({ lastTrade: null, series: [1, 2], name: '^GSPC', currency: '' });
   });
-  it('rejects documents without a stamp or without any readable quote', () => {
+  it('rejects documents without a stamp; an empty or unreadable list still counts, as missing quotes', () => {
     expect(parseMarkets(null)).toBeUndefined();
     expect(parseMarkets({ indexes: [quote()] })).toBeUndefined();
-    expect(parseMarkets({ generated: 'g', indexes: [{ symbol: 'x', ok: false }], tickers: 'nope' })).toBeUndefined();
-    expect(parseMarkets({ generated: 'g', indexes: [null, 5, quote({ price: 'NaN' })] })).toBeUndefined();
+    expect(parseMarkets({ generated: 'g', indexes: [], tickers: [] })?.tickers).toEqual([]);  // an empty watchlist
+    expect(parseMarkets({ generated: 'g', indexes: [{ symbol: 'x', ok: false }], tickers: 'nope' })?.missing).toBe(1);
+    expect(parseMarkets({ generated: 'g', indexes: [null, 5, quote({ price: 'NaN' })] })?.missing).toBe(3);
   });
 });
 

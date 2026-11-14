@@ -1,6 +1,6 @@
 # Working in this repo
 
-Personal, iPhone-first news PWA: Preact + Vite + TypeScript frontend, Python ingest Lambdas (EventBridge schedule -> S3 JSON), CloudFront, AWS CDK. No login, no API Lambda, no user table. Cost target: under $0.15/month. Plan and decisions: `PLAN.md`.
+Personal, iPhone-first news PWA: Preact + Vite + TypeScript frontend, Python ingest Lambdas (EventBridge schedule -> S3 JSON), CloudFront, AWS CDK. No login, no user table; one tiny endpoint (`/api/watchlist`, Lambda Function URL behind CloudFront, guarded by a secret key) edits the private watchlist. Cost target: under $0.15/month. Plan and decisions: `PLAN.md`.
 
 ## Layout
 
