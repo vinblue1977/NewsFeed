@@ -13,6 +13,7 @@ export const TOPICS: { id: Topic | 'all'; label: string }[] = [
 
 const LABELS = new Map<string, string>(TOPICS.map((t) => [t.id, t.label]));
 const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
+export const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function topicLabel(topic: string): string {
   return LABELS.get(topic) ?? topic;
@@ -103,11 +104,19 @@ export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   return out.sort((a, b) => b.item.published.localeCompare(a.item.published));
 }
 
+/** How old a story is. Unparseable dates give NaN (never "recent"); a date in the future counts as just now. */
+function ageMs(iso: string, now: Date): number {
+  return Math.max(0, now.getTime() - new Date(iso).getTime());
+}
+
+/** Stories from the last day (an unparseable date is not recent). */
+function recentOnly(list: Story[], now: Date): Story[] {
+  return list.filter((s) => ageMs(s.item.published, now) < DAY_MS);
+}
+
 /** The lead story: the best-covered cluster from the last day (ties: newest). */
 export function topStory(list: Story[], now: Date): Story | undefined {
-  const day = 24 * 60 * 60 * 1000;
-  const recent = list.filter((s) => now.getTime() - new Date(s.item.published).getTime() < day);
-  return [...recent].sort((a, b) => b.sources - a.sources || b.item.published.localeCompare(a.item.published))[0];
+  return [...recentOnly(list, now)].sort((a, b) => b.sources - a.sources || b.item.published.localeCompare(a.item.published))[0];
 }
 
 /** The other articles in the lead story's cluster ("Full coverage"), best three, one per source. */
@@ -124,4 +133,36 @@ export function coverage(feed: Feed, story: Story, limit = 3): Item[] {
     if (out.length >= limit) break;
   }
   return out;
+}
+
+export interface BriefGroup {
+  label: string;
+  color: string;
+  stories: Story[];
+}
+
+export const BRIEF_TOP_COLOR = '#5b86c9';
+const BRIEF_GROUPS: { label: string; color: string; topics: Topic[] }[] = [
+  { label: 'US', color: '#5b86c9', topics: ['us'] },
+  { label: 'World · India', color: '#3fb6a8', topics: ['world', 'india'] },
+  { label: 'Sports', color: '#6fbf5c', topics: ['sports'] },
+  { label: 'Technology · Business', color: '#8a6fe0', topics: ['tech', 'business'] },
+  { label: 'Local', color: '#e0705f', topics: ['local'] },
+];
+const MORE_GROUP = { label: 'More', color: '#9aa0a6' };  // any topic the groups above do not name, so no story is lost
+const PER_GROUP = 3;
+
+/** The Briefing: the lead story, then the newest few stories per topic group from the last day. Text only, no repeats. */
+export function briefing(feed: Feed, now: Date): { top: Story | undefined; groups: BriefGroup[]; total: number } {
+  const recent = recentOnly(stories(feed, 'all'), now);
+  const top = topStory(recent, now);
+  const rest = recent.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
+  const named = new Set<string>(BRIEF_GROUPS.flatMap((g) => g.topics));
+  const groups = [
+    ...BRIEF_GROUPS.map(({ label, color, topics }) => ({ label, color, stories: rest.filter((s) => topics.includes(s.item.topic)) })),
+    { ...MORE_GROUP, stories: rest.filter((s) => !named.has(s.item.topic)) },
+  ]
+    .map((g) => ({ ...g, stories: g.stories.slice(0, PER_GROUP) }))
+    .filter((g) => g.stories.length > 0);
+  return { top, groups, total: (top ? 1 : 0) + groups.reduce((n, g) => n + g.stories.length, 0) };
 }
