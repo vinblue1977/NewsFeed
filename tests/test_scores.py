@@ -2,6 +2,7 @@ import json
 import threading
 from datetime import UTC, datetime
 from typing import Any
+from xml.sax.saxutils import escape
 
 import pytest
 
@@ -69,6 +70,35 @@ def test_parse_nfl_tolerates_missing_scores_links_and_unknown_state() -> None:
     odd["status"]["type"]["state"] = "mystery"
     (g,) = parse_nfl(nfl_doc(odd))
     assert g["home"]["score"] is None and g["away"]["score"] is None and g["url"] is None and g["state"] == "pre"
+
+
+def test_a_game_that_has_not_started_has_no_score() -> None:
+    pre = game("1", "pre", "2026-11-14T01:15Z", home=competitor("home", "H", "0"), away=competitor("away", "A", "0"))
+    live = game("2", "in", "2026-11-13T01:15Z", home=competitor("home", "H", "0"), away=competitor("away", "A", "3"))
+    got = {g["id"]: g for g in parse_nfl(nfl_doc(pre, live))}
+    assert got["1"]["home"]["score"] is None and got["1"]["away"]["score"] is None
+    assert got["2"]["home"]["score"] == 0 and got["2"]["away"]["score"] == 3  # a real 0 stays 0 once play has started
+
+
+def test_an_unrecognised_status_does_not_hide_a_real_score() -> None:
+    delayed = game("1", "in", "2026-11-13T01:15Z", home=competitor("home", "H", "7"), away=competitor("away", "A", "3"))
+    delayed["status"]["type"]["state"] = "delayed"  # not a state we know; the score is real
+    (g,) = parse_nfl(nfl_doc(delayed))
+    assert g["state"] == "pre" and g["home"]["score"] == 7 and g["away"]["score"] == 3
+
+
+def test_an_unreadable_score_in_a_started_game_is_none() -> None:
+    bad = game("1", "in", "2026-11-13T01:15Z", home=competitor("home", "H", "x"), away=competitor("away", "A", None))
+    (g,) = parse_nfl(nfl_doc(bad))
+    assert g["home"]["score"] is None and g["away"]["score"] is None
+
+
+def test_parse_nfl_empty_scoreboard_is_fine_but_unreadable_events_are_an_error() -> None:
+    assert parse_nfl(nfl_doc()) == []  # a quiet week
+    assert parse_nfl(nfl_doc({"id": "x", "competitions": []}, {"id": "y"})) == []  # announced games with no data yet
+    broken = {"id": "x", "competitions": [{"competitors": []}], "status": {"type": {"state": "pre"}}}
+    with pytest.raises(ScoresError, match="games present"):
+        parse_nfl(nfl_doc(broken))  # games came with data but none were readable: the payload changed shape
 
 
 def test_parse_nfl_keeps_only_web_links() -> None:
@@ -156,6 +186,29 @@ def test_parse_tennis_handles_tournaments_without_groupings_and_bad_matches() ->
     assert [m["id"] for m in parse_tennis(body)] == ["ok"]
 
 
+def test_a_match_that_has_not_started_has_no_sets() -> None:
+    pre = match("1", "pre", "2026-11-15T10:00Z", players=[player("Player A", 1, [0.0]), player("Player B", 2, [0.0])])
+    (m,) = parse_tennis(tennis_doc(pre))
+    assert [p["sets"] for p in m["players"]] == [[], []]
+
+
+def test_parse_tennis_empty_scoreboard_is_fine_but_unreadable_matches_are_an_error() -> None:
+    assert parse_tennis(b'{"events": []}') == []  # nothing scheduled
+    assert (
+        parse_tennis(b'{"events": [{"name": "Open"}, {"name": "Draw", "groupings": [{"competitions": []}]}]}') == []
+    )  # no draw yet
+    body = json.dumps({"events": [{"name": "Open", "groupings": [{"competitions": [{}, None]}]}]}).encode()
+    with pytest.raises(ScoresError, match="matches present"):
+        parse_tennis(body)  # matches came with data but none were readable: the payload changed shape
+
+
+def test_an_unrecognised_status_does_not_hide_set_scores() -> None:
+    odd = match("1", "in", "2026-11-13T10:00Z")
+    odd["status"]["type"]["state"] = "suspended"
+    (m,) = parse_tennis(tennis_doc(odd))
+    assert m["state"] == "pre" and [p["sets"] for p in m["players"]] == [[5, 6, 6], [7, 4, 7]]
+
+
 def test_parse_tennis_is_capped() -> None:
     got = parse_tennis(tennis_doc(*[match(str(i), "post", f"2026-11-07T10:{i:02d}Z") for i in range(30)]))
     assert len(got) == scores.MAX_PER_SPORT
@@ -185,7 +238,7 @@ def test_parse_cricket_reads_score_lines() -> None:
         "url": "http://www.example.com/match/1.html?CMP=OTC-RSS",
     }
     assert b["line"] == "Team C 348/10 v Team D 133/10" and b["live"] is False and b["url"] is None
-    assert b["id"] == b["line"]  # no usable guid or link: the line identifies it
+    assert b["id"].startswith("cricket-") and "348" not in b["id"]  # no usable guid or link: an id from the team names
 
 
 def test_parse_cricket_id_stays_the_same_when_the_score_changes() -> None:
@@ -196,6 +249,26 @@ def test_parse_cricket_id_stays_the_same_when_the_score_changes() -> None:
     assert one("10/1")["id"] == one("250/4")["id"] == "http://www.example.com/match/9.html"
     link_only = "<link>http://www.example.com/match/9.html</link>"
     assert one("10/1", link_only)["id"] == one("250/4", link_only)["id"] == "http://www.example.com/match/9.html"
+
+
+def _cricket(*titles: str) -> list[dict[str, Any]]:
+    items = "".join(f"<item><title>{escape(t)}</title></item>" for t in titles)
+    return parse_cricket(f"<rss><channel>{items}</channel></rss>".encode())
+
+
+def test_cricket_id_without_guid_or_link_does_not_change_with_the_score_or_the_feed_order() -> None:
+    a1 = _cricket("Team A 10/1 v Team B 3/0")[0]["id"]
+    a2 = _cricket("Team A 250/4 & 12/0 v Team B 399/10*")[0]["id"]
+    assert a1 == a2
+    reordered = _cricket("Team C 1/0 v Team D 2/0", "Team E 5/1 v Team F 6/0", "Team A 99/2* v Team B 3/0")
+    assert reordered[2]["id"] == a1 and len({m["id"] for m in reordered}) == 3  # other matches get other ids
+
+
+def test_cricket_ids_stay_distinct_when_the_same_teams_play_twice_or_the_line_has_no_names() -> None:
+    twice = _cricket("Team A 1/0 v Team B 2/0", "Team A 150/3 v Team B 90/1")
+    assert twice[0]["id"] != twice[1]["id"] and twice[1]["id"].endswith("-2")
+    (numbers_only,) = _cricket("12/3 & 45/6*")
+    assert numbers_only["id"] == "cricket-pos0"
 
 
 def test_parse_cricket_is_capped() -> None:
