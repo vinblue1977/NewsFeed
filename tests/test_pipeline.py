@@ -117,17 +117,58 @@ def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(boto3, "client", lambda name: s3)
     monkeypatch.setenv("DATA_BUCKET", "bucket")
     monkeypatch.setenv("DATA_PREFIX", "data")
-    monkeypatch.setattr(handler_module, "cached_location", lambda: {"nearby": ["Palatine"], "feeds": ["https://c.example/f"]})
+    location = {"nearby": ["Palatine"], "feeds": ["https://c.example/f"], "lat": 40.0, "lon": -90.0}
+    monkeypatch.setattr(handler_module, "cached_location", lambda: location)
     monkeypatch.setattr(handler_module, "SOURCES", (src("a", "a"),))
     monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "t", "lat_seen": lat})
     result = handler_module.handler({}, object())
-    assert result["status"] == "ok" and result["failed"] == []
-    (put,) = s3.puts
+    assert result["status"] == "ok" and result["failed"] == [] and result["weather"] == "ok"
+    put, weather_put = s3.puts
+    assert weather_put["Bucket"] == "bucket" and weather_put["Key"] == "data/weather.json"
+    assert weather_put["ContentType"] == "application/json"
+    assert json.loads(weather_put["Body"]) == {"generated": "t", "lat_seen": 40.0}
     assert put["Bucket"] == "bucket" and put["Key"] == "data/feed.json" and put["ContentType"] == "application/json"
     body = json.loads(put["Body"])
     assert {"generated", "items", "sources"} <= body.keys()
     assert {i["topic"] for i in body["items"]} <= {"us", "local"}
     assert {c["id"] for c in body["clusters"]} == {i["cluster"] for i in body["items"]}
+
+
+def _weather_handler_setup(monkeypatch: pytest.MonkeyPatch, s3: FakeS3) -> None:
+    monkeypatch.setattr(boto3, "client", lambda name: s3)
+    monkeypatch.setenv("DATA_BUCKET", "bucket")
+    monkeypatch.setenv("DATA_PREFIX", "data")
+    monkeypatch.setattr(handler_module, "cached_location", lambda: {"nearby": [], "feeds": [], "lat": 40.0, "lon": -90.0})
+    monkeypatch.setattr(handler_module, "SOURCES", (src("a", "a"),))
+    monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
+
+
+def test_handler_survives_a_weather_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+
+    def boom(lat: float, lon: float) -> dict[str, Any]:
+        raise RuntimeError("weather is down")
+
+    monkeypatch.setattr(handler_module, "build_weather", boom)
+    result = handler_module.handler({}, object())
+    assert result["status"] == "ok" and result["weather"] == "failed"
+    assert [p["Key"] for p in s3.puts] == ["data/feed.json"]
+
+
+def test_handler_survives_a_weather_write_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    class PutFails(FakeS3):
+        def put_object(self, **kw: Any) -> None:
+            if kw["Key"].endswith("weather.json"):
+                raise OSError("denied")
+            super().put_object(**kw)
+
+    s3 = PutFails()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "t"})
+    assert handler_module.handler({}, object())["weather"] == "failed"
+    assert [p["Key"] for p in s3.puts] == ["data/feed.json"]
 
 
 def test_handler_refuses_to_overwrite_with_an_all_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,3 +317,13 @@ def test_a_clustering_failure_still_writes_the_feed(monkeypatch: pytest.MonkeyPa
     feed = handler_module.build_feed({"nearby": [], "feeds": []})
     assert feed["clusters"] == [] and feed["items"]
     assert all("cluster" not in i for i in feed["items"])
+
+
+def test_weather_is_written_even_when_the_feed_run_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "SOURCES", (src("bad", "missing"),))
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: {"generated": "t"})
+    with pytest.raises(RuntimeError, match="keeping the previous feed"):
+        handler_module.handler({}, object())
+    assert [p["Key"] for p in s3.puts] == ["data/weather.json"]
