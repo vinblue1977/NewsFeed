@@ -111,6 +111,16 @@ def test_fetch_returns_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
     assert timeout == feeds.TIMEOUT_SECONDS and "NewsPWA" in request.get_header("User-agent")
 
 
+def test_fetch_sends_a_custom_accept_and_honours_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    opener = FakeOpener(FakeResponse(b"{}"))
+    monkeypatch.setattr(feeds, "_OPENER", opener)
+    assert fetch("https://example.com/j", accept="application/json") == b"{}"
+    assert opener.requests[0][0].get_header("Accept") == "application/json"
+    monkeypatch.setattr(feeds, "_OPENER", FakeOpener(FakeResponse(b"{}")))
+    with pytest.raises(FeedError, match="too slow"):
+        fetch("https://example.com/j", deadline_seconds=-1)
+
+
 def test_fetch_refuses_non_https() -> None:
     for url in ("http://example.com/f", "file:///etc/passwd", "ftp://example.com/f"):
         with pytest.raises(FeedError, match="https"):
