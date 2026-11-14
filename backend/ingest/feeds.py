@@ -38,13 +38,13 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_HttpsOnlyRedirects)
 
 
-def fetch(url: str) -> bytes:
+def fetch(url: str, *, accept: str = ACCEPT, deadline_seconds: float | None = None, user_agent: str = USER_AGENT) -> bytes:
     """GET a feed over HTTPS (redirects too), with a socket timeout, a total deadline and a size cap."""
     if urlsplit(url).scheme != "https":
         raise FeedError("only https feeds are fetched")
-    headers = {"User-Agent": USER_AGENT, "Accept": ACCEPT}
+    headers = {"User-Agent": user_agent, "Accept": accept}
     request = urllib.request.Request(url, headers=headers)  # noqa: S310  (https scheme checked above)
-    deadline = time.monotonic() + DEADLINE_SECONDS
+    deadline = time.monotonic() + (DEADLINE_SECONDS if deadline_seconds is None else deadline_seconds)
     body = bytearray()
     try:
         with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
