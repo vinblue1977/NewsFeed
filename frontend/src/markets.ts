@@ -2,6 +2,11 @@ export interface Quote {
   symbol: string;
   name: string;
   price: number;
+  prevClose: number | null;
+  dayOpen: number | null;
+  dayHigh: number | null;
+  dayLow: number | null;
+  history: number[];  // about three months of daily closes, oldest first (empty for an index or when unavailable)
   change: number | null;
   changePct: number | null;
   currency: string;
@@ -31,6 +36,11 @@ function parseQuote(value: unknown): Quote | 'missing' | undefined {
     symbol: q.symbol,
     name: typeof q.name === 'string' && q.name ? q.name : q.symbol,
     price,
+    prevClose: num(q.prev_close),
+    dayOpen: num(q.day_open),
+    dayHigh: num(q.day_high),
+    dayLow: num(q.day_low),
+    history: Array.isArray(q.history) ? q.history.map(num).filter((n): n is number => n !== null) : [],
     change: num(q.change),
     changePct: num(q.change_pct),
     currency: typeof q.currency === 'string' ? q.currency : '',
@@ -94,4 +104,48 @@ export function sparkline(series: number[], width = 100, height = 28): string {
   return series
     .map((v, i) => `${((i / (series.length - 1)) * width).toFixed(1)},${(height - ((v - min) / span) * (height - 2) - 1).toFixed(1)}`)
     .join(' ');
+}
+
+/** "▼ $2.71 (0.36%)": the move in money first, then in percent. Other currencies use their symbol or ISO code. */
+export function formatMove(change: number | null, pct: number | null, currency: string): { text: string; dir: 'up' | 'down' | 'flat' } {
+  const { text: percent, dir } = formatChange(change, pct);
+  if (change === null || dir === 'flat') return { text: percent, dir };
+  const arrow = change > 0 ? '▲' : '▼';
+  return { text: `${arrow} ${priceLabel(Math.abs(change), currency, false)} (${percent.slice(2)})`, dir };
+}
+
+/** "$100.50 – $106.00", or '' when either end is unknown. */
+export function dayRange(low: number | null, high: number | null, currency: string): string {
+  return low === null || high === null ? '' : `${priceLabel(low, currency, false)} – ${priceLabel(high, currency, false)}`;
+}
+
+/** The 3-month change from the first to the last daily close, or undefined with fewer than two points. */
+export function historyChange(history: number[]): { change: number; pct: number } | undefined {
+  const first = history[0];
+  const last = history[history.length - 1];
+  if (history.length < 2 || first === undefined || last === undefined || first === 0) return undefined;
+  return { change: last - first, pct: ((last - first) / first) * 100 };
+}
+
+const MARKET_WORDS = /\b(stocks?|stock market|dow|s&p|nasdaq|wall street|the fed|federal reserve|treasury yields?|bond yields?|bond market|yields?|inflation|earnings|oil prices?|crude|gold prices?|bitcoin|crypto|tariffs?|sensex|nifty|rallies|rally|sell-?off|ipo|interest rates?|rate (?:cut|hike)s?|jobs report|etfs?|commodity prices?|rupee)\b/i;
+const COMPANY_SUFFIX = /[,.]?\s+(corporation|corp|incorporated|inc|company|co|holdings|group|ltd|plc|n\.?v|class [a-z]|series \d+)\.?$/i;
+
+const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** What makes a story about your watchlist: each symbol and each company name (without "Inc." and the like) as a whole word.
+ * Compiled once here, not per story. Names match as written (a headline capitalizes them). */
+export function watchTerms(quotes: Quote[]): RegExp[] {
+  const terms = new Set<string>();
+  for (const q of quotes) {
+    if (q.symbol.length >= 2) terms.add(q.symbol.replace('^', ''));
+    let name = q.name.trim();
+    for (let next = name.replace(COMPANY_SUFFIX, ''); next !== name; next = name.replace(COMPANY_SUFFIX, '')) name = next;
+    if (name.length >= 4 && name !== q.symbol) terms.add(name);
+  }
+  return [...terms].map((t) => new RegExp(`(?<![A-Za-z0-9])${escape(t)}(?![A-Za-z0-9])`));
+}
+
+/** Is this story market news: from a markets feed, or a headline about markets or something on your watchlist? */
+export function isMarketNews(item: { title: string; subtopic?: string }, terms: RegExp[] = []): boolean {
+  return item.subtopic === 'markets' || MARKET_WORDS.test(item.title) || terms.some((t) => t.test(item.title));
 }

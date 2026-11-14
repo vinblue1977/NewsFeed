@@ -144,6 +144,9 @@ describe('feed helpers', () => {
   it('reads the route from the URL hash', () => {
     expect(parseRoute('#/markets')).toEqual({ kind: 'markets' });
     expect(parseRoute('#/settings')).toEqual({ kind: 'settings' });
+    expect(parseRoute('#/quote/NVDA')).toEqual({ kind: 'quote', id: 'NVDA' });
+    expect(parseRoute('#/quote/%5EGSPC')).toEqual({ kind: 'quote', id: '^GSPC' });
+    for (const bad of ['#/quote/', '#/quote/has space', '#/quote/%E0%A4%A', '#/quote/' + 'A'.repeat(41)]) expect(parseRoute(bad)).toEqual({ kind: 'home' });
     expect(parseRoute('#/markets/x')).toEqual({ kind: 'home' });
     expect(parseRoute('')).toEqual({ kind: 'home' });
     expect(parseRoute('#')).toEqual({ kind: 'home' });

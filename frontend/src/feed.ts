@@ -206,12 +206,22 @@ export function sections(list: Story[], top: Story | undefined): Section[] {
   });
 }
 
-export type Route = { kind: 'home' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
+export type Route = { kind: 'home' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/markets", "#/settings", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
   if (hash === '#/markets') return { kind: 'markets' };
   if (hash === '#/settings') return { kind: 'settings' };
+  const q = /^#\/quote\/(.{1,40})$/.exec(hash);
+  if (q?.[1]) {
+    try {
+      const id = decodeURIComponent(q[1]);
+      if (/^[A-Za-z0-9^][A-Za-z0-9.^=_-]{0,14}$/.test(id)) return { kind: 'quote', id: id.toUpperCase() };
+    } catch {
+      return { kind: 'home' };  // a malformed escape
+    }
+    return { kind: 'home' };
+  }
   const m = /^#\/(story|read)\/([A-Za-z0-9_-]{1,64})$/.exec(hash);
   if (!m?.[2]) return { kind: 'home' };
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };

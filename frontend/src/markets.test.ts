@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatChange, formatPrice, isFresh, parseMarkets, priceLabel, sparkline } from './markets';
+import { formatChange, formatPrice, isFresh, parseMarkets, priceLabel, sparkline, formatMove, dayRange, historyChange, isMarketNews, watchTerms } from './markets';
 
 const quote = (over: Record<string, unknown> = {}) => ({
   symbol: '^GSPC', name: 'S&P 500', ok: true, price: 7561.67, change: -30.73, change_pct: -0.4,
@@ -59,5 +59,49 @@ describe('formatting', () => {
     expect(pts[2]?.[0]).toBe(100);
     expect(pts.every(([, y]) => y >= 0 && y <= 28)).toBe(true);
     expect(sparkline([3, 3, 3])).not.toContain('NaN');  // a flat series must not divide by zero
+  });
+});
+
+describe('dollar moves and the detail numbers', () => {
+  it('shows the move in money first, then percent', () => {
+    expect(formatMove(-2.71, -0.36, 'USD')).toEqual({ text: '▼ $2.71 (0.36%)', dir: 'down' });
+    expect(formatMove(1.5, 0.76, 'USD')).toEqual({ text: '▲ $1.50 (0.76%)', dir: 'up' });
+    expect(formatMove(12, 0.5, 'CAD').text).toBe('▲ CAD 12.00 (0.50%)');
+    expect(formatMove(0, 0, 'USD').dir).toBe('flat');
+    expect(formatMove(null, null, 'USD').text).toBe('–');
+  });
+  it('formats the day range only when both ends are known', () => {
+    expect(dayRange(99, 106, 'USD')).toBe('$99.00 – $106.00');
+    expect(dayRange(null, 106, 'USD')).toBe('');
+  });
+  it('measures the 3-month change from the first and last close', () => {
+    expect(historyChange([100, 110, 125])).toEqual({ change: 25, pct: 25 });
+    expect(historyChange([100])).toBeUndefined();
+    expect(historyChange([0, 5])).toBeUndefined();
+  });
+  it('reads the new quote fields and tolerates their absence', () => {
+    const q = parseMarkets({ generated: 'g', tickers: [quote({ prev_close: 100, day_open: 101, day_high: 106, day_low: 99, history: [1, null, 2] })] })?.tickers[0];
+    expect(q).toMatchObject({ prevClose: 100, dayOpen: 101, dayHigh: 106, dayLow: 99, history: [1, 2] });
+    expect(parseMarkets({ generated: 'g', tickers: [quote()] })?.tickers[0]).toMatchObject({ dayOpen: null, history: [] });
+  });
+});
+
+describe('market news', () => {
+  it('accepts markets-feed stories and headlines about markets', () => {
+    expect(isMarketNews({ title: 'Anything at all', subtopic: 'markets' })).toBe(true);
+    expect(isMarketNews({ title: 'Stocks slip as Fed signals a pause' })).toBe(true);
+    expect(isMarketNews({ title: 'Heating oil prices are up 59%' })).toBe(true);
+    for (const t of ['Gold medal for the relay team', 'He shares his story of recovery', 'Fed up with traffic', 'Olive oil recipes']) expect(isMarketNews({ title: t })).toBe(false);
+    expect(isMarketNews({ title: '‘I’m sick of flying’: I paid for priority boarding' })).toBe(false);
+    expect(isMarketNews({ title: 'Ground stop followed updates to an older system' })).toBe(false);
+  });
+  it('also accepts a story naming something on your watchlist', () => {
+    const parsed = parseMarkets({ generated: 'g', tickers: [quote({ symbol: 'NVDA', name: 'NVIDIA Corporation' }), quote({ symbol: 'TSLA', name: 'Tesla, Inc.' })] });
+    const terms = watchTerms(parsed?.tickers ?? []);
+    expect(terms.map((t) => t.source)).toEqual(expect.arrayContaining([expect.stringContaining('NVDA'), expect.stringContaining('NVIDIA'), expect.stringContaining('Tesla')]));
+    expect(watchTerms(parseMarkets({ generated: 'g', tickers: [quote({ symbol: 'GOOGL', name: 'Alphabet Inc. Class A' })] })?.tickers ?? []).some((t) => t.test('Alphabet unveils a chip'))).toBe(true);
+    expect(isMarketNews({ title: 'Why NVIDIA is rethinking its China plans' }, terms)).toBe(true);
+    expect(isMarketNews({ title: 'TSLAX is not it' }, terms)).toBe(false);  // a symbol must stand alone
+    expect(isMarketNews({ title: 'A quiet day in town' }, terms)).toBe(false);
   });
 });
