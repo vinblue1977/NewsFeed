@@ -7,9 +7,11 @@ import { useChrome } from './chrome';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, parseRoute, readerPage, safeUrl, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Story } from './feed';
 import { formatChange, isFresh as marketsFresh, type Markets, priceLabel, type Quote, sparkline } from './markets';
+import { loadSettings, readSize, saveSettings, type Settings, sourceNames, TEXT_SIZES, toggled, withoutSources } from './settings';
 import type { Feed, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
+const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings';
 const PAGE = 30;
 const TICK_MS = 60_000;
 const COVERAGE_SHOWN = 8;
@@ -187,15 +189,15 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
   );
 }
 
-function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'markets' }) {
-  const link = (tab: 'home' | 'markets', href: string, label: string) =>
+function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'markets' | 'settings' }) {
+  const link = (tab: 'home' | 'markets' | 'settings', href: string, label: string) =>
     current === tab ? <a class="on" href={href} aria-current="page">{label}</a> : <a href={href}>{label}</a>;
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
       {['Explore', 'Saved'].map((name) => <button key={name} type="button" disabled>{name}</button>)}
       {link('markets', '#/markets', 'Markets')}
-      <button type="button" disabled>Settings</button>
+      {link('settings', '#/settings', 'Settings')}
     </nav>
   );
 }
@@ -216,9 +218,10 @@ function QuoteRow({ q, index = false }: { q: Quote; index?: boolean }) {
   );
 }
 
-function MarketsScreen({ markets, loaded, now }: { markets: Markets | undefined; loaded: boolean; now: Date }) {
+function MarketsScreen({ markets, loaded, now, hidden }: { markets: Markets | undefined; loaded: boolean; now: Date; hidden: string[] }) {
+  const tickers = markets ? markets.tickers.filter((q) => !hidden.includes(q.symbol)) : [];
   const stale = markets ? !marketsFresh(markets.generated, now) : false;
-  const open = markets && !stale ? [...markets.indexes, ...markets.tickers].some((q) => q.open) : false;  // `open` is frozen at build time
+  const open = markets && !stale ? [...markets.indexes, ...tickers].some((q) => q.open) : false;  // `open` is frozen at build time
   const traded = markets?.indexes.find((q) => q.lastTrade)?.lastTrade;
   return (
     <div class="wrap">
@@ -237,10 +240,10 @@ function MarketsScreen({ markets, loaded, now }: { markets: Markets | undefined;
           <ul class="ql">{markets.indexes.map((q) => <QuoteRow key={q.symbol} q={q} index />)}</ul>
         </>
       )}
-      {markets && markets.tickers.length > 0 && (
+      {tickers.length > 0 && (
         <>
           <div class="grp">Watchlist</div>
-          <ul class="ql">{markets.tickers.map((q) => <QuoteRow key={q.symbol} q={q} />)}</ul>
+          <ul class="ql">{tickers.map((q) => <QuoteRow key={q.symbol} q={q} />)}</ul>
         </>
       )}
       {markets && markets.missing > 0 && <p class="note">{markets.missing} {markets.missing === 1 ? 'quote is' : 'quotes are'} unavailable right now.</p>}
@@ -249,6 +252,51 @@ function MarketsScreen({ markets, loaded, now }: { markets: Markets | undefined;
           {traded ? `Last trade ${timeAgo(traded, now)}. ` : ''}Delayed, unofficial data from Yahoo Finance. Not investment advice.
         </p>
       )}
+    </div>
+  );
+}
+
+function SettingsScreen({ settings, update, sources, markets, marketsLoaded }: {
+  settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; markets: Markets | undefined; marketsLoaded: boolean;
+}) {
+  const symbols = [...new Map([...(markets?.tickers ?? []).map((q) => [q.symbol, `${q.name} · ${q.symbol}`] as const),
+    ...settings.hiddenTickers.map((t) => [t, t] as const)]).entries()];  // a hidden symbol no longer in the list can still be switched back on
+  return (
+    <div class="wrap">
+      <header class="hdr"><div><div class="e">On this device</div><h1>Settings</h1></div></header>
+      <div class="grp">Reader text size</div>
+      <div class="seg" role="group" aria-label="Reader text size">
+        {TEXT_SIZES.map((t) => (
+          <button key={t.id} type="button" class={t.id === settings.textSize ? 'on' : ''} aria-pressed={t.id === settings.textSize}
+            onClick={() => update({ textSize: t.id })}>{t.label}</button>
+        ))}
+      </div>
+      <p class="sample">Sample of how an article will read.</p>
+      <div class="grp">News sources</div>
+      {sources.length === 0 && <p class="note">Sources appear once the news has loaded.</p>}
+      {sources.length > 0 && (
+        <ul class="set">
+          {sources.map((name) => (
+            <li key={name}><label>{name}
+              <input type="checkbox" checked={!settings.hiddenSources.includes(name)}
+                onChange={() => update({ hiddenSources: toggled(settings.hiddenSources, name) })} />
+            </label></li>
+          ))}
+        </ul>
+      )}
+      <div class="grp">Markets watchlist</div>
+      {symbols.length === 0 && <p class="note">{markets ? 'No watchlist symbols are configured.' : marketsLoaded ? 'Watchlist unavailable right now.' : 'Loading the watchlist…'}</p>}
+      {symbols.length > 0 && (
+        <ul class="set">
+          {symbols.map(([symbol, label]) => (
+            <li key={symbol}><label>{label}
+              <input type="checkbox" checked={!settings.hiddenTickers.includes(symbol)}
+                onChange={() => update({ hiddenTickers: toggled(settings.hiddenTickers, symbol) })} />
+            </label></li>
+          ))}
+        </ul>
+      )}
+      <p class="fine">Saved on this device only. Hiding a source or symbol does not delete it. Symbols themselves are set up outside the app.</p>
     </div>
   );
 }
@@ -271,6 +319,11 @@ export function App() {
   const [weather, setWeather] = useState<Weather | undefined>();
   const [markets, setMarkets] = useState<Markets | undefined>();
   const [marketsLoaded, setMarketsLoaded] = useState(false);
+  const [settings, setSettings] = useState<Settings>(() => {
+    const s = loadSettings();
+    document.documentElement.style.setProperty('--read-size', `${readSize(s.textSize)}px`);  // before the first paint, so no reflow
+    return s;
+  });
   const [route, setRoute] = useState(() => parseRoute(location.hash));
   const homeScroll = useRef(0);
   const routeRef = useRef(route);
@@ -296,19 +349,19 @@ export function App() {
   };
   useEffect(() => {
     refresh();
-    if (routeRef.current.kind === 'markets') refreshMarkets();
+    if (needsMarkets(routeRef.current.kind)) refreshMarkets();
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         setNow(new Date());
         refresh();
-        if (routeRef.current.kind === 'markets') refreshMarkets();
+        if (needsMarkets(routeRef.current.kind)) refreshMarkets();
       }
     };
     document.addEventListener('visibilitychange', onVisible);
     const onHash = () => {
       const next = parseRoute(location.hash);
       if (routeRef.current.kind === 'home' && next.kind !== 'home') homeScroll.current = window.scrollY;  // come back to the same place
-      if (next.kind === 'markets') refreshMarkets();
+      if (needsMarkets(next.kind)) refreshMarkets();
       routeRef.current = next;
       inAppNavs.current += 1;
       setRoute(next);
@@ -323,7 +376,19 @@ export function App() {
     };
   }, []);
 
-  const feed = load.state === 'ready' ? load.feed : undefined;
+  const raw = load.state === 'ready' ? load.feed : undefined;  // the Reader opens any article, even from a hidden source
+  const feed = useMemo(() => (raw ? withoutSources(raw, settings.hiddenSources) : undefined), [raw, settings.hiddenSources]);
+  const sources = useMemo(() => sourceNames(raw, settings.hiddenSources), [raw, settings.hiddenSources]);
+  const update = (next: Partial<Settings>) => {
+    setSettings((prev) => {  // from the latest state, so two quick taps both count
+      const merged = { ...prev, ...next };
+      saveSettings(merged);
+      return merged;
+    });
+  };
+  useEffect(() => {
+    document.documentElement.style.setProperty('--read-size', `${readSize(settings.textSize)}px`);
+  }, [settings.textSize]);
   const isBrief = view === 'brief';
   // only the visible view is computed
   const list = useMemo(() => (feed && !isBrief ? stories(feed, topic) : []), [feed, topic, isBrief]);
@@ -339,7 +404,7 @@ export function App() {
     setShown(PAGE);
   };
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
-  const screenKey = route.kind === 'home' || route.kind === 'markets' ? route.kind : `${route.kind}:${route.id}`;
+  const screenKey = route.kind === 'home' || route.kind === 'markets' || route.kind === 'settings' ? route.kind : `${route.kind}:${route.id}`;
   useEffect(() => {
     window.scrollTo(0, screenKey === 'home' ? homeScroll.current : 0);
   }, [screenKey]);
@@ -349,8 +414,17 @@ export function App() {
   if (route.kind === 'markets') {
     return (
       <>
-        <MarketsScreen markets={markets} loaded={marketsLoaded} now={now} />
+        <MarketsScreen markets={markets} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers} />
         <TabBar current="markets" />
+      </>
+    );
+  }
+
+  if (route.kind === 'settings') {
+    return (
+      <>
+        <SettingsScreen settings={settings} update={update} sources={sources} markets={markets} marketsLoaded={marketsLoaded} />
+        <TabBar current="settings" />
       </>
     );
   }
@@ -360,8 +434,8 @@ export function App() {
       <>
         {feed ? (
           route.kind === 'story'
-            ? <StoryScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
-            : <ReaderScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
+            ? <StoryScreen key={route.id} feed={raw ?? feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
+            : <ReaderScreen key={route.id} feed={raw ?? feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
         ) : (
           <div class="wrap">
             <div class="back"><a class="ib" href="#" aria-label="Home">‹</a></div>
@@ -412,7 +486,9 @@ export function App() {
         )}
         {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
         {feed && isBrief && brief && brief.total === 0 && <div class="empty"><b>Nothing new today</b><span>No stories from the last 24 hours.</span></div>}
-        {feed && !isBrief && list.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
+        {raw && feed && raw.items.length > 0 && feed.items.length === 0 && <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>}
+        {feed && !isBrief && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
+        {feed && !isBrief && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
         {isBrief && brief && (
           <>
