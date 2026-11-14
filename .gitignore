@@ -27,3 +27,4 @@ frontend/dist/
 data/
 
 .DS_Store
+.playwright-mcp/

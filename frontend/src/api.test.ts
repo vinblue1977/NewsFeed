@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadWeather, resetArticlesCache } from './api';
+import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadMarkets, loadWeather, resetArticlesCache } from './api';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) });
 
@@ -41,6 +41,20 @@ describe('loadWeather', () => {
     expect(await loadWeather()).toBeUndefined();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     expect(await loadWeather()).toBeUndefined();
+  });
+});
+
+describe('loadMarkets', () => {
+  it('returns the parsed quotes, or undefined for any problem', async () => {
+    const quote = { symbol: '^GSPC', ok: true, price: 1 };
+    vi.stubGlobal('fetch', reply({ generated: 'g', indexes: [quote], tickers: [] }));
+    expect((await loadMarkets())?.indexes[0]?.price).toBe(1);
+    vi.stubGlobal('fetch', reply({}, false, 403));
+    expect(await loadMarkets()).toBeUndefined();
+    vi.stubGlobal('fetch', reply({ nope: 1 }));
+    expect(await loadMarkets()).toBeUndefined();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await loadMarkets()).toBeUndefined();
   });
 });
 
