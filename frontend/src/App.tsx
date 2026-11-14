@@ -1,7 +1,8 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadFeed, loadWeather } from './api';
+import { loadArticles, loadFeed, loadWeather } from './api';
+import { type Block, groupBlocks, readingMinutes } from './article';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, parseRoute, readerPage, safeUrl, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Story } from './feed';
 import type { Feed, Topic } from './types';
@@ -62,15 +63,46 @@ function StoryAnchor({ story, class: cls, children }: { story: Story; class: str
   return <a class={cls} href={storyLink(story)}>{children}</a>;
 }
 
-function readerNote(source: string, hasSummary: boolean, hasLink: boolean): string {
-  if (!hasLink) return `${source} did not supply a usable link to the story.`;
-  return hasSummary
+function readerNote(o: { source: string; hasSummary: boolean; hasLink: boolean; hasFullText: boolean }): string {
+  const { source } = o;
+  if (!o.hasLink) return `${source} did not supply a usable link to the story.`;
+  if (o.hasFullText) return `Text supplied by ${source}. Open the original for images and the full page.`;
+  return o.hasSummary
     ? `Showing the summary supplied by ${source}. Read the rest on their site.`
     : `${source} supplies only the headline. Read the story on their site.`;
 }
 
+function ArticleBody({ blocks }: { blocks: Block[] }) {
+  return (
+    <div class="body">
+      {groupBlocks(blocks).map((g, n) => {
+        if (g.kind === 'h') return <h2 key={n}>{g.text}</h2>;
+        if (g.kind === 'q') return <blockquote key={n}>{g.text}</blockquote>;
+        if (g.kind === 'list') return <ul key={n}>{g.items.map((x, k) => <li key={k}>{x}</li>)}</ul>;
+        return <p key={n}>{g.text}</p>;
+      })}
+    </div>
+  );
+}
+
 function ReaderScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; now: Date; canGoBack: boolean }) {
   const page = readerPage(feed, id);
+  const wantsFull = page?.item.full === true;
+  const [blocks, setBlocks] = useState<Block[] | undefined>();
+  const [answered, setAnswered] = useState(false);  // the full-text request has finished (with or without this article)
+  const fetching = wantsFull && !answered;  // so "Loading" shows exactly while waiting, and cannot hang
+  useEffect(() => {
+    if (!wantsFull) return undefined;
+    let current = true;
+    void loadArticles(id).then((articles) => {
+      if (!current) return;
+      const found = articles?.[id];
+      setBlocks(Array.isArray(found) ? found : undefined);
+      setAnswered(true);
+    });
+    return () => { current = false; };
+  }, [wantsFull, id]);
+  const minutes = useMemo(() => (blocks ? readingMinutes(blocks) : 0), [blocks]);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = ''; };
   const url = page ? safeUrl(page.item.url) : '#';
   const canShare = typeof navigator.share === 'function' && url !== '#';
@@ -89,12 +121,13 @@ function ReaderScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; no
           <h1>{page.item.title}</h1>
           <div class="src art-src">
             <span class="fav" style={{ background: badgeColor(page.item.source) }}>{initial(page.item.source)}</span>
-            {page.item.source} · {timeAgo(page.item.published, now)}{page.item.metered ? ' · Metered' : ''}
+            {page.item.source} · {timeAgo(page.item.published, now)}{blocks ? ` · ${minutes} min read` : ''}{page.item.metered ? ' · Metered' : ''}
           </div>
-          {page.item.summary ? <p>{page.item.summary}</p> : null}
+          {blocks ? <ArticleBody blocks={blocks} /> : page.item.summary ? <p>{page.item.summary}</p> : null}
+          {fetching && !blocks && <p class="wait">Loading the full text…</p>}
           <div class="box infobox">
             <span aria-hidden="true">ⓘ</span>
-            <span>{readerNote(page.item.source, page.item.summary !== '', url !== '#')}</span>
+            <span>{readerNote({ source: page.item.source, hasSummary: page.item.summary !== '', hasLink: url !== '#', hasFullText: blocks !== undefined })}</span>
           </div>
           <div class="btns">
             {url !== '#' && <a class="btn" href={url} {...EXTERNAL}>Open original ↗</a>}
@@ -330,7 +363,7 @@ export function App() {
               <div class="full">
                 <div class="lab">FULL COVERAGE · {lead.sources} SOURCES</div>
                 {full.map((i) => (
-                  <a class="it" key={i.id} href={safeUrl(i.url)} {...EXTERNAL}>
+                  <a class="it" key={i.id} href={`#/read/${i.id}`}>
                     <Source name={i.source} when={timeAgo(i.published, now)} />
                     <b>{i.title}</b>
                   </a>
