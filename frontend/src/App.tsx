@@ -1,12 +1,16 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { loadFeed, loadWeather } from './api';
-import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, safeUrl, stories, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, initial, isStale, parseRoute, safeUrl, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import type { Story } from './feed';
 import type { Feed, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
 const PAGE = 30;
 const TICK_MS = 60_000;
+const COVERAGE_SHOWN = 8;
+const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer' } as const;
 const VIEW_KEY = 'news.view';
 
 type View = 'feed' | 'brief';
@@ -53,6 +57,69 @@ function WeatherStrip({ weather, stale }: { weather: Weather; stale: boolean }) 
   );
 }
 
+/** A story link: the Story screen when several sources cover it, otherwise the article itself in a new tab. */
+function StoryAnchor({ story, class: cls, children }: { story: Story; class: string; children: ComponentChildren }) {
+  const { href, external } = storyLink(story);
+  if (href === '#') return <div class={cls}>{children}</div>;  // an unusable link is shown, but is not tappable
+  return external ? <a class={cls} href={href} {...EXTERNAL}>{children}</a> : <a class={cls} href={href}>{children}</a>;
+}
+
+function StoryScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; now: Date; canGoBack: boolean }) {
+  const page = storyPage(feed, id);
+  const [all, setAll] = useState(false);
+  const goBack = () => { if (canGoBack) history.back(); else location.hash = ''; };  // a deep link has nothing in the app to go back to
+  const shown = page && !all ? page.items.slice(0, COVERAGE_SHOWN) : (page?.items ?? []);
+  return (
+    <div class="wrap">
+      <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>
+      {!page && <div class="empty"><b>Story not found</b><span>It may have dropped out of the latest news.</span></div>}
+      {page && (
+        <>
+          <div class="tag">{topicLabel(page.cluster.topic)} · Full coverage</div>
+          <h1 class="ttl">{page.cluster.title}</h1>
+          <div class="meta">Updated {timeAgo(page.items[0]?.published ?? page.cluster.published, now)} · {page.sources} {page.sources === 1 ? 'source' : 'sources'}</div>
+          <div class="sh"><b>Coverage from {page.sources} {page.sources === 1 ? 'source' : 'sources'}</b></div>
+          {shown.map((i) => (
+            <a class="cv" key={i.id} href={safeUrl(i.url)} {...EXTERNAL}>
+              <span class="fav" style={{ background: badgeColor(i.source) }}>{initial(i.source)}</span>
+              <div class="cvt"><b>{i.title}</b><small>{i.source} · {timeAgo(i.published, now)}{i.metered ? ' · Metered' : ''}</small></div>
+              <span class="chev" aria-hidden="true">›</span>
+            </a>
+          ))}
+          {page.items.length > COVERAGE_SHOWN && !all && (
+            <div class="more"><button type="button" class="btn g" onClick={() => setAll(true)}>Show {page.items.length - COVERAGE_SHOWN} more</button></div>
+          )}
+          <div class="note">Paywalled articles are filtered out · sources that limit free reads are marked Metered</div>
+          {page.related.length > 0 && (
+            <>
+              <div class="sh"><b>Related</b></div>
+              {page.related.map((r) => (
+                <StoryAnchor story={r} key={r.item.id} class="row">
+                  <div class="t">
+                    <Source name={r.item.source} when={timeAgo(r.item.published, now)} />
+                    <h3>{r.item.title}</h3>
+                  </div>
+                </StoryAnchor>
+              ))}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabBar() {
+  return (
+    <nav class="tabbar" aria-label="Sections">
+      <a class="on" href="#" aria-current="page">For you</a>
+      {['Explore', 'Saved', 'Markets', 'Settings'].map((name) => (
+        <button key={name} type="button" disabled>{name}</button>
+      ))}
+    </nav>
+  );
+}
+
 function Source({ name, when, extra }: { name: string; when: string; extra?: string }) {
   return (
     <div class="src">
@@ -69,6 +136,10 @@ export function App() {
   const [shown, setShown] = useState(PAGE);
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
+  const [route, setRoute] = useState(() => parseRoute(location.hash));
+  const homeScroll = useRef(0);
+  const routeRef = useRef(route);
+  const inAppNavs = useRef(0);  // hash changes since the app opened: more than zero means there is an app screen to go back to
 
   const latest = useRef(0);
   const refresh = () => {
@@ -85,10 +156,19 @@ export function App() {
       if (document.visibilityState === 'visible') { setNow(new Date()); refresh(); }
     };
     document.addEventListener('visibilitychange', onVisible);
+    const onHash = () => {
+      const next = parseRoute(location.hash);
+      if (routeRef.current.kind === 'home' && next.kind === 'story') homeScroll.current = window.scrollY;  // come back to the same place
+      routeRef.current = next;
+      inAppNavs.current += 1;
+      setRoute(next);
+    };
+    window.addEventListener('hashchange', onHash);
     const tick = setInterval(() => setNow(new Date()), TICK_MS);  // "x min ago" and the stale banner keep moving
     return () => {
       latest.current = -1;
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('hashchange', onHash);
       clearInterval(tick);
     };
   }, []);
@@ -109,7 +189,30 @@ export function App() {
     setShown(PAGE);
   };
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
+  const screenKey = route.kind === 'story' ? route.id : 'home';
+  useEffect(() => {
+    window.scrollTo(0, screenKey === 'home' ? homeScroll.current : 0);
+  }, [screenKey]);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  if (route.kind === 'story') {
+    return (
+      <>
+        {feed ? (
+          <StoryScreen key={route.id} feed={feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} />
+        ) : (
+          <div class="wrap">
+            <div class="back"><a class="ib" href="#" aria-label="Home">‹</a></div>
+            {load.state === 'error' ? (
+              <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
+                <button type="button" class="btn" onClick={() => { setLoad({ state: 'loading' }); refresh(); }}>Try again</button></div>
+            ) : <p class="note">Loading…</p>}
+          </div>
+        )}
+        <TabBar />
+      </>
+    );
+  }
 
   return (
     <>
@@ -148,22 +251,22 @@ export function App() {
             {brief.top && (
               <>
                 <div class="grp"><i style={{ background: BRIEF_TOP_COLOR }} />Top story</div>
-                <a class="bi first" href={safeUrl(brief.top.item.url)} target="_blank" rel="noopener noreferrer">
+                <StoryAnchor story={brief.top} class="bi first">
                   <h2>{brief.top.item.title}</h2>
                   {brief.top.item.summary && <p>{brief.top.item.summary.slice(0, 200)}</p>}
                   <div class="m"><span>{brief.top.item.source}</span><span>{timeAgo(brief.top.item.published, now)}</span>
                     {brief.top.sources > 1 && <span class="c">{brief.top.sources} sources</span>}</div>
-                </a>
+                </StoryAnchor>
               </>
             )}
             {brief.groups.map((g) => (
               <section key={g.label}>
                 <div class="grp"><i style={{ background: g.color }} />{g.label}</div>
                 {g.stories.map((st) => (
-                  <a class="bi" key={st.item.id} href={safeUrl(st.item.url)} target="_blank" rel="noopener noreferrer">
+                  <StoryAnchor story={st} key={st.item.id} class="bi">
                     <h2>{st.item.title}</h2>
                     <div class="m"><span>{st.item.source}</span><span>{timeAgo(st.item.published, now)}</span></div>
-                  </a>
+                  </StoryAnchor>
                 ))}
               </section>
             ))}
@@ -174,15 +277,15 @@ export function App() {
         {!isBrief && lead && (
           <>
             <div class="sec"><b>Top story</b></div>
-            <a class="big" href={safeUrl(lead.item.url)} target="_blank" rel="noopener noreferrer">
+            <StoryAnchor story={lead} class="big">
               <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
               <h2>{lead.item.title}</h2>
-            </a>
+            </StoryAnchor>
             {full.length > 0 && (
               <div class="full">
                 <div class="lab">FULL COVERAGE · {lead.sources} SOURCES</div>
                 {full.map((i) => (
-                  <a class="it" key={i.id} href={safeUrl(i.url)} target="_blank" rel="noopener noreferrer">
+                  <a class="it" key={i.id} href={safeUrl(i.url)} {...EXTERNAL}>
                     <Source name={i.source} when={timeAgo(i.published, now)} />
                     <b>{i.title}</b>
                   </a>
@@ -194,24 +297,19 @@ export function App() {
 
         {!isBrief && weather && <WeatherStrip weather={weather} stale={weatherStale} />}
         {!isBrief && rest.slice(0, shown).map((s) => (
-          <a class="row" key={s.item.id} href={safeUrl(s.item.url)} target="_blank" rel="noopener noreferrer">
+          <StoryAnchor story={s} key={s.item.id} class="row">
             <div class="t">
               <Source name={s.item.source} when={timeAgo(s.item.published, now)}
                 extra={[topicLabel(s.item.topic), s.item.place, s.sources > 1 ? `${s.sources} sources` : ''].filter(Boolean).join(' · ')} />
               <h3>{s.item.title}</h3>
             </div>
-          </a>
+          </StoryAnchor>
         ))}
         {!isBrief && rest.length > shown && (
           <div class="more"><button type="button" class="btn g" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>
         )}
       </div>
-      <nav class="tabbar" aria-label="Sections">
-        <button type="button" class="on" aria-current="page">For you</button>
-        {['Explore', 'Saved', 'Markets', 'Settings'].map((name) => (
-          <button key={name} type="button" disabled>{name}</button>
-        ))}
-      </nav>
+      <TabBar />
     </>
   );
 }
