@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, stories, timeAgo, topicLabel, topStory } from './feed';
+import { badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -143,6 +143,9 @@ describe('feed helpers', () => {
 
   it('reads the route from the URL hash', () => {
     expect(parseRoute('#/local')).toEqual({ kind: 'local' });
+    expect(parseRoute('#/discovery')).toEqual({ kind: 'discovery' });
+    expect(parseRoute('#/discovery/cricket')).toEqual({ kind: 'discovery', sub: 'cricket' });
+    expect(parseRoute('#/discovery/Bad Thing')).toEqual({ kind: 'home' });
     expect(parseRoute('#/markets')).toEqual({ kind: 'markets' });
     expect(parseRoute('#/settings')).toEqual({ kind: 'settings' });
     expect(parseRoute('#/quote/NVDA')).toEqual({ kind: 'quote', id: 'NVDA' });
@@ -232,5 +235,31 @@ describe('splitRecent', () => {
     expect(recent.map((s) => s.item.id)).toEqual(['a', 'b']);
     expect(earlier.map((s) => s.item.id)).toEqual(['c', 'd']);
     expect(splitRecent([story('bad', 'garbage'), story('old', '2026-11-01T00:00:00Z')], now).earlier.map((s) => s.item.id)).toEqual(['old', 'bad']);  // bad dates last
+  });
+});
+
+describe('discovery', () => {
+  const now = new Date('2026-11-15T12:00:00Z');
+  const mk = (id: string, published: string, sources: number, subtopic?: string) => ({
+    item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic: 'us' as const, subtopic },
+    cluster: sources > 1 ? { id: `c-${id}`, title: id, topic: 'us' as const, lead: id, published, sources, items: [id] } : undefined,
+    sources,
+  });
+  const list = [  // newest first
+    mk('new1', '2026-11-15T11:50:00Z', 1, 'cricket'), mk('wide3', '2026-11-15T10:00:00Z', 3), mk('wide7', '2026-11-15T09:00:00Z', 7),
+    mk('top', '2026-11-15T08:00:00Z', 12, 'cricket'), mk('nfl1', '2026-11-14T08:00:00Z', 1, 'nfl'), mk('old', '2026-11-10T08:00:00Z', 9, 'cricket'),
+  ];
+  it('ranks widely covered stories by sources, leaves out the top story, and keeps Just in to the last day', () => {
+    const d = discovery(list, now);
+    expect(d.widely.map((s) => s.item.id)).toEqual(['wide7', 'wide3']);
+    expect(d.justIn.map((s) => s.item.id)).toEqual(['new1']);
+    expect(discovery([mk('old', '2026-11-01T00:00:00Z', 1)], now).justIn).toEqual([]);
+  });
+  it('counts every story of a sub-topic, top story included, so a tile matches the list it opens', () => {
+    expect(discovery(list, now).corners.map((c) => [c.id, c.lead.item.id, c.total])).toEqual([['cricket', 'new1', 3], ['nfl', 'nfl1', 1]]);
+    expect(discovery([], now)).toEqual({ widely: [], justIn: [], corners: [] });
+  });
+  it('titles sub-topics', () => {
+    expect([subtopicLabel('cricket'), subtopicLabel('nfl')]).toEqual(['Cricket', 'NFL']);
   });
 });

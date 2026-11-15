@@ -4,14 +4,17 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadFeed, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
-import type { Section, Story } from './feed';
+import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import type { Route, Section, Story } from './feed';
 import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
 import { loadSettings, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
+/** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
+const screenKeyOf = (r: Route): string =>
+  r.kind === 'discovery' ? `discovery:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
 const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings' || kind === 'quote';
 const PAGE = 30;
 const TICK_MS = 60_000;
@@ -241,13 +244,13 @@ function PullIndicator({ distance, spinning }: { distance: number; spinning: boo
   );
 }
 
-function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'local' | 'markets' | 'settings' }) {
-  const link = (tab: 'home' | 'local' | 'markets' | 'settings', href: string, label: string) =>
+function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'discovery' | 'local' | 'markets' | 'settings' }) {
+  const link = (tab: 'home' | 'discovery' | 'local' | 'markets' | 'settings', href: string, label: string) =>
     current === tab ? <a class="on" href={href} aria-current="page">{label}</a> : <a href={href}>{label}</a>;
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
-      <button type="button" disabled>Discovery</button>
+      {link('discovery', '#/discovery', 'Discovery')}
       {link('local', '#/local', 'Local')}
       {link('markets', '#/markets', 'Markets')}
       {link('settings', '#/settings', 'Settings')}
@@ -318,6 +321,62 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
             <Stat label="Last trade" value={q.lastTrade ? timeAgo(q.lastTrade, now) : ''} />
           </ul>
           <p class="fine">Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
+function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onRetry, canGoBack }: {
+  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void;
+  onRetry: () => void; canGoBack: boolean;
+}) {
+  const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
+  const found = useMemo(() => discovery(all, now), [all, now]);
+  const inSub = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : []), [all, sub]);
+  const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/discovery'; };
+  const waiting = !feed && !failed && !loaded;
+  return (
+    <div class="wrap">
+      {sub && <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>}
+      <header class="hdr"><div><div class="e">{sub ? 'Discovery' : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : 'Discovery'}</h1></div></header>
+      {waiting && <p class="note">Loading…</p>}
+      {failed && !feed && (
+        <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
+          <button type="button" class="btn" onClick={onRetry}>Try again</button></div>
+      )}
+      {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
+      {feed && sub && inSub.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No stories in this sub-topic right now.</span></div>}
+      {sub && inSub.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+      {sub && inSub.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
+      {feed && !sub && found.widely.length + found.justIn.length + found.corners.length === 0 && (
+        <div class="empty"><b>Nothing to discover yet</b><span>Check back after the next update.</span></div>
+      )}
+      {!sub && found.widely.length > 0 && (
+        <>
+          <div class="grp">Widely covered</div>
+          {found.widely.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        </>
+      )}
+      {!sub && found.justIn.length > 0 && (
+        <>
+          <div class="grp">Just in</div>
+          {found.justIn.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        </>
+      )}
+      {!sub && found.corners.length > 0 && (
+        <>
+          <div class="grp">Corners of the feed</div>
+          <div class="tiles">
+            {found.corners.map((c) => (
+              <a key={c.id} class="tile" href={`#/discovery/${c.id}`} onClick={onOpenSub}>
+                <b>{c.label}</b>
+                <span class="tl">{c.lead.item.title}</span>
+                <span class="tn">{c.total} {c.total === 1 ? 'story' : 'stories'} · {timeAgo(c.lead.item.published, now)} ›</span>
+              </a>
+            ))}
+          </div>
         </>
       )}
     </div>
@@ -514,6 +573,7 @@ export function App() {
   const [topic, setTopic] = useState<Topic | 'all'>('all');
   const [view, setView] = useState<View>(savedView);
   const [shown, setShown] = useState(PAGE);
+  const [subShown, setSubShown] = useState(PAGE);  // rows shown in a Discovery sub-topic list
   const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
@@ -570,8 +630,8 @@ export function App() {
     document.addEventListener('visibilitychange', onVisible);
     const onHash = () => {
       const next = parseRoute(location.hash);
-      const from = routeRef.current.kind;
-      if ((from === 'home' || from === 'local') && next.kind !== from) scrolls.current[from] = window.scrollY;  // come back to the same place
+      const prev = routeRef.current;
+      if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
       if (needsMarkets(next.kind)) refreshMarkets();
       routeRef.current = next;
       inAppNavs.current += 1;
@@ -622,17 +682,29 @@ export function App() {
     setShown(PAGE);
   };
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
-  const screenKey = route.kind === 'home' || route.kind === 'local' || route.kind === 'markets' || route.kind === 'settings' ? route.kind : `${route.kind}:${route.id}`;
+  const screenKey = screenKeyOf(route);
   useEffect(() => {
     window.scrollTo(0, scrolls.current[screenKey] ?? 0);
   }, [screenKey]);
-  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'markets', () => {
+  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'discovery' || route.kind === 'markets', () => {
     setNow(new Date());
     if (routeRef.current.kind === 'markets') refreshMarkets();
     else refresh();
   });
   const chrome = useChrome(route.kind === 'story' || route.kind === 'read', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  if (route.kind === 'discovery') {
+    return (
+      <>
+        <PullIndicator {...pull} />
+        <DiscoveryScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
+          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)}
+          canGoBack={inAppNavs.current > 0} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
+        <TabBar current="discovery" />
+      </>
+    );
+  }
 
   if (route.kind === 'local') {
     return (
