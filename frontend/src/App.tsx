@@ -15,6 +15,8 @@ import { degrees, describe, isFresh, type Weather } from './weather';
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
 const screenKeyOf = (r: Route): string =>
   r.kind === 'discovery' ? `discovery:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
+/** The Browse tab (was Discovery). Its route stays `#/discovery` and the code keeps the Discovery names so old links and bookmarks still work. */
+const BROWSE = 'Browse';
 const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings' || kind === 'quote';
 const PAGE = 30;
 const TICK_MS = 60_000;
@@ -250,7 +252,7 @@ function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; curren
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
-      {link('discovery', '#/discovery', 'Discovery')}
+      {link('discovery', '#/discovery', BROWSE)}
       {link('local', '#/local', 'Local')}
       {link('markets', '#/markets', 'Markets')}
       {link('settings', '#/settings', 'Settings')}
@@ -327,7 +329,7 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
   );
 }
 
-/** Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
+/** The Browse screen (route and name kept as Discovery). Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
 function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onRetry, canGoBack }: {
   feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void;
   onRetry: () => void; canGoBack: boolean;
@@ -340,7 +342,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
   return (
     <div class="wrap">
       {sub && <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>}
-      <header class="hdr"><div><div class="e">{sub ? 'Discovery' : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : 'Discovery'}</h1></div></header>
+      <header class="hdr"><div><div class="e">{sub ? BROWSE : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : BROWSE}</h1></div></header>
       {waiting && <p class="note">Loading…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -575,7 +577,7 @@ export function App() {
   const [topic, setTopic] = useState<Topic | 'all'>('all');
   const [view, setView] = useState<View>(savedView);
   const [shown, setShown] = useState(PAGE);
-  const [subShown, setSubShown] = useState(PAGE);  // rows shown in a Discovery sub-topic list
+  const [subShown, setSubShown] = useState(PAGE);  // rows shown in a Browse sub-topic list
   const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
