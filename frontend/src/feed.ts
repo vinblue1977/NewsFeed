@@ -121,6 +121,18 @@ function recentOnly(list: Story[], now: Date): Story[] {
   return list.filter((s) => ageMs(s.item.published, now) < DAY_MS);
 }
 
+/** `list` (newest first) split into the last 24 hours and everything older; stories with an unparseable date come last. */
+export function splitRecent(list: Story[], now: Date): { recent: Story[]; earlier: Story[] } {
+  const recent: Story[] = [];
+  const earlier: Story[] = [];
+  const undated: Story[] = [];
+  for (const s of list) {
+    const age = ageMs(s.item.published, now);
+    (Number.isNaN(age) ? undated : age < DAY_MS ? recent : earlier).push(s);
+  }
+  return { recent, earlier: [...earlier, ...undated] };
+}
+
 /** The lead story: the best-covered cluster from the last day (ties: newest). */
 export function topStory(list: Story[], now: Date): Story | undefined {
   return [...recentOnly(list, now)].sort((a, b) => b.sources - a.sources || b.item.published.localeCompare(a.item.published))[0];
@@ -206,10 +218,11 @@ export function sections(list: Story[], top: Story | undefined): Section[] {
   });
 }
 
-export type Route = { kind: 'home' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
+export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
+  if (hash === '#/local') return { kind: 'local' };
   if (hash === '#/markets') return { kind: 'markets' };
   if (hash === '#/settings') return { kind: 'settings' };
   const q = /^#\/quote\/(.{1,40})$/.exec(hash);

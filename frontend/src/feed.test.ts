@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, stories, timeAgo, topicLabel, topStory } from './feed';
+import { badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -142,6 +142,7 @@ describe('feed helpers', () => {
   });
 
   it('reads the route from the URL hash', () => {
+    expect(parseRoute('#/local')).toEqual({ kind: 'local' });
     expect(parseRoute('#/markets')).toEqual({ kind: 'markets' });
     expect(parseRoute('#/settings')).toEqual({ kind: 'settings' });
     expect(parseRoute('#/quote/NVDA')).toEqual({ kind: 'quote', id: 'NVDA' });
@@ -219,5 +220,17 @@ describe('pictures and sections', () => {
     const b = { item: item('b'), cluster: c, sources: 2 };
     expect(sections([a, b], a)).toEqual([]);
     expect(sections([], undefined)).toEqual([]);
+  });
+});
+
+describe('splitRecent', () => {
+  const now = new Date('2026-11-15T12:00:00Z');
+  const story = (id: string, published: string) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic: 'local' as const }, cluster: undefined, sources: 1 });
+  it('puts the last 24 hours first and everything else, including bad dates, under earlier', () => {
+    const list = [story('a', '2026-11-15T10:00:00Z'), story('b', '2026-11-14T13:00:00Z'), story('c', '2026-11-14T11:00:00Z'), story('d', 'garbage')];
+    const { recent, earlier } = splitRecent(list, now);
+    expect(recent.map((s) => s.item.id)).toEqual(['a', 'b']);
+    expect(earlier.map((s) => s.item.id)).toEqual(['c', 'd']);
+    expect(splitRecent([story('bad', 'garbage'), story('old', '2026-11-01T00:00:00Z')], now).earlier.map((s) => s.item.id)).toEqual(['old', 'bad']);  // bad dates last
   });
 });
