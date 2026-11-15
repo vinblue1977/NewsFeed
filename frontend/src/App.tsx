@@ -281,15 +281,19 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
   const q = markets?.tickers.find((t) => t.symbol === symbol);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/markets'; };
   const move = q ? formatMove(q.change, q.changePct, q.currency) : undefined;
-  const trend = q ? historyChange(q.history) : undefined;
+  // the stored history ends at an earlier (possibly in-progress) daily bar: end the graph on the live price
+  const series = q && q.history.length > 1 ? [...q.history, q.price] : [];
+  const trend = historyChange(series);
   const trendMove = trend && q ? formatMove(trend.change, trend.pct, q.currency) : undefined;
-  const points = q ? sparkline(q.history, 300, 120) : '';
-  const lo = q && q.history.length > 1 ? Math.min(...q.history) : undefined;
-  const hi = q && q.history.length > 1 ? Math.max(...q.history) : undefined;
+  const points = sparkline(series, 300, 120);
+  const lo = series.length ? Math.min(...series) : undefined;
+  const hi = series.length ? Math.max(...series) : undefined;
+  const stale = markets ? !marketsFresh(markets.generated, now) : false;
   return (
     <div class="wrap">
       <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>
       <header class="hdr"><div><div class="e">{symbol}</div><h1>{q?.name ?? symbol}</h1></div></header>
+      {markets && stale && <p class="note warn">Updated {timeAgo(markets.generated, now)}; prices may be out of date.</p>}
       {!q && <p class="note">{markets || loaded ? 'No quote for this symbol right now.' : 'Loading…'}</p>}
       {q && move && (
         <>

@@ -69,6 +69,7 @@ describe('dollar moves and the detail numbers', () => {
     expect(formatMove(12, 0.5, 'CAD').text).toBe('▲ CAD 12.00 (0.50%)');
     expect(formatMove(0, 0, 'USD').dir).toBe('flat');
     expect(formatMove(null, null, 'USD').text).toBe('–');
+    expect(formatMove(0.004, 1, 'USD')).toEqual({ text: '▲ 1.00%', dir: 'up' });  // never "$0.00" beside an arrow
   });
   it('formats the day range only when both ends are known', () => {
     expect(dayRange(99, 106, 'USD')).toBe('$99.00 – $106.00');
@@ -103,5 +104,12 @@ describe('market news', () => {
     expect(isMarketNews({ title: 'Why NVIDIA is rethinking its China plans' }, terms)).toBe(true);
     expect(isMarketNews({ title: 'TSLAX is not it' }, terms)).toBe(false);  // a symbol must stand alone
     expect(isMarketNews({ title: 'A quiet day in town' }, terms)).toBe(false);
+  });
+  it('matches names in any case, strips Limited, and drops exchange suffixes from symbols', () => {
+    const terms = watchTerms(parseMarkets({ generated: 'g', tickers: [quote({ symbol: 'NVDA', name: 'NVIDIA Corporation' }), quote({ symbol: 'RELIANCE.NS', name: 'Reliance Industries Limited' })] })?.tickers ?? []);
+    expect(isMarketNews({ title: 'Nvidia shares slide' }, terms)).toBe(true);
+    expect(isMarketNews({ title: 'Reliance Industries plans a new unit' }, terms)).toBe(true);
+    expect(isMarketNews({ title: 'Crop yields fall after drought' })).toBe(false);
+    expect(isMarketNews({ title: 'Campaign rally draws thousands' })).toBe(false);
   });
 });

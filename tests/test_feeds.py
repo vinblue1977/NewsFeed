@@ -179,6 +179,11 @@ def test_parse_accepts_declared_latin1() -> None:
     assert parse_feed(body, SRC)[0]["title"] == "Café"
 
 
+def test_markets_feeds_come_before_the_general_business_feed() -> None:
+    order = [s.id for s in SOURCES]  # dedup keeps the first copy of a story, so its "markets" tag must come first
+    assert all(order.index(s.id) < order.index("cnbc") for s in SOURCES if s.subtopic == "markets" and s.id != "cnbc")
+
+
 def test_source_list_is_sane() -> None:
     ids = [s.id for s in SOURCES]
     assert len(ids) == len(set(ids))

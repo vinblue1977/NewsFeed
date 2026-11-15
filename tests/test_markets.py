@@ -332,3 +332,14 @@ def test_an_old_graph_is_kept_when_the_refetch_fails(monkeypatch: pytest.MonkeyP
         return chart()
 
     assert build_markets(["AAA"], getter=down, now=NOW)["tickers"][0]["history"] == [1.0, 2.0]
+
+
+def test_an_empty_refetch_keeps_the_cached_graph(monkeypatch: pytest.MonkeyPatch) -> None:
+    markets._HISTORY["AAA"] = (-1e9, [1.0, 2.0])  # long expired
+    assert markets._fetch_history("AAA", lambda url: history_chart([None])) == [1.0, 2.0]
+
+
+def test_removed_symbols_leave_the_history_cache() -> None:
+    markets._HISTORY["OLD"] = (0.0, [1.0, 2.0])
+    build_markets(["AAA"], getter=lambda url: history_chart([1.0, 2.0]) if "range=3mo" in url else chart(), now=NOW)
+    assert "OLD" not in markets._HISTORY
