@@ -420,8 +420,8 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   );
 }
 
-function MarketsScreen({ markets, hasKey, loaded, now, hidden, feed, onAllBusiness }: {
-  markets: Markets | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; feed: Feed | undefined; onAllBusiness: () => void;
+function MarketsScreen({ markets, hasKey, loaded, now, hidden, collapsed, onToggle, feed, onAllBusiness }: {
+  markets: Markets | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; collapsed: boolean; onToggle: () => void; feed: Feed | undefined; onAllBusiness: () => void;
 }) {
   const tickers = markets ? markets.tickers.filter((q) => !hidden.includes(q.symbol)) : [];
   const stale = markets ? !marketsFresh(markets.generated, now) : false;
@@ -447,12 +447,14 @@ function MarketsScreen({ markets, hasKey, loaded, now, hidden, feed, onAllBusine
       {markets && stale && <p class="note warn">Updated {timeAgo(markets.generated, now)}; prices may be out of date.</p>}
       {tickers.length > 0 && (
         <>
-          <div class="grp">Watchlist</div>
-          <ul class="ql">{tickers.map((q) => <QuoteRow key={q.symbol} q={q} />)}</ul>
+          <button type="button" class="grp fold-h" aria-expanded={!collapsed} onClick={onToggle}>
+            <span>Watchlist{collapsed ? ` (${tickers.length})` : ''}</span><span class={`chev${collapsed ? '' : ' open'}`} aria-hidden="true">›</span>
+          </button>
+          {!collapsed && <ul class="ql">{tickers.map((q) => <QuoteRow key={q.symbol} q={q} />)}</ul>}
         </>
       )}
-      {markets && markets.missing > 0 && <p class="note">{markets.missing} {markets.missing === 1 ? 'quote is' : 'quotes are'} unavailable right now.</p>}
-      {tickers.length > 0 && (
+      {!collapsed && markets && markets.missing > 0 && <p class="note">{markets.missing} {markets.missing === 1 ? 'quote is' : 'quotes are'} unavailable right now.</p>}
+      {tickers.length > 0 && !collapsed && (
         <p class="fine">
           {traded ? `Last trade ${timeAgo(traded, now)}. ` : ''}Delayed, unofficial data from Yahoo Finance. Not investment advice.
         </p>
@@ -655,6 +657,14 @@ export function App() {
   const raw = load.state === 'ready' ? load.feed : undefined;  // the Reader opens any article, even from a hidden source
   const feed = useMemo(() => (raw ? withoutSources(raw, settings.hiddenSources) : undefined), [raw, settings.hiddenSources]);
   const sources = useMemo(() => sourceNames(raw, settings.hiddenSources), [raw, settings.hiddenSources]);
+  const toggleWatchlist = () => {
+    setSettings((prev) => {  // flips the latest state, so two quick taps cancel out
+      const merged = { ...prev, watchCollapsed: !prev.watchCollapsed };
+      saveSettings(merged);
+      settingsRef.current = merged;
+      return merged;
+    });
+  };
   const update = (next: Partial<Settings>) => {
     setSettings((prev) => {  // from the latest state, so two quick taps both count
       const merged = { ...prev, ...next };
@@ -722,6 +732,7 @@ export function App() {
       <>
         <PullIndicator {...pull} />
         <MarketsScreen markets={markets} hasKey={settings.watchKey !== ''} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers}
+          collapsed={settings.watchCollapsed} onToggle={toggleWatchlist}
           feed={feed} onAllBusiness={() => { setTopic('business'); setView('feed'); location.hash = '#'; }} />
         <TabBar current="markets" />
       </>

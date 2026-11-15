@@ -91,6 +91,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ib.on { background: var(--accent); color: var(--on-accent); }
 
 .grp { padding: 16px 16px 8px; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; color: #c4c7cc; }
+.fold-h { width: 100%; background: none; border: 0; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; justify-content: space-between; cursor: pointer; text-align: left; }
+.fold-h { min-height: 44px; color: #c4c7cc; }
+.fold-h:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; border-radius: 8px; }
+.fold-h .chev { font-size: 18px; letter-spacing: 0; transition: transform .15s; }
+.fold-h .chev.open { transform: rotate(90deg); }
 .grp i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .bi { display: block; }
 .bi h2 { font-size: 16.5px; line-height: 1.3; font-weight: 600; margin: 0 0 5px; overflow-wrap: anywhere; }
