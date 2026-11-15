@@ -108,10 +108,13 @@ export function sparkline(series: number[], width = 100, height = 28): string {
 
 /** "▼ $2.71 (0.36%)": the move in money first, then in percent. Other currencies use their symbol or ISO code. */
 export function formatMove(change: number | null, pct: number | null, currency: string): { text: string; dir: 'up' | 'down' | 'flat' } {
-  const { text: percent, dir } = formatChange(change, pct);
-  if (change === null || dir === 'flat') return { text: percent, dir };
+  const { text, dir } = formatChange(change, pct);
+  if (change === null || pct === null || dir === 'flat') return { text, dir };
   const arrow = change > 0 ? '▲' : '▼';
-  return { text: `${arrow} ${priceLabel(Math.abs(change), currency, false)} (${percent.slice(2)})`, dir };
+  const percent = `${Math.abs(pct).toFixed(2)}%`;
+  // a move under half a cent would read "$0.00" beside an arrow: show the percent alone
+  if (Math.abs(change) < 0.005) return { text: `${arrow} ${percent}`, dir };
+  return { text: `${arrow} ${priceLabel(Math.abs(change), currency, false)} (${percent})`, dir };
 }
 
 /** "$100.50 – $106.00", or '' when either end is unknown. */
@@ -127,22 +130,26 @@ export function historyChange(history: number[]): { change: number; pct: number 
   return { change: last - first, pct: ((last - first) / first) * 100 };
 }
 
-const MARKET_WORDS = /\b(stocks?|stock market|dow|s&p|nasdaq|wall street|the fed|federal reserve|treasury yields?|bond yields?|bond market|yields?|inflation|earnings|oil prices?|crude|gold prices?|bitcoin|crypto|tariffs?|sensex|nifty|rallies|rally|sell-?off|ipo|interest rates?|rate (?:cut|hike)s?|jobs report|etfs?|commodity prices?|rupee)\b/i;
-const COMPANY_SUFFIX = /[,.]?\s+(corporation|corp|incorporated|inc|company|co|holdings|group|ltd|plc|n\.?v|class [a-z]|series \d+)\.?$/i;
+const MARKET_WORDS = /\b(stocks?|stock market|dow|s&p|nasdaq|wall street|the fed|federal reserve|treasury yields?|bond yields?|bond market|inflation|oil prices?|crude oil|gold prices?|bitcoin|crypto|sensex|nifty|stock rally|market rally|sell-?off|ipo|interest rates?|rate (?:cut|hike)s?|jobs report|commodity prices?|rupee)\b/i;
+const COMPANY_SUFFIX = /[,.]?\s+(corporation|corp|incorporated|inc|company|co|holdings|group|limited|ltd|llc|plc|n\.?v|class [a-z]|series \d+)\.?$/i;
 
 const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** What makes a story about your watchlist: each symbol and each company name (without "Inc." and the like) as a whole word.
- * Compiled once here, not per story. Names match as written (a headline capitalizes them). */
+ * Compiled once here, not per story. */
 export function watchTerms(quotes: Quote[]): RegExp[] {
-  const terms = new Set<string>();
+  const symbols = new Set<string>();
+  const names = new Set<string>();
   for (const q of quotes) {
-    if (q.symbol.length >= 2) terms.add(q.symbol.replace('^', ''));
+    const symbol = q.symbol.replace('^', '').replace(/\.[A-Z]{1,2}$/, '');  // "RELIANCE.NS" is written "Reliance" or "RELIANCE" in prose
+    if (symbol.length >= 2) symbols.add(symbol);
     let name = q.name.trim();
     for (let next = name.replace(COMPANY_SUFFIX, ''); next !== name; next = name.replace(COMPANY_SUFFIX, '')) name = next;
-    if (name.length >= 4 && name !== q.symbol) terms.add(name);
+    if (name.length >= 4 && name !== q.symbol) names.add(name);
   }
-  return [...terms].map((t) => new RegExp(`(?<![A-Za-z0-9])${escape(t)}(?![A-Za-z0-9])`));
+  // No lookbehind (iOS Safari before 16.4 throws on it). Symbols match as written; names in any case ("NVIDIA" / "Nvidia").
+  const make = (t: string, flags: string) => new RegExp(`(?:^|[^A-Za-z0-9])${escape(t)}(?![A-Za-z0-9])`, flags);
+  return [...[...symbols].map((t) => make(t, '')), ...[...names].map((t) => make(t, 'i'))];
 }
 
 /** Is this story market news: from a markets feed, or a headline about markets or something on your watchlist? */

@@ -137,9 +137,10 @@ def _fetch_history(symbol: str, get: Any) -> list[float]:
     try:
         values = parse_history(get(history_url(symbol)))
     except FeedError:
+        values = []
+    if not values:
         return cached[1] if cached else []  # an old graph beats none
-    if values:
-        _HISTORY[symbol] = (time.monotonic(), values)
+    _HISTORY[symbol] = (time.monotonic(), values)
     return values
 
 
@@ -151,6 +152,8 @@ def build_markets(tickers: list[str] | None = None, *, getter: Any = None, now: 
     # Case-insensitive, and an index named in the watchlist is not shown twice (it is already in the strip).
     extra = [t for t in dict.fromkeys(t.upper() for t in tickers or []) if SYMBOL.fullmatch(t) and t not in INDEXES]
     symbols = [*INDEXES, *extra]
+    for gone in set(_HISTORY) - set(extra):  # symbols dropped from the watchlist do not stay cached
+        del _HISTORY[gone]
     pool = ThreadPoolExecutor(max_workers=len(symbols) + len(extra))
     try:
         futures = {s: pool.submit(_fetch_quote, s, now, get) for s in symbols}
