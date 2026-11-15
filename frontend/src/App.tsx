@@ -303,7 +303,7 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
       {!q && <p class="note">{markets || loaded ? 'No quote for this symbol right now.' : 'Loading…'}</p>}
       {q && move && (
         <>
-          <div class="big"><b>{priceLabel(q.price, q.currency, false)}</b><span class={`chg ${move.dir}`}>{move.text}</span></div>
+          <div class="qprice"><b>{priceLabel(q.price, q.currency, false)}</b><span class={`chg ${move.dir}`}>{move.text}</span></div>
           <div class="grp">3 months</div>
           {points ? (
             <div class="card gr">
@@ -853,7 +853,7 @@ export function App() {
         {!isBrief && lead && (
           <>
             <div class="sec"><b>Top story</b></div>
-            <StoryAnchor story={lead} class="big">
+            <StoryAnchor story={lead} class="topcard">
               <Pic item={lead.item} class="pic" />
               <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
               <h2>{lead.item.title}</h2>
