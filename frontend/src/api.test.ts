@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
+import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadScores, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) });
 
@@ -136,5 +136,18 @@ describe('loadArticles', () => {
     fetchMock.mockReset().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve(second) });
     await Promise.all([loadArticles('a'), loadArticles('b')]);
     expect(fetchMock).toHaveBeenCalledTimes(1);  // simultaneous calls share one request
+  });
+});
+
+describe('loadScores', () => {
+  it('returns the parsed scores, or undefined for a missing file, a bad body or a network error', async () => {
+    vi.stubGlobal('fetch', reply({ generated: 'g', nfl: { ok: true, entries: [] } }));
+    expect((await loadScores())?.generated).toBe('g');
+    vi.stubGlobal('fetch', reply({}, false, 403));
+    expect(await loadScores()).toBeUndefined();
+    vi.stubGlobal('fetch', reply({ nope: 1 }));
+    expect(await loadScores()).toBeUndefined();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await loadScores()).toBeUndefined();
   });
 });
