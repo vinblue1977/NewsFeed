@@ -265,7 +265,7 @@ export interface Corner {
 export const DISCOVERY_PER_SECTION = 5;
 export const MAX_CORNERS = 8;
 
-/** What the Discovery screen shows, from `list` (newest first).
+/** What the Browse screen (internally Discovery) shows, from `list` (newest first).
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
  * - corners: each sub-topic (cricket, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story
