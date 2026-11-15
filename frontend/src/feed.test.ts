@@ -260,6 +260,6 @@ describe('discovery', () => {
     expect(discovery([], now)).toEqual({ widely: [], justIn: [], corners: [] });
   });
   it('titles sub-topics', () => {
-    expect([subtopicLabel('cricket'), subtopicLabel('nfl')]).toEqual(['Cricket', 'NFL']);
+    expect([subtopicLabel('cricket'), subtopicLabel('nfl'), subtopicLabel('f1'), subtopicLabel('soccer')]).toEqual(['Cricket', 'NFL', 'F1', 'Soccer']);
   });
 });

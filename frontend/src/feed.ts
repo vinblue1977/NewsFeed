@@ -248,7 +248,7 @@ export function parseRoute(hash: string): Route {
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
 }
 
-const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL' };
+const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', nba: 'NBA', nhl: 'NHL', f1: 'F1' };
 
 /** A sub-topic id ("cricket") as a title ("Cricket"). */
 export function subtopicLabel(id: string): string {
@@ -263,11 +263,12 @@ export interface Corner {
 }
 
 export const DISCOVERY_PER_SECTION = 5;
+export const MAX_CORNERS = 8;
 
 /** What the Browse screen (internally Discovery) shows, from `list` (newest first).
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
- * - corners: each sub-topic (cricket, markets...) with its newest story and its story count, biggest first. These use every story
+ * - corners: each sub-topic (cricket, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story
  *   in the feed (any age, top story included), so a tile's count matches the list it opens. */
 export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
   const rest = recentOnly(withoutTop(list, topStory(list, now)), now);
@@ -285,7 +286,7 @@ export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: 
     if (have) have.total += 1;
     else byId.set(id, { id, label: subtopicLabel(id), lead: s, total: 1 });
   }
-  return { widely, justIn, corners: [...byId.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)) };
+  return { widely, justIn, corners: [...byId.values()].sort((a, b) => b.lead.item.published.localeCompare(a.lead.item.published) || b.total - a.total).slice(0, MAX_CORNERS) };
 }
 
 /** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */
