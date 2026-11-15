@@ -693,6 +693,7 @@ export function App() {
     setTopic('all');  // the Briefing covers everything, so a topic chosen earlier must not stay hidden behind it
     setShown(PAGE);
   };
+  const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has none: point to the Local tab when that is all there is
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
   const screenKey = screenKeyOf(route);
   useEffect(() => {
@@ -816,9 +817,9 @@ export function App() {
             <button type="button" class="btn" onClick={() => { setLoad({ state: 'loading' }); refresh(); }}>Try again</button></div>
         )}
         {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
-        {feed && isBrief && brief && brief.total === 0 && <div class="empty"><b>Nothing new today</b><span>No stories from the last 24 hours.</span></div>}
+        {feed && isBrief && brief && brief.total === 0 && <div class="empty"><b>Nothing new today</b><span>No stories from the last 24 hours.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}</span></div>}
         {raw && feed && raw.items.length > 0 && feed.items.length === 0 && <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>}
-        {feed && !isBrief && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
+        {feed && !isBrief && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}</span></div>}
         {feed && !isBrief && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
         {isBrief && brief && (
