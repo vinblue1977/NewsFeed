@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadFeed, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Route, Section, Story } from './feed';
 import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -14,7 +14,7 @@ import { degrees, describe, isFresh, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
 const screenKeyOf = (r: Route): string =>
-  r.kind === 'discovery' ? `discovery:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
+  r.kind === 'discovery' || r.kind === 'sports' ? `${r.kind}:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
 /** The Browse tab (was Discovery). Its route stays `#/discovery` and the code keeps the Discovery names so old links and bookmarks still work. */
 const BROWSE = 'Browse';
 const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings' || kind === 'quote';
@@ -246,17 +246,32 @@ function PullIndicator({ distance, spinning }: { distance: number; spinning: boo
   );
 }
 
-function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'discovery' | 'local' | 'markets' | 'settings' }) {
-  const link = (tab: 'home' | 'discovery' | 'local' | 'markets' | 'settings', href: string, label: string) =>
+type Tab = 'home' | 'discovery' | 'local' | 'sports' | 'markets';
+
+/** `current` is null on screens that are not a tab (Settings). */
+function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: Tab | null }) {
+  const link = (tab: Tab, href: string, label: string) =>
     current === tab ? <a class="on" href={href} aria-current="page">{label}</a> : <a href={href}>{label}</a>;
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
       {link('discovery', '#/discovery', BROWSE)}
       {link('local', '#/local', 'Local')}
+      {link('sports', '#/sports', 'Sports')}
       {link('markets', '#/markets', 'Markets')}
-      {link('settings', '#/settings', 'Settings')}
     </nav>
+  );
+}
+
+/** The gear at the top right of each tab's header: Settings is not a tab. */
+function SettingsLink() {
+  return (
+    <a class="ib" href="#/settings" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    </a>
   );
 }
 
@@ -330,19 +345,23 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
 }
 
 /** The Browse screen (route and name kept as Discovery). Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
-function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onRetry, canGoBack }: {
-  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void;
+function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onOpenSports, onRetry, canGoBack }: {
+  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void; onOpenSports: () => void;
   onRetry: () => void; canGoBack: boolean;
 }) {
   const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
-  const found = useMemo(() => discovery(all, now), [all, now]);
+  const sportsAll = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
+  const found = useMemo(() => discovery(all, now, sportsAll), [all, sportsAll, now]);
   const inSub = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : []), [all, sub]);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/discovery'; };
+  useEffect(() => {  // an old link to a sports sub-topic (#/discovery/cricket) now lives in the Sports tab
+    if (sub && feed && inSub.length === 0 && sportsAll.some((s) => s.item.subtopic === sub)) location.replace(subtopicRoute('sports', sub));
+  }, [sub, feed, inSub, sportsAll]);
   const waiting = !feed && !failed && !loaded;
   return (
     <div class="wrap">
       {sub && <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>}
-      <header class="hdr"><div><div class="e">{sub ? BROWSE : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : BROWSE}</h1></div></header>
+      <header class="hdr"><div><div class="e">{sub ? BROWSE : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : BROWSE}</h1></div>{!sub && <SettingsLink />}</header>
       {waiting && <p class="note">Loading…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -372,7 +391,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
           <div class="grp">Corners of the feed</div>
           <div class="tiles">
             {found.corners.map((c) => (
-              <a key={c.id} class="tile" href={`#/discovery/${c.id}`} onClick={onOpenSub}>
+              <a key={`${c.topic}/${c.id}`} class="tile" href={subtopicRoute(c.topic, c.id)} onClick={c.topic === 'sports' ? onOpenSports : onOpenSub}>
                 <b>{c.label}</b>
                 <span class="tl">{c.lead.item.title}</span>
                 <span class="tn">{c.total} {c.total === 1 ? 'story' : 'stories'} · {timeAgo(c.lead.item.published, now)} ›</span>
@@ -381,6 +400,37 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Every sports story, newest first, with a chip per sub-topic (NFL, soccer, cricket...). */
+function SportsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
+}) {
+  const all = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
+  const subs = useMemo(() => subtopicsOf(all), [all]);
+  const list = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : all), [all, sub]);
+  const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/sports/${next}` : '#/sports'; };
+  return (
+    <div class="wrap">
+      <header class="hdr"><div><div class="e">Scores and stories</div><h1>Sports</h1></div><SettingsLink /></header>
+      <nav class="chips" aria-label="Sports">
+        <button type="button" class={!sub ? 'on' : ''} aria-pressed={!sub} onClick={() => pick(undefined)}>All</button>
+        {subs.map((id) => (
+          <button key={id} type="button" class={id === sub ? 'on' : ''} aria-pressed={id === sub} onClick={() => pick(id)}>{subtopicLabel(id)}</button>
+        ))}
+        {sub && !subs.includes(sub) && <button type="button" class="on" aria-pressed="true">{subtopicLabel(sub)}</button>}
+      </nav>
+      {!feed && !failed && !loaded && <p class="note">Loading sports…</p>}
+      {failed && !feed && (
+        <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
+          <button type="button" class="btn" onClick={onRetry}>Try again</button></div>
+      )}
+      {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
+      {feed && list.length === 0 && <div class="empty"><b>No sports stories yet</b><span>{sub ? 'Nothing in this sport right now.' : 'Sports stories appear here.'}</span></div>}
+      {list.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+      {list.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
     </div>
   );
 }
@@ -396,7 +446,7 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   const empty = feed !== undefined && recent.length + earlier.length === 0;
   return (
     <div class="wrap">
-      <header class="hdr"><div><div class="e">Near you</div><h1>Local</h1></div></header>
+      <header class="hdr"><div><div class="e">Near you</div><h1>Local</h1></div><SettingsLink /></header>
       {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
       {!feed && !failed && !loaded && <p class="note">Loading local stories…</p>}
       {failed && !feed && (
@@ -442,6 +492,7 @@ function MarketsScreen({ markets, hasKey, loaded, now, hidden, collapsed, onTogg
           <div class="e">{tickers.length > 0 ? (open ? 'Market open' : 'Market closed') : 'Markets'}</div>
           <h1>Markets</h1>
         </div>
+        <SettingsLink />
       </header>
       {!hasKey && <p class="note">Your watchlist is private. Add your key and symbols in Settings.</p>}
       {hasKey && !markets && !loaded && <p class="note">Loading quotes…</p>}
@@ -510,14 +561,15 @@ function WatchlistEditor({ watchKey, update, onSaved }: { watchKey: string; upda
   );
 }
 
-function SettingsScreen({ settings, update, sources, markets, marketsLoaded, onSaved }: {
+function SettingsScreen({ settings, update, sources, markets, marketsLoaded, onSaved, canGoBack }: {
   settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; markets: Markets | undefined; marketsLoaded: boolean;
-  onSaved: (key: string) => void;
+  onSaved: (key: string) => void; canGoBack: boolean;
 }) {
   const symbols = [...new Map([...(markets?.tickers ?? []).map((q) => [q.symbol, `${q.name} · ${q.symbol}`] as const),
     ...settings.hiddenTickers.map((t) => [t, t] as const)]).entries()];  // a hidden symbol no longer in the list can still be switched back on
   return (
     <div class="wrap">
+      <div class="back"><button type="button" class="ib" aria-label="Back" onClick={() => { if (canGoBack) history.back(); else location.hash = '#'; }}>‹</button></div>
       <header class="hdr"><div><div class="e">On this device</div><h1>Settings</h1></div></header>
       <div class="grp">Reader text size</div>
       <div class="seg" role="group" aria-label="Reader text size">
@@ -578,6 +630,7 @@ export function App() {
   const [view, setView] = useState<View>(savedView);
   const [shown, setShown] = useState(PAGE);
   const [subShown, setSubShown] = useState(PAGE);  // rows shown in a Browse sub-topic list
+  const [sportsShown, setSportsShown] = useState(PAGE);
   const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
@@ -635,7 +688,7 @@ export function App() {
     const onHash = () => {
       const next = parseRoute(location.hash);
       const prev = routeRef.current;
-      if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
+      if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery' || prev.kind === 'sports') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
       if (needsMarkets(next.kind)) refreshMarkets();
       routeRef.current = next;
       inAppNavs.current += 1;
@@ -693,13 +746,14 @@ export function App() {
     setTopic('all');  // the Briefing covers everything, so a topic chosen earlier must not stay hidden behind it
     setShown(PAGE);
   };
-  const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has none: point to the Local tab when that is all there is
+  const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has neither local nor sports stories:
+  const hasSports = feed?.items.some((i) => i.topic === 'sports') ?? false;  // point to their tabs when that is all there is
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
   const screenKey = screenKeyOf(route);
   useEffect(() => {
     window.scrollTo(0, scrolls.current[screenKey] ?? 0);
   }, [screenKey]);
-  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'discovery' || route.kind === 'markets', () => {
+  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'discovery' || route.kind === 'sports' || route.kind === 'markets', () => {
     setNow(new Date());
     if (routeRef.current.kind === 'markets') refreshMarkets();
     else refresh();
@@ -712,9 +766,21 @@ export function App() {
       <>
         <PullIndicator {...pull} />
         <DiscoveryScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
-          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)}
+          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)} onOpenSports={() => setSportsShown(PAGE)}
           canGoBack={inAppNavs.current > 0} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="discovery" />
+      </>
+    );
+  }
+
+  if (route.kind === 'sports') {
+    return (
+      <>
+        <PullIndicator {...pull} />
+        <SportsScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
+          shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)}
+          onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
+        <TabBar current="sports" />
       </>
     );
   }
@@ -755,8 +821,8 @@ export function App() {
     return (
       <>
         <SettingsScreen settings={settings} update={update} sources={sources} markets={markets} marketsLoaded={marketsLoaded}
-          onSaved={(key) => afterSave(key)} />
-        <TabBar current="settings" />
+          onSaved={(key) => afterSave(key)} canGoBack={inAppNavs.current > 0} />
+        <TabBar current={null} />
       </>
     );
   }
@@ -797,8 +863,11 @@ export function App() {
             <div class="e">{date}{isBrief && brief ? ` · ${brief.total} stories` : ''}</div>
             <h1>{isBrief ? 'Briefing' : topic === 'all' ? 'For you' : topicLabel(topic)}</h1>
           </div>
-          <button type="button" class={isBrief ? 'ib on' : 'ib'} aria-pressed={isBrief} aria-label="Briefing view" title="Briefing view"
-            onClick={toggleView}>☰</button>
+          <div class="hbtns">
+            <button type="button" class={isBrief ? 'ib on' : 'ib'} aria-pressed={isBrief} aria-label="Briefing view" title="Briefing view"
+              onClick={toggleView}>☰</button>
+            <SettingsLink />
+          </div>
         </header>
         {!isBrief && (
           <nav class="chips" aria-label="Topics">
@@ -817,9 +886,9 @@ export function App() {
             <button type="button" class="btn" onClick={() => { setLoad({ state: 'loading' }); refresh(); }}>Try again</button></div>
         )}
         {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
-        {feed && isBrief && brief && brief.total === 0 && <div class="empty"><b>Nothing new today</b><span>No stories from the last 24 hours.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}</span></div>}
+        {feed && isBrief && brief && brief.total === 0 && <div class="empty"><b>Nothing new today</b><span>No stories from the last 24 hours.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {raw && feed && raw.items.length > 0 && feed.items.length === 0 && <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>}
-        {feed && !isBrief && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}</span></div>}
+        {feed && !isBrief && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && !isBrief && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
         {isBrief && brief && (
