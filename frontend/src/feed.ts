@@ -8,10 +8,11 @@ export const TOPICS: { id: Topic | 'all'; label: string }[] = [
   { id: 'sports', label: 'Sports' },
   { id: 'tech', label: 'Technology' },
   { id: 'business', label: 'Business' },
-  { id: 'local', label: 'Local' },
 ];
 
-const LABELS = new Map<string, string>(TOPICS.map((t) => [t.id, t.label]));
+/** Topics with a tab of their own: `stories(feed, 'all')` (For You, Browse, the briefing) leaves them out. */
+const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local']);
+const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local']]);
 const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -86,9 +87,10 @@ export interface Story {
 }
 
 /** One story per cluster, newest first. The cluster's lead item stands for it; if the lead is missing or in another
- * topic, the newest member in this topic does. Unclustered items stand alone. */
+ * topic, the newest member in this topic does. Unclustered items stand alone.
+ * `all` is every topic except the tab-only ones (local), which only their own topic returns. */
 export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
-  const wanted = (i: Item) => topic === 'all' || i.topic === topic;
+  const wanted = (i: Item) => (topic === 'all' ? !TAB_ONLY_TOPICS.has(i.topic) : i.topic === topic);
   const members = new Map<string, Item[]>();
   const loose: Item[] = [];
   for (const item of feed.items) {
@@ -100,6 +102,7 @@ export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   const known = new Set<string>();
   for (const c of feed.clusters) {
     known.add(c.id);
+    if (topic === 'all' && TAB_ONLY_TOPICS.has(c.topic)) continue;  // a local cluster stays in the Local tab, whatever else joined it
     const here = members.get(c.id) ?? [];
     const item = here.find((i) => i.id === c.lead) ?? [...here].sort((a, b) => b.published.localeCompare(a.published))[0];
     if (item) out.push({ item, cluster: c, sources: c.sources });
@@ -171,7 +174,6 @@ const BRIEF_GROUPS: { label: string; color: string; topics: Topic[] }[] = [
   { label: 'World · India', color: '#3fb6a8', topics: ['world', 'india'] },
   { label: 'Sports', color: '#6fbf5c', topics: ['sports'] },
   { label: 'Technology · Business', color: '#8a6fe0', topics: ['tech', 'business'] },
-  { label: 'Local', color: '#e0705f', topics: ['local'] },
 ];
 const MORE_GROUP = { label: 'More', color: '#9aa0a6' };  // any topic the groups above do not name, so no story is lost
 const PER_GROUP = 3;
@@ -198,7 +200,6 @@ export const SECTION_TOPICS: { topic: Topic; color: string }[] = [
   { topic: 'sports', color: '#6fbf5c' },
   { topic: 'tech', color: '#8a6fe0' },
   { topic: 'business', color: '#c97aa8' },
-  { topic: 'local', color: '#e0705f' },
 ];
 export const PER_SECTION = 3;  // the lead plus two more
 
@@ -265,7 +266,7 @@ export interface Corner {
 export const DISCOVERY_PER_SECTION = 5;
 export const MAX_CORNERS = 8;
 
-/** What the Browse screen (internally Discovery) shows, from `list` (newest first).
+/** What the Browse screen (internally Discovery) shows, from `list` (newest first; local stories are not in it, they have their own tab).
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
  * - corners: each sub-topic (cricket, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story

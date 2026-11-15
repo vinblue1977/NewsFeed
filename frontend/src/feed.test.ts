@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -261,5 +261,30 @@ describe('discovery', () => {
   });
   it('titles sub-topics', () => {
     expect([subtopicLabel('cricket'), subtopicLabel('nfl'), subtopicLabel('f1'), subtopicLabel('soccer')]).toEqual(['Cricket', 'NFL', 'F1', 'Soccer']);
+  });
+});
+
+describe('local stories stay out of For You', () => {
+  const now = new Date('2026-11-15T12:00:00Z');
+  const item = (id: string, topic: 'us' | 'local', cluster?: string) => ({ id, title: id, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic, cluster });
+  const feed = {
+    generated: '2026-11-15T11:30:00Z',
+    items: [item('a', 'us'), item('l1', 'local'), item('l2', 'local', 'c1'), item('l3', 'local', 'c1')],
+    clusters: [{ id: 'c1', title: 'Local cluster', topic: 'local' as const, lead: 'l2', published: '2026-11-15T10:00:00Z', sources: 2, items: ['l2', 'l3'] }],
+  };
+  it('leaves local out of "all" but still returns it for the local topic', () => {
+    expect(stories(feed, 'all').map((s) => s.item.id)).toEqual(['a']);
+    expect(stories(feed, 'local').map((s) => s.item.id).sort()).toEqual(['l1', 'l2']);
+  });
+  it('keeps a local cluster out of For You even when a non-local story joined it', () => {
+    const mixed = { ...feed, items: [...feed.items, item('u', 'us', 'c1')] };
+    expect(stories(mixed, 'all').map((s) => s.item.id)).toEqual(['a']);
+  });
+  it('has no Local topic chip, section or briefing group, and still labels local stories', () => {
+    expect(TOPICS.map((t) => t.id)).not.toContain('local');
+    expect(topicLabel('local')).toBe('Local');
+    expect(briefing(feed, now).groups.map((g) => g.label)).not.toContain('Local');
+    expect(sections(stories(feed, 'all'), undefined).map((s) => s.topic)).not.toContain('local');
+    expect(briefing(feed, now).total).toBe(1);
   });
 });
