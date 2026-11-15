@@ -22,7 +22,9 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchKey: '' });
+    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, watchKey: '' });
+    expect(parseSettings(JSON.stringify({ watchCollapsed: true })).watchCollapsed).toBe(true);
+    expect(parseSettings(JSON.stringify({ watchCollapsed: 'yes' })).watchCollapsed).toBe(false);
     expect(parseSettings(JSON.stringify({ watchKey: 'a1b2c3d4e5f6a7b8' })).watchKey).toBe('a1b2c3d4e5f6a7b8');
     for (const bad of ['short', 'UPPERCASEUPPERCASE', '../data/feed', 5, '']) expect(parseSettings(JSON.stringify({ watchKey: bad })).watchKey).toBe('');
     expect(parseSettings(JSON.stringify({ textSize: 'huge' })).textSize).toBe('medium');
