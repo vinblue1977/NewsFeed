@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadFeed, loadWatchlist, loadWeather, watchlistSymbols } from './api';
+import { loadArticles, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
@@ -10,6 +10,7 @@ import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketN
 import { usePullToRefresh } from './pull';
 import { loadSettings, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
 import type { Feed, Item, Topic } from './types';
+import { type CricketMatch, type Game, hasScores, type Match, type ScoreView, scoresFor, type Scores } from './scores';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
@@ -404,13 +405,64 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
   );
 }
 
+function Status({ state, detail }: { state: 'pre' | 'live' | 'final'; detail: string }) {
+  return <div class={`st ${state}`}>{state === 'live' && <b>LIVE</b>}<span>{detail}</span></div>;
+}
+
+/** One NFL game: both sides and their scores; the leader of a finished game is in bold. */
+function GameRow({ g }: { g: Game }) {
+  const lead = g.state !== 'pre' && g.home.score !== null && g.away.score !== null && g.home.score !== g.away.score ? (g.home.score > g.away.score ? 'home' : 'away') : '';
+  const body = (
+    <>
+      <div class="teams">
+        <div class={g.state === 'final' && lead === 'away' ? 'win' : ''}><span>{g.away.name}</span><b>{g.away.score ?? ''}</b></div>
+        <div class={g.state === 'final' && lead === 'home' ? 'win' : ''}><span>{g.home.name}</span><b>{g.home.score ?? ''}</b></div>
+      </div>
+      <Status state={g.state} detail={g.detail} />
+    </>
+  );
+  return g.url ? <a class="g" href={g.url} {...EXTERNAL}>{body}</a> : <div class="g">{body}</div>;
+}
+
+function MatchRow({ m }: { m: Match }) {
+  return (
+    <div class="g">
+      <div class="teams">
+        {m.players.map((p) => <div key={p.name} class={p.winner ? 'win' : ''}><span>{p.name}</span><b>{p.sets.join(' ')}</b></div>)}
+      </div>
+      <Status state={m.state} detail={m.detail} />
+    </div>
+  );
+}
+
+function CricketRow({ c }: { c: CricketMatch }) {
+  const body = <><div class="teams"><div><span class="wrap">{c.line}</span></div></div>{c.live && <div class="st live"><b>LIVE</b></div>}</>;
+  return c.url ? <a class="g" href={c.url} {...EXTERNAL}>{body}</a> : <div class="g">{body}</div>;
+}
+
+/** The scores part of the Sports tab: rows per sport, or a note when they are out of date or could not be read. */
+function ScoresPanel({ view, generated, now }: { view: ScoreView; generated: string; now: Date }) {
+  if (view.stale) return <p class="note warn">Scores are out of date (updated {timeAgo(generated, now)}).</p>;
+  return (
+    <>
+      {view.down.length > 0 && <p class="note">{view.down.join(' and ')} scores are unavailable right now.</p>}
+      {view.nfl.length > 0 && (<><div class="grp">NFL</div><div class="sc">{view.nfl.map((g) => <GameRow key={g.id} g={g} />)}</div></>)}
+      {view.tennis.map((t) => (
+        <div key={t.tournament}><div class="grp">{t.tournament || 'Tennis'}</div><div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div></div>
+      ))}
+      {view.cricket.length > 0 && (<><div class="grp">Cricket</div><div class="sc">{view.cricket.map((c) => <CricketRow key={c.id} c={c} />)}</div></>)}
+    </>
+  );
+}
+
 /** Every sports story, newest first, with a chip per sub-topic (NFL, soccer, cricket...). */
-function SportsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
-  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
+function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+  feed: Feed | undefined; scores: Scores | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
   const all = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
   const subs = useMemo(() => subtopicsOf(all), [all]);
   const list = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : all), [all, sub]);
+  const scoreView = useMemo(() => scoresFor(scores, sub, now), [scores, sub, now]);
   const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/sports/${next}` : '#/sports'; };
   return (
     <div class="wrap">
@@ -422,6 +474,7 @@ function SportsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, o
         ))}
         {sub && !subs.includes(sub) && <button type="button" class="on" aria-pressed="true">{subtopicLabel(sub)}</button>}
       </nav>
+      {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} />}
       {!feed && !failed && !loaded && <p class="note">Loading sports…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -429,6 +482,7 @@ function SportsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, o
       )}
       {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
       {feed && list.length === 0 && <div class="empty"><b>No sports stories yet</b><span>{sub ? 'Nothing in this sport right now.' : 'Sports stories appear here.'}</span></div>}
+      {list.length > 0 && hasScores(scoreView) && <div class="grp">Stories</div>}
       {list.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
       {list.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
     </div>
@@ -634,6 +688,7 @@ export function App() {
   const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
+  const [scores, setScores] = useState<Scores | undefined>();
   const [markets, setMarkets] = useState<Markets | undefined>();
   const [marketsLoaded, setMarketsLoaded] = useState(false);
   const [settings, setSettings] = useState<Settings>(() => {
@@ -646,10 +701,12 @@ export function App() {
   const routeRef = useRef(route);
   const inAppNavs = useRef(0);  // hash changes since the app opened: more than zero means there is an app screen to go back to
 
+  const refreshScores = () => { void loadScores().then((c) => { if (c) setScores(c); }); };  // a failed refresh keeps the last good ones
   const latest = useRef(0);
   const refresh = () => {
     const mine = ++latest.current;  // a slower, older response must not overwrite a newer one
     void loadWeather().then((w) => { if (w) setWeather(w); });  // independent of the feed; a failed refresh keeps the last good one
+    if (routeRef.current.kind === 'sports') refreshScores();  // only the Sports tab shows them
     loadFeed().then(
       (feed) => { if (mine === latest.current) setLoad({ state: 'ready', feed }); },
       () => { if (mine === latest.current) setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' })); },
@@ -690,6 +747,7 @@ export function App() {
       const prev = routeRef.current;
       if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery' || prev.kind === 'sports') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
       if (needsMarkets(next.kind)) refreshMarkets();
+      if (next.kind === 'sports' && routeRef.current.kind !== 'sports') refreshScores();  // fresh scores on arrival, whatever their age
       routeRef.current = next;
       inAppNavs.current += 1;
       setRoute(next);
@@ -698,6 +756,9 @@ export function App() {
     const quotes = setInterval(() => {  // quotes move every 5 minutes in market hours
       if (document.visibilityState === 'visible' && routeRef.current.kind === 'markets') refreshMarkets();
     }, 5 * 60 * 1000);
+    const live = setInterval(() => {  // the scores file is rewritten every few minutes
+      if (document.visibilityState === 'visible' && routeRef.current.kind === 'sports') refreshScores();
+    }, 2 * 60 * 1000);
     const tick = setInterval(() => setNow(new Date()), TICK_MS);  // "x min ago" and the stale banner keep moving
     return () => {
       latest.current = -1;
@@ -705,6 +766,7 @@ export function App() {
       window.removeEventListener('hashchange', onHash);
       clearInterval(tick);
       clearInterval(quotes);
+      clearInterval(live);
       timers.current.forEach(clearTimeout);
     };
   }, []);
@@ -777,7 +839,7 @@ export function App() {
     return (
       <>
         <PullIndicator {...pull} />
-        <SportsScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
+        <SportsScreen key={route.sub ?? ''} feed={feed} scores={scores} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
           shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)}
           onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="sports" />
