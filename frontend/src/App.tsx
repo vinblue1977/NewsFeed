@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadFeed, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Section, Story } from './feed';
 import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -241,13 +241,14 @@ function PullIndicator({ distance, spinning }: { distance: number; spinning: boo
   );
 }
 
-function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'markets' | 'settings' }) {
-  const link = (tab: 'home' | 'markets' | 'settings', href: string, label: string) =>
+function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: 'home' | 'local' | 'markets' | 'settings' }) {
+  const link = (tab: 'home' | 'local' | 'markets' | 'settings', href: string, label: string) =>
     current === tab ? <a class="on" href={href} aria-current="page">{label}</a> : <a href={href}>{label}</a>;
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
-      <button type="button" disabled>Explore</button>
+      <button type="button" disabled>Discovery</button>
+      {link('local', '#/local', 'Local')}
       {link('markets', '#/markets', 'Markets')}
       {link('settings', '#/settings', 'Settings')}
     </nav>
@@ -319,6 +320,43 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
           <p class="fine">Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
         </>
       )}
+    </div>
+  );
+}
+
+/** Everything local: the forecast and alerts, then every local story, the last 24 hours first. */
+function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, onMore, onRetry }: {
+  feed: Feed | undefined; loaded: boolean; failed: boolean; weather: Weather | undefined; weatherStale: boolean; now: Date; shown: number; onMore: () => void; onRetry: () => void;
+}) {
+  const local = useMemo(() => (feed ? stories(feed, 'local') : []), [feed]);  // the sort depends on the feed only; the split on the clock
+  const { recent, earlier } = useMemo(() => splitRecent(local, now), [local, now]);
+  const recentShown = recent.slice(0, shown);
+  const earlierShown = earlier.slice(0, Math.max(0, shown - recent.length));
+  const empty = feed !== undefined && recent.length + earlier.length === 0;
+  return (
+    <div class="wrap">
+      <header class="hdr"><div><div class="e">Near you</div><h1>Local</h1></div></header>
+      {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
+      {!feed && !failed && !loaded && <p class="note">Loading local stories…</p>}
+      {failed && !feed && (
+        <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
+          <button type="button" class="btn" onClick={onRetry}>Try again</button></div>
+      )}
+      {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
+      {empty && <div class="empty"><b>No local stories yet</b><span>Local stories from your town's feeds appear here.</span></div>}
+      {recentShown.length > 0 && (
+        <>
+          <div class="grp">Last 24 hours</div>
+          {recentShown.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        </>
+      )}
+      {earlierShown.length > 0 && (
+        <>
+          <div class="grp">Earlier</div>
+          {earlierShown.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        </>
+      )}
+      {recent.length + earlier.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
     </div>
   );
 }
@@ -476,6 +514,7 @@ export function App() {
   const [topic, setTopic] = useState<Topic | 'all'>('all');
   const [view, setView] = useState<View>(savedView);
   const [shown, setShown] = useState(PAGE);
+  const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
   const [markets, setMarkets] = useState<Markets | undefined>();
@@ -486,7 +525,7 @@ export function App() {
     return s;
   });
   const [route, setRoute] = useState(() => parseRoute(location.hash));
-  const homeScroll = useRef(0);
+  const scrolls = useRef<Record<string, number>>({});  // where the long list screens (home, local) were left
   const routeRef = useRef(route);
   const inAppNavs = useRef(0);  // hash changes since the app opened: more than zero means there is an app screen to go back to
 
@@ -531,7 +570,8 @@ export function App() {
     document.addEventListener('visibilitychange', onVisible);
     const onHash = () => {
       const next = parseRoute(location.hash);
-      if (routeRef.current.kind === 'home' && next.kind !== 'home') homeScroll.current = window.scrollY;  // come back to the same place
+      const from = routeRef.current.kind;
+      if ((from === 'home' || from === 'local') && next.kind !== from) scrolls.current[from] = window.scrollY;  // come back to the same place
       if (needsMarkets(next.kind)) refreshMarkets();
       routeRef.current = next;
       inAppNavs.current += 1;
@@ -582,17 +622,28 @@ export function App() {
     setShown(PAGE);
   };
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
-  const screenKey = route.kind === 'home' || route.kind === 'markets' || route.kind === 'settings' ? route.kind : `${route.kind}:${route.id}`;
+  const screenKey = route.kind === 'home' || route.kind === 'local' || route.kind === 'markets' || route.kind === 'settings' ? route.kind : `${route.kind}:${route.id}`;
   useEffect(() => {
-    window.scrollTo(0, screenKey === 'home' ? homeScroll.current : 0);
+    window.scrollTo(0, scrolls.current[screenKey] ?? 0);
   }, [screenKey]);
-  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'markets', () => {
+  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'markets', () => {
     setNow(new Date());
     if (routeRef.current.kind === 'markets') refreshMarkets();
     else refresh();
   });
   const chrome = useChrome(route.kind === 'story' || route.kind === 'read', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  if (route.kind === 'local') {
+    return (
+      <>
+        <PullIndicator {...pull} />
+        <LocalScreen feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} weather={weather} weatherStale={weatherStale} now={now}
+          shown={localShown} onMore={() => setLocalShown((n) => n + PAGE)} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
+        <TabBar current="local" />
+      </>
+    );
+  }
 
   if (route.kind === 'markets') {
     return (
