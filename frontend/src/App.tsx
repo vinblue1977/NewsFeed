@@ -247,7 +247,7 @@ function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; curren
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
-      {['Explore', 'Saved'].map((name) => <button key={name} type="button" disabled>{name}</button>)}
+      <button type="button" disabled>Explore</button>
       {link('markets', '#/markets', 'Markets')}
       {link('settings', '#/settings', 'Settings')}
     </nav>
