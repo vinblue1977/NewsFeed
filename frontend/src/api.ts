@@ -3,6 +3,7 @@ import type { Feed } from './types';
 import { type Articles, parseArticles } from './article';
 import { type Markets, parseMarkets } from './markets';
 import { WATCH_KEY } from './settings';
+import { parseScores, type Scores } from './scores';
 import { parseWeather, type Weather } from './weather';
 
 export const FEED_URL = '/data/feed.json';
@@ -22,6 +23,18 @@ export async function loadWeather(): Promise<Weather | undefined> {
   try {
     const response = await fetch(WEATHER_URL, { cache: 'no-cache' });
     return response.ok ? parseWeather(await response.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const SCORES_URL = '/data/scores.json';
+
+/** The scores, or undefined for any problem: they are optional and must never break the page. */
+export async function loadScores(): Promise<Scores | undefined> {
+  try {
+    const response = await fetch(SCORES_URL, { cache: 'no-cache' });
+    return response.ok ? parseScores(await response.json()) : undefined;
   } catch {
     return undefined;
   }
