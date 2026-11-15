@@ -160,6 +160,11 @@ export interface BriefGroup {
   stories: Story[];
 }
 
+/** `list` without the top story (and the rest of its cluster), so it is not shown twice on one screen. */
+function withoutTop(list: Story[], top: Story | undefined): Story[] {
+  return list.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
+}
+
 export const BRIEF_TOP_COLOR = '#5b86c9';
 const BRIEF_GROUPS: { label: string; color: string; topics: Topic[] }[] = [
   { label: 'US', color: '#5b86c9', topics: ['us'] },
@@ -175,7 +180,7 @@ const PER_GROUP = 3;
 export function briefing(feed: Feed, now: Date): { top: Story | undefined; groups: BriefGroup[]; total: number } {
   const recent = recentOnly(stories(feed, 'all'), now);
   const top = topStory(recent, now);
-  const rest = recent.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
+  const rest = withoutTop(recent, top);
   const named = new Set<string>(BRIEF_GROUPS.flatMap((g) => g.topics));
   const groups = [
     ...BRIEF_GROUPS.map(({ label, color, topics }) => ({ label, color, stories: rest.filter((s) => topics.includes(s.item.topic)) })),
@@ -209,7 +214,7 @@ export interface Section {
 /** For You, grouped by topic: in each, a lead (the newest story that has a picture, else the newest) and the next few.
  * `list` is newest first; the story shown as the top story is left out so it does not appear twice. */
 export function sections(list: Story[], top: Story | undefined): Section[] {
-  const rest = list.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
+  const rest = withoutTop(list, top);
   return SECTION_TOPICS.flatMap(({ topic, color }) => {
     const here = rest.filter((s) => s.item.topic === topic);
     const lead = here.find((s) => imageSrc(s.item)) ?? here[0];
@@ -218,11 +223,14 @@ export function sections(list: Story[], top: Story | undefined): Section[] {
   });
 }
 
-export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
+export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'discovery'; sub?: string } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
   if (hash === '#/local') return { kind: 'local' };
+  if (hash === '#/discovery') return { kind: 'discovery' };
+  const d = /^#\/discovery\/([a-z0-9-]{1,30})$/.exec(hash);
+  if (d?.[1]) return { kind: 'discovery', sub: d[1] };
   if (hash === '#/markets') return { kind: 'markets' };
   if (hash === '#/settings') return { kind: 'settings' };
   const q = /^#\/quote\/(.{1,40})$/.exec(hash);
@@ -238,6 +246,46 @@ export function parseRoute(hash: string): Route {
   const m = /^#\/(story|read)\/([A-Za-z0-9_-]{1,64})$/.exec(hash);
   if (!m?.[2]) return { kind: 'home' };
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
+}
+
+const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL' };
+
+/** A sub-topic id ("cricket") as a title ("Cricket"). */
+export function subtopicLabel(id: string): string {
+  return SUBTOPIC_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+export interface Corner {
+  id: string;
+  label: string;
+  lead: Story;  // the newest story in it
+  total: number;
+}
+
+export const DISCOVERY_PER_SECTION = 5;
+
+/** What the Discovery screen shows, from `list` (newest first).
+ * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
+ * - justIn: the newest stories from the last day not already above
+ * - corners: each sub-topic (cricket, markets...) with its newest story and its story count, biggest first. These use every story
+ *   in the feed (any age, top story included), so a tile's count matches the list it opens. */
+export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
+  const rest = recentOnly(withoutTop(list, topStory(list, now)), now);
+  const widely = rest
+    .filter((s) => s.sources > 1)
+    .sort((a, b) => b.sources - a.sources || b.item.published.localeCompare(a.item.published))
+    .slice(0, DISCOVERY_PER_SECTION);
+  const seen = new Set(widely);
+  const justIn = rest.filter((s) => !seen.has(s)).slice(0, DISCOVERY_PER_SECTION);
+  const byId = new Map<string, Corner>();
+  for (const s of list) {
+    const id = s.item.subtopic;
+    if (!id) continue;
+    const have = byId.get(id);
+    if (have) have.total += 1;
+    else byId.set(id, { id, label: subtopicLabel(id), lead: s, total: 1 });
+  }
+  return { widely, justIn, corners: [...byId.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label)) };
 }
 
 /** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */

@@ -1,5 +1,6 @@
 import http.client
 import io
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -182,6 +183,11 @@ def test_parse_accepts_declared_latin1() -> None:
 def test_markets_feeds_come_before_the_general_business_feed() -> None:
     order = [s.id for s in SOURCES]  # dedup keeps the first copy of a story, so its "markets" tag must come first
     assert all(order.index(s.id) < order.index("cnbc") for s in SOURCES if s.subtopic == "markets" and s.id != "cnbc")
+
+
+def test_subtopic_ids_fit_the_discovery_route() -> None:
+    # the frontend's parseRoute accepts #/discovery/<id> only for ids like these
+    assert all(re.fullmatch(r"[a-z0-9-]{1,30}", s.subtopic) for s in SOURCES if s.subtopic)
 
 
 def test_source_list_is_sane() -> None:
