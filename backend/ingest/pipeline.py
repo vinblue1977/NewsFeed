@@ -74,7 +74,7 @@ def collect(
     results = [f.result() if f.done() else (source, [], "timed out") for source, f in futures]
 
     items: dict[str, dict[str, Any]] = {}
-    headlines: set[tuple[str, str]] = set()
+    by_headline: dict[tuple[str, str], dict[str, Any]] = {}
     status: dict[str, dict[str, Any]] = {}
     for source, parsed, error in results:
         kept = 0
@@ -96,10 +96,13 @@ def collect(
                 continue
             key = _dedupe_key(item["url"])
             same_headline = (item["source"].lower(), item["title"].lower())  # a direct feed and Google News carry one story
-            if key in items or same_headline in headlines:
+            seen = items.get(key) or by_headline.get(same_headline)
+            if seen is not None:
+                if item.get("subtopic") and not seen.get("subtopic"):
+                    seen["subtopic"] = item["subtopic"]  # first seen in a general feed: it still gets the sub-topic tag
                 continue
             items[key] = item
-            headlines.add(same_headline)
+            by_headline[same_headline] = item
             kept += 1
         status[source.id] = {
             "ok": error is None,

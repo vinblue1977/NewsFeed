@@ -13,7 +13,7 @@ class Source:
     name: str
     url: str
     topic: str  # us | world | india | sports | tech | business | local
-    subtopic: str | None = None  # sports: nfl | cricket | tennis; business: markets
+    subtopic: str | None = None  # a Browse tile: sports, tech or business ids, e.g. nfl, f1, gadgets
     enabled: bool = True
     metered: bool = False
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
@@ -56,7 +56,13 @@ SOURCES: tuple[Source, ...] = (
     _s("espn-nfl", "ESPN", "https://www.espn.com/espn/rss/nfl/news", "sports", "nfl"),
     _s("cricinfo", "ESPNcricinfo", "https://www.espncricinfo.com/rss/content/story/feeds/0.xml", "sports", "cricket"),
     _s("bbc-tennis", "BBC Sport", "https://feeds.bbci.co.uk/sport/tennis/rss.xml", "sports", "tennis"),
+    _s("espn-nba", "ESPN", "https://www.espn.com/espn/rss/nba/news", "sports", "nba"),
+    _s("espn-nhl", "ESPN", "https://www.espn.com/espn/rss/nhl/news", "sports", "nhl"),
+    _s("espn-soccer", "ESPN", "https://www.espn.com/espn/rss/soccer/news", "sports", "soccer"),
+    _s("bbc-football", "BBC Sport", "https://feeds.bbci.co.uk/sport/football/rss.xml", "sports", "soccer"),
+    _s("bbc-f1", "BBC Sport", "https://feeds.bbci.co.uk/sport/formula1/rss.xml", "sports", "f1"),
     # Technology
+    _s("ars-gadgets", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/gadgets", "tech", "gadgets"),
     _s("ars", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "tech"),
     _s("verge", "The Verge", "https://www.theverge.com/rss/index.xml", "tech"),
     _s("techcrunch", "TechCrunch", "https://techcrunch.com/feed/", "tech"),
@@ -67,7 +73,6 @@ SOURCES: tuple[Source, ...] = (
     _s("bbc-tech", "BBC News", "https://feeds.bbci.co.uk/news/technology/rss.xml", "tech"),
     # Business
     _s("marketwatch", "MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "business"),
-    # Markets-only feeds come first: a story in both lists keeps the first one's "markets" tag
     _s("cnbc-finance", "CNBC", "https://www.cnbc.com/id/10000664/device/rss/rss.html", "business", "markets"),
     _s("cnbc-investing", "CNBC", "https://www.cnbc.com/id/15839069/device/rss/rss.html", "business", "markets"),
     _s("cnbc", "CNBC", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "business"),

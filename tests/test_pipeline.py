@@ -296,6 +296,18 @@ def test_a_story_in_both_a_direct_feed_and_google_news_is_shown_once() -> None:
     assert len(items) == 1
 
 
+def test_a_duplicate_with_a_sub_topic_tags_the_story_whichever_feed_came_first() -> None:
+    docs = {
+        "https://a.example/f": rss(("Same story", "https://a.example/x", "", "Fri, 13 Nov 2026 11:00:00 GMT")),
+        "https://b.example/f": rss(("Same story", "https://a.example/x/", "", "Fri, 13 Nov 2026 11:00:00 GMT")),
+    }
+    general = Source("gen", "Site", "https://a.example/f", "tech")
+    tagged = Source("tag", "Site", "https://b.example/f", "tech", "gadgets")
+    for order in ([general, tagged], [tagged, general]):
+        items, _ = collect(order, now=NOW, fetcher=docs.__getitem__)
+        assert len(items) == 1 and items[0]["subtopic"] == "gadgets"
+
+
 def test_only_google_news_local_feeds_are_trusted() -> None:
     made = local_sources(["https://news.google.com/rss/search?q=x", "https://wgntv.example/feed"])
     assert [s.trusted for s in made] == [True, False]

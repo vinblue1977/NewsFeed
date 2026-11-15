@@ -180,11 +180,6 @@ def test_parse_accepts_declared_latin1() -> None:
     assert parse_feed(body, SRC)[0]["title"] == "Café"
 
 
-def test_markets_feeds_come_before_the_general_business_feed() -> None:
-    order = [s.id for s in SOURCES]  # dedup keeps the first copy of a story, so its "markets" tag must come first
-    assert all(order.index(s.id) < order.index("cnbc") for s in SOURCES if s.subtopic == "markets" and s.id != "cnbc")
-
-
 def test_subtopic_ids_fit_the_discovery_route() -> None:
     # the frontend's parseRoute accepts #/discovery/<id> only for ids like these
     assert all(re.fullmatch(r"[a-z0-9-]{1,30}", s.subtopic) for s in SOURCES if s.subtopic)
@@ -198,7 +193,7 @@ def test_source_list_is_sane() -> None:
     headline_only = {s.id for s in SOURCES if s.headline_only}
     assert headline_only == {"gn-ap", "gn-cnn", "gn-reuters"}
     assert all(urlsplit(s.url).hostname == "news.google.com" for s in SOURCES if s.id in headline_only)
-    assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
+    assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis", "nba", "nhl", "soccer", "f1"}
 
 
 ITEM = "<item><title>T</title><link>https://e.com/a</link><pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate>{extra}</item>"
