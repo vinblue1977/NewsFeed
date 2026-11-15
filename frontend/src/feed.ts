@@ -9,11 +9,11 @@ export const TOPICS: { id: Topic | 'all'; label: string }[] = [
   { id: 'business', label: 'Business' },
 ];
 
-/** Topics with a tab of their own (Local, Sports): `stories(feed, 'all')` (For You, the briefing) leaves them out. */
+/** Topics with a tab of their own (Local, Sports): `stories(feed, 'all')` (For You) leaves them out. */
 const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local', 'sports']);
 const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local'], ['sports', 'Sports']]);
 const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
-export const DAY_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function topicLabel(topic: string): string {
   return LABELS.get(topic) ?? topic;
@@ -156,39 +156,9 @@ export function coverage(feed: Feed, story: Story, limit = 3): Item[] {
   return out;
 }
 
-export interface BriefGroup {
-  label: string;
-  color: string;
-  stories: Story[];
-}
-
 /** `list` without the top story (and the rest of its cluster), so it is not shown twice on one screen. */
 function withoutTop(list: Story[], top: Story | undefined): Story[] {
   return list.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
-}
-
-export const BRIEF_TOP_COLOR = '#5b86c9';
-const BRIEF_GROUPS: { label: string; color: string; topics: Topic[] }[] = [
-  { label: 'US', color: '#5b86c9', topics: ['us'] },
-  { label: 'World · India', color: '#3fb6a8', topics: ['world', 'india'] },
-  { label: 'Technology · Business', color: '#8a6fe0', topics: ['tech', 'business'] },
-];
-const MORE_GROUP = { label: 'More', color: '#9aa0a6' };  // any topic the groups above do not name, so no story is lost
-const PER_GROUP = 3;
-
-/** The Briefing: the lead story, then the newest few stories per topic group from the last day. Text only, no repeats. */
-export function briefing(feed: Feed, now: Date): { top: Story | undefined; groups: BriefGroup[]; total: number } {
-  const recent = recentOnly(stories(feed, 'all'), now);
-  const top = topStory(recent, now);
-  const rest = withoutTop(recent, top);
-  const named = new Set<string>(BRIEF_GROUPS.flatMap((g) => g.topics));
-  const groups = [
-    ...BRIEF_GROUPS.map(({ label, color, topics }) => ({ label, color, stories: rest.filter((s) => topics.includes(s.item.topic)) })),
-    { ...MORE_GROUP, stories: rest.filter((s) => !named.has(s.item.topic)) },
-  ]
-    .map((g) => ({ ...g, stories: g.stories.slice(0, PER_GROUP) }))
-    .filter((g) => g.stories.length > 0);
-  return { top, groups, total: (top ? 1 : 0) + groups.reduce((n, g) => n + g.stories.length, 0) };
 }
 
 export const SECTION_TOPICS: { topic: Topic; color: string }[] = [

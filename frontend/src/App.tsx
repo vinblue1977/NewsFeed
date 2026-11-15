@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BRIEF_TOP_COLOR, briefing, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Route, Section, Story } from './feed';
 import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -23,26 +23,6 @@ const PAGE = 30;
 const TICK_MS = 60_000;
 const COVERAGE_SHOWN = 8;
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer' } as const;
-const VIEW_KEY = 'news.view';
-
-type View = 'feed' | 'brief';
-
-function savedView(): View {
-  try {
-    return localStorage.getItem(VIEW_KEY) === 'brief' ? 'brief' : 'feed';
-  } catch {
-    return 'feed';  // storage can be blocked; the app works without it
-  }
-}
-
-function saveView(view: View): void {
-  try {
-    localStorage.setItem(VIEW_KEY, view);
-  } catch {
-    /* not remembered; fine */
-  }
-}
-
 type Load = { state: 'loading' } | { state: 'error' } | { state: 'ready'; feed: Feed };
 
 function WeatherStrip({ weather, stale }: { weather: Weather; stale: boolean }) {
@@ -681,7 +661,6 @@ function Source({ name, when, extra }: { name: string; when: string; extra?: str
 export function App() {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [topic, setTopic] = useState<Topic | 'all'>('all');
-  const [view, setView] = useState<View>(savedView);
   const [shown, setShown] = useState(PAGE);
   const [subShown, setSubShown] = useState(PAGE);  // rows shown in a Browse sub-topic list
   const [sportsShown, setSportsShown] = useState(PAGE);
@@ -793,21 +772,11 @@ export function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--read-size', `${readSize(settings.textSize)}px`);
   }, [settings.textSize]);
-  const isBrief = view === 'brief';
-  // only the visible view is computed
-  const list = useMemo(() => (feed && !isBrief ? stories(feed, topic) : []), [feed, topic, isBrief]);
-  const lead = useMemo(() => (feed && !isBrief ? topStory(list, now) : undefined), [feed, list, now, isBrief]);
+  const list = useMemo(() => (feed ? stories(feed, topic) : []), [feed, topic]);
+  const lead = useMemo(() => (feed ? topStory(list, now) : undefined), [feed, list, now]);
   const full = useMemo(() => (feed && lead ? coverage(feed, lead) : []), [feed, lead]);
   const rest = list.filter((s) => s.item.id !== lead?.item.id);
-  const grouped = useMemo(() => (topic === 'all' && !isBrief ? sections(list, lead) : []), [list, lead, topic, isBrief]);
-  const brief = useMemo(() => (feed && isBrief ? briefing(feed, now) : undefined), [feed, now, isBrief]);
-  const toggleView = () => {
-    const next = isBrief ? 'feed' : 'brief';
-    setView(next);
-    saveView(next);
-    setTopic('all');  // the Briefing covers everything, so a topic chosen earlier must not stay hidden behind it
-    setShown(PAGE);
-  };
+  const grouped = useMemo(() => (topic === 'all' ? sections(list, lead) : []), [list, lead, topic]);
   const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has neither local nor sports stories:
   const hasSports = feed?.items.some((i) => i.topic === 'sports') ?? false;  // point to their tabs when that is all there is
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
@@ -864,7 +833,7 @@ export function App() {
         <PullIndicator {...pull} />
         <MarketsScreen markets={markets} hasKey={settings.watchKey !== ''} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers}
           collapsed={settings.watchCollapsed} onToggle={toggleWatchlist}
-          feed={feed} onAllBusiness={() => { setTopic('business'); setView('feed'); location.hash = '#'; }} />
+          feed={feed} onAllBusiness={() => { setTopic('business'); location.hash = '#'; }} />
         <TabBar current="markets" />
       </>
     );
@@ -922,25 +891,19 @@ export function App() {
       <div class="wrap">
         <header class="hdr">
           <div>
-            <div class="e">{date}{isBrief && brief ? ` · ${brief.total} stories` : ''}</div>
-            <h1>{isBrief ? 'Briefing' : topic === 'all' ? 'For you' : topicLabel(topic)}</h1>
+            <div class="e">{date}</div>
+            <h1>{topic === 'all' ? 'For you' : topicLabel(topic)}</h1>
           </div>
-          <div class="hbtns">
-            <button type="button" class={isBrief ? 'ib on' : 'ib'} aria-pressed={isBrief} aria-label="Briefing view" title="Briefing view"
-              onClick={toggleView}>☰</button>
-            <SettingsLink />
-          </div>
+          <SettingsLink />
         </header>
-        {!isBrief && (
-          <nav class="chips" aria-label="Topics">
-            {TOPICS.map((t) => (
-              <button key={t.id} type="button" class={t.id === topic ? 'on' : ''} aria-pressed={t.id === topic}
-                onClick={() => { setTopic(t.id); setShown(PAGE); }}>
-                {t.label}
-              </button>
-            ))}
-          </nav>
-        )}
+        <nav class="chips" aria-label="Topics">
+          {TOPICS.map((t) => (
+            <button key={t.id} type="button" class={t.id === topic ? 'on' : ''} aria-pressed={t.id === topic}
+              onClick={() => { setTopic(t.id); setShown(PAGE); }}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
 
         {load.state === 'loading' && <p class="note">Loading the latest stories…</p>}
         {load.state === 'error' && (
@@ -948,41 +911,11 @@ export function App() {
             <button type="button" class="btn" onClick={() => { setLoad({ state: 'loading' }); refresh(); }}>Try again</button></div>
         )}
         {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
-        {feed && isBrief && brief && brief.total === 0 && <div class="empty"><b>Nothing new today</b><span>No stories from the last 24 hours.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {raw && feed && raw.items.length > 0 && feed.items.length === 0 && <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>}
-        {feed && !isBrief && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
-        {feed && !isBrief && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
+        {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
+        {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
-        {isBrief && brief && (
-          <>
-            {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
-            {brief.top && (
-              <>
-                <div class="grp"><i style={{ background: BRIEF_TOP_COLOR }} />Top story</div>
-                <StoryAnchor story={brief.top} class="bi first">
-                  <h2>{brief.top.item.title}</h2>
-                  {brief.top.item.summary && <p>{brief.top.item.summary.slice(0, 200)}</p>}
-                  <div class="m"><span>{brief.top.item.source}</span><span>{timeAgo(brief.top.item.published, now)}</span>
-                    {brief.top.sources > 1 && <span class="c">{brief.top.sources} sources</span>}</div>
-                </StoryAnchor>
-              </>
-            )}
-            {brief.groups.map((g) => (
-              <section key={g.label}>
-                <div class="grp"><i style={{ background: g.color }} />{g.label}</div>
-                {g.stories.map((st) => (
-                  <StoryAnchor story={st} key={st.item.id} class="bi">
-                    <h2>{st.item.title}</h2>
-                    <div class="m"><span>{st.item.source}</span><span>{timeAgo(st.item.published, now)}</span></div>
-                  </StoryAnchor>
-                ))}
-              </section>
-            ))}
-            {brief.total > 0 && <div class="done">You're all caught up ✓</div>}
-          </>
-        )}
-
-        {!isBrief && lead && (
+        {lead && (
           <>
             <div class="sec"><b>Top story</b></div>
             <StoryAnchor story={lead} class="topcard">
@@ -1004,12 +937,12 @@ export function App() {
           </>
         )}
 
-        {!isBrief && weather && <WeatherStrip weather={weather} stale={weatherStale} />}
-        {!isBrief && topic === 'all' && grouped.map((g) => (
+        {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
+        {topic === 'all' && grouped.map((g) => (
           <TopicSection key={g.topic} section={g} now={now} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
         ))}
-        {!isBrief && topic !== 'all' && rest.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
-        {!isBrief && topic !== 'all' && rest.length > shown && (
+        {topic !== 'all' && rest.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        {topic !== 'all' && rest.length > shown && (
           <div class="more"><button type="button" class="btn g" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>
         )}
       </div>
