@@ -60,8 +60,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .full .it .src { margin-top: 0; }
 .full .it b { font-weight: 500; font-size: 14.5px; display: block; }
 
-/* one card style for the feed rows and the briefing rows */
-.row, .bi { margin: 0 16px 10px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+/* the card style for the feed rows */
+.row { margin: 0 16px 10px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .row { display: flex; gap: 12px; }
 .row .t { flex: 1; min-width: 0; }
 .row .src { margin-top: 0; }
@@ -88,7 +88,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tabbar button:disabled { opacity: .45; cursor: default; }
 
 .ib { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--chip); font-size: 17px; }
-.ib.on { background: var(--accent); color: var(--on-accent); }
 
 .grp { padding: 16px 16px 8px; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; color: #c4c7cc; }
 .fold-h { width: 100%; background: none; border: 0; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; justify-content: space-between; cursor: pointer; text-align: left; }
@@ -97,13 +96,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .fold-h .chev { font-size: 18px; letter-spacing: 0; transition: transform .15s; }
 .fold-h .chev.open { transform: rotate(90deg); }
 .grp i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-.bi { display: block; }
-.bi h2 { font-size: 16.5px; line-height: 1.3; font-weight: 600; margin: 0 0 5px; overflow-wrap: anywhere; }
-.bi .m { font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
-.bi .c { color: var(--accent); }
-.bi.first h2 { font-size: 20px; }
-.bi.first p { margin: 0 0 6px; color: #b4b8be; font-size: 14.5px; }
-.done { text-align: center; padding: 22px; color: var(--muted); font-size: 14px; }
 
 .wx { margin: 8px 16px; background: var(--wx-bg); border-radius: 14px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--wx-text); }
 .wx-k { font-size: 12px; font-weight: 600; letter-spacing: .5px; }
@@ -215,5 +207,4 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tile b { font-size: 15px; }
 .tile .tl { font-size: 13px; line-height: 1.35; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .tile .tn { margin-top: auto; font-size: 12px; color: var(--accent); }
-.hbtns { display: flex; gap: 8px; }
 .ib svg { display: block; }

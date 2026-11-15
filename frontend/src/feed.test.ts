@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, briefing, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -85,60 +85,18 @@ describe('feed helpers', () => {
     expect(topStory(stories(feed, 'tech'), NOW)).toBeUndefined();
   });
 
+  it('only picks a lead from the last 24 hours: not an old, future-dated or unreadable story', () => {
+    const at = (id: string, published: string) => ({ item: item(id, { published }), cluster: undefined, sources: 1 });
+    expect(topStory([at('bad', 'sometime yesterday'), at('old', '2026-11-12T11:59:59+00:00')], NOW)).toBeUndefined();
+    expect(topStory([at('edge', '2026-11-12T12:00:01+00:00')], NOW)?.item.id).toBe('edge');
+    expect(topStory([at('future', '2026-11-14T09:00:00+00:00')], NOW)?.item.id).toBe('future');  // a clock slip counts as just now
+  });
+
   it('lists coverage from other sources only', () => {
     const lead = stories(feed, 'us')[0];
     if (!lead) throw new Error('no lead');
     expect(coverage(feed, lead).map((i) => i.id)).toEqual(['b']);
     expect(coverage(feed, { item: item('q'), cluster: undefined, sources: 1 })).toEqual([]);
-  });
-
-  it('builds a briefing: lead story, then a few recent stories per topic group, no repeats', () => {
-    const b = briefing(feed, NOW);
-    expect(b.top?.item.id).toBe('a');
-    expect(b.groups.map((g) => g.label)).toEqual(['World · India']);
-    expect(b.groups[0]?.stories.map((s) => s.item.id)).toEqual(['d']);
-    expect(b.total).toBe(2);  // 'e' is days old, so left out
-    const many: Feed = {
-      ...feed,
-      clusters: [],
-      items: Array.from({ length: 6 }, (_, n) => item(`t${n}`, { topic: 'tech', published: `2026-11-13T11:0${n}:00+00:00` })),
-    };
-    expect(briefing(many, NOW).groups[0]?.stories).toHaveLength(3);
-    expect(briefing({ ...feed, items: [], clusters: [] }, NOW)).toEqual({ top: undefined, groups: [], total: 0 });
-  });
-
-  it('keeps stories from topics it has no group for, in a "More" group', () => {
-    const odd: Feed = {
-      ...feed,
-      clusters: [],
-      items: [item('s1', { topic: 'us', published: '2026-11-13T11:30:00+00:00' }), item('s2', { topic: 'science' as never })],
-    };
-    const b = briefing(odd, NOW);
-    expect(b.top?.item.id).toBe('s1');
-    expect(b.groups.map((g) => [g.label, g.stories.map((s) => s.item.id)])).toEqual([['More', ['s2']]]);
-    expect(b.total).toBe(2);
-  });
-
-  it('ignores unparseable dates, treats future dates as now, and cuts off at 24 hours', () => {
-    const dated: Feed = {
-      ...feed,
-      clusters: [],
-      items: [
-        item('bad', { published: 'sometime yesterday' }),
-        item('future', { published: '2026-11-14T09:00:00+00:00' }),
-        item('edge', { published: '2026-11-12T12:00:01+00:00' }),
-        item('old', { published: '2026-11-12T11:59:59+00:00' }),
-      ],
-    };
-    const b = briefing(dated, NOW);
-    const ids = [b.top?.item.id, ...b.groups.flatMap((g) => g.stories.map((s) => s.item.id))].sort();
-    expect(ids).toEqual(['edge', 'future']);
-  });
-
-  it('does not repeat the lead story\'s cluster further down', () => {
-    const b = briefing(feed, NOW);
-    const shown = [b.top, ...b.groups.flatMap((g) => g.stories)].map((s) => s?.cluster?.id).filter(Boolean);
-    expect(new Set(shown).size).toBe(shown.length);
   });
 
   it('reads the route from the URL hash', () => {
@@ -268,7 +226,6 @@ describe('discovery', () => {
 });
 
 describe('tab-only topics stay out of For You', () => {
-  const now = new Date('2026-11-15T12:00:00Z');
   const item = (id: string, topic: 'us' | 'local' | 'sports', cluster?: string) => ({ id, title: id, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic, cluster });
   const feed = {
     generated: '2026-11-15T11:30:00Z',
@@ -284,14 +241,12 @@ describe('tab-only topics stay out of For You', () => {
     const mixed = { ...feed, items: [...feed.items, item('u', 'us', 'c1')] };
     expect(stories(mixed, 'all').map((s) => s.item.id)).toEqual(['a']);
   });
-  it('has no Local topic chip, section or briefing group, and still labels local stories', () => {
+  it('has no Local or Sports topic chip or section, and still labels their stories', () => {
     expect(TOPICS.map((t) => t.id)).not.toContain('local');
     expect(TOPICS.map((t) => t.id)).not.toContain('sports');
     expect(topicLabel('sports')).toBe('Sports');
     expect(topicLabel('local')).toBe('Local');
-    expect(briefing(feed, now).groups.map((g) => g.label)).not.toContain('Local');
     expect(sections(stories(feed, 'all'), undefined).map((s) => s.topic)).not.toContain('local');
-    expect(briefing(feed, now).total).toBe(1);
   });
 });
 
