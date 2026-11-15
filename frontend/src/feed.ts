@@ -5,14 +5,13 @@ export const TOPICS: { id: Topic | 'all'; label: string }[] = [
   { id: 'us', label: 'US' },
   { id: 'world', label: 'World' },
   { id: 'india', label: 'India' },
-  { id: 'sports', label: 'Sports' },
   { id: 'tech', label: 'Technology' },
   { id: 'business', label: 'Business' },
 ];
 
-/** Topics with a tab of their own: `stories(feed, 'all')` (For You, Browse, the briefing) leaves them out. */
-const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local']);
-const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local']]);
+/** Topics with a tab of their own (Local, Sports): `stories(feed, 'all')` (For You, the briefing) leaves them out. */
+const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local', 'sports']);
+const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local'], ['sports', 'Sports']]);
 const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -88,7 +87,7 @@ export interface Story {
 
 /** One story per cluster, newest first. The cluster's lead item stands for it; if the lead is missing or in another
  * topic, the newest member in this topic does. Unclustered items stand alone.
- * `all` is every topic except the tab-only ones (local), which only their own topic returns. */
+ * `all` is every topic except the tab-only ones (local, sports), which only their own topic returns. */
 export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   const wanted = (i: Item) => (topic === 'all' ? !TAB_ONLY_TOPICS.has(i.topic) : i.topic === topic);
   const members = new Map<string, Item[]>();
@@ -172,7 +171,6 @@ export const BRIEF_TOP_COLOR = '#5b86c9';
 const BRIEF_GROUPS: { label: string; color: string; topics: Topic[] }[] = [
   { label: 'US', color: '#5b86c9', topics: ['us'] },
   { label: 'World · India', color: '#3fb6a8', topics: ['world', 'india'] },
-  { label: 'Sports', color: '#6fbf5c', topics: ['sports'] },
   { label: 'Technology · Business', color: '#8a6fe0', topics: ['tech', 'business'] },
 ];
 const MORE_GROUP = { label: 'More', color: '#9aa0a6' };  // any topic the groups above do not name, so no story is lost
@@ -197,7 +195,6 @@ export const SECTION_TOPICS: { topic: Topic; color: string }[] = [
   { topic: 'us', color: '#5b86c9' },
   { topic: 'world', color: '#3fb6a8' },
   { topic: 'india', color: '#e0a53f' },
-  { topic: 'sports', color: '#6fbf5c' },
   { topic: 'tech', color: '#8a6fe0' },
   { topic: 'business', color: '#c97aa8' },
 ];
@@ -224,14 +221,17 @@ export function sections(list: Story[], top: Story | undefined): Section[] {
   });
 }
 
-export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'discovery'; sub?: string } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
+export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'discovery'; sub?: string } | { kind: 'sports'; sub?: string } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/sports", "#/sports/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
   if (hash === '#/local') return { kind: 'local' };
   if (hash === '#/discovery') return { kind: 'discovery' };
   const d = /^#\/discovery\/([a-z0-9-]{1,30})$/.exec(hash);
   if (d?.[1]) return { kind: 'discovery', sub: d[1] };
+  if (hash === '#/sports') return { kind: 'sports' };
+  const sp = /^#\/sports\/([a-z0-9-]{1,30})$/.exec(hash);
+  if (sp?.[1]) return { kind: 'sports', sub: sp[1] };
   if (hash === '#/markets') return { kind: 'markets' };
   if (hash === '#/settings') return { kind: 'settings' };
   const q = /^#\/quote\/(.{1,40})$/.exec(hash);
@@ -259,6 +259,7 @@ export function subtopicLabel(id: string): string {
 export interface Corner {
   id: string;
   label: string;
+  topic: Topic;  // of the lead: a sports sub-topic opens in the Sports tab
   lead: Story;  // the newest story in it
   total: number;
 }
@@ -270,8 +271,9 @@ export const MAX_CORNERS = 8;
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
  * - corners: each sub-topic (cricket, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story
- *   in the feed (any age, top story included), so a tile's count matches the list it opens. */
-export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
+ *   in the feed (any age, top story included; `sportsList` adds the sports stories, which are not in `list`), so a tile's count
+ *   matches the list it opens. */
+export function discovery(list: Story[], now: Date, sportsList: Story[] = []): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
   const rest = recentOnly(withoutTop(list, topStory(list, now)), now);
   const widely = rest
     .filter((s) => s.sources > 1)
@@ -279,15 +281,31 @@ export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: 
     .slice(0, DISCOVERY_PER_SECTION);
   const seen = new Set(widely);
   const justIn = rest.filter((s) => !seen.has(s)).slice(0, DISCOVERY_PER_SECTION);
-  const byId = new Map<string, Corner>();
-  for (const s of list) {
+  const byKey = new Map<string, Corner>();  // keyed by topic too: two topics may use one sub-topic id, and each tile opens one tab
+  for (const s of [...list, ...sportsList]) {
     const id = s.item.subtopic;
     if (!id) continue;
-    const have = byId.get(id);
-    if (have) have.total += 1;
-    else byId.set(id, { id, label: subtopicLabel(id), lead: s, total: 1 });
+    const key = `${s.item.topic}/${id}`;
+    const have = byKey.get(key);
+    if (!have) byKey.set(key, { id, label: subtopicLabel(id), topic: s.item.topic, lead: s, total: 1 });
+    else {
+      have.total += 1;
+      if (s.item.published > have.lead.item.published) have.lead = s;
+    }
   }
-  return { widely, justIn, corners: [...byId.values()].sort((a, b) => b.lead.item.published.localeCompare(a.lead.item.published) || b.total - a.total).slice(0, MAX_CORNERS) };
+  return { widely, justIn, corners: [...byKey.values()].sort((a, b) => b.lead.item.published.localeCompare(a.lead.item.published) || b.total - a.total).slice(0, MAX_CORNERS) };
+}
+
+/** Where a sub-topic's list lives: sports sub-topics in the Sports tab, the rest in Browse. */
+export function subtopicRoute(topic: string, sub: string): string {
+  return topic === 'sports' ? `#/sports/${sub}` : `#/discovery/${sub}`;
+}
+
+/** The sub-topics of `list` (newest first) with a story each, most stories first: the Sports tab's chips. */
+export function subtopicsOf(list: Story[]): string[] {
+  const counts = new Map<string, number>();
+  for (const s of list) if (s.item.subtopic) counts.set(s.item.subtopic, (counts.get(s.item.subtopic) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
 }
 
 /** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */

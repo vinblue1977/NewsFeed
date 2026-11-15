@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, briefing, imageSrc, sections, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, briefing, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -144,6 +144,9 @@ describe('feed helpers', () => {
   it('reads the route from the URL hash', () => {
     expect(parseRoute('#/local')).toEqual({ kind: 'local' });
     expect(parseRoute('#/discovery')).toEqual({ kind: 'discovery' });
+    expect(parseRoute('#/sports')).toEqual({ kind: 'sports' });
+    expect(parseRoute('#/sports/nba')).toEqual({ kind: 'sports', sub: 'nba' });
+    expect(parseRoute('#/sports/NBA!')).toEqual({ kind: 'home' });
     expect(parseRoute('#/discovery/cricket')).toEqual({ kind: 'discovery', sub: 'cricket' });
     expect(parseRoute('#/discovery/Bad Thing')).toEqual({ kind: 'home' });
     expect(parseRoute('#/markets')).toEqual({ kind: 'markets' });
@@ -207,15 +210,15 @@ describe('pictures and sections', () => {
   it('groups by topic in a fixed order; the lead prefers a story with a picture; the top story is left out', () => {
     const list = [
       story('w1', 'world'), story('u1', 'us'), story('u2', 'us', { img: NAME }), story('u3', 'us'), story('u4', 'us'),
-      story('top', 'sports'), story('s1', 'sports'),
+      story('top', 'tech'), story('t1', 'tech'),
     ];
     const out = sections(list, list[5]);
-    expect(out.map((s) => s.topic)).toEqual(['us', 'world', 'sports']);
+    expect(out.map((s) => s.topic)).toEqual(['us', 'world', 'tech']);
     const us = out[0];
     expect(us?.lead.item.id).toBe('u2');  // the one with a picture
     expect(us?.more.map((s) => s.item.id)).toEqual(['u1', 'u3']);  // then the newest others, two at most
     expect(us?.total).toBe(4);
-    expect(out[2]?.lead.item.id).toBe('s1');
+    expect(out[2]?.lead.item.id).toBe('t1');
   });
   it('leaves out a topic with nothing and the whole cluster of the top story', () => {
     const c = { id: 'c', title: '', topic: 'us' as const, lead: 'a', published: '', sources: 2, items: [] };
@@ -264,17 +267,18 @@ describe('discovery', () => {
   });
 });
 
-describe('local stories stay out of For You', () => {
+describe('tab-only topics stay out of For You', () => {
   const now = new Date('2026-11-15T12:00:00Z');
-  const item = (id: string, topic: 'us' | 'local', cluster?: string) => ({ id, title: id, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic, cluster });
+  const item = (id: string, topic: 'us' | 'local' | 'sports', cluster?: string) => ({ id, title: id, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic, cluster });
   const feed = {
     generated: '2026-11-15T11:30:00Z',
-    items: [item('a', 'us'), item('l1', 'local'), item('l2', 'local', 'c1'), item('l3', 'local', 'c1')],
+    items: [item('a', 'us'), item('sp1', 'sports'), item('l1', 'local'), item('l2', 'local', 'c1'), item('l3', 'local', 'c1')],
     clusters: [{ id: 'c1', title: 'Local cluster', topic: 'local' as const, lead: 'l2', published: '2026-11-15T10:00:00Z', sources: 2, items: ['l2', 'l3'] }],
   };
   it('leaves local out of "all" but still returns it for the local topic', () => {
     expect(stories(feed, 'all').map((s) => s.item.id)).toEqual(['a']);
     expect(stories(feed, 'local').map((s) => s.item.id).sort()).toEqual(['l1', 'l2']);
+    expect(stories(feed, 'sports').map((s) => s.item.id)).toEqual(['sp1']);
   });
   it('keeps a local cluster out of For You even when a non-local story joined it', () => {
     const mixed = { ...feed, items: [...feed.items, item('u', 'us', 'c1')] };
@@ -282,9 +286,33 @@ describe('local stories stay out of For You', () => {
   });
   it('has no Local topic chip, section or briefing group, and still labels local stories', () => {
     expect(TOPICS.map((t) => t.id)).not.toContain('local');
+    expect(TOPICS.map((t) => t.id)).not.toContain('sports');
+    expect(topicLabel('sports')).toBe('Sports');
     expect(topicLabel('local')).toBe('Local');
     expect(briefing(feed, now).groups.map((g) => g.label)).not.toContain('Local');
     expect(sections(stories(feed, 'all'), undefined).map((s) => s.topic)).not.toContain('local');
     expect(briefing(feed, now).total).toBe(1);
+  });
+});
+
+describe('sports tab helpers', () => {
+  const mk = (id: string, subtopic?: string) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic: 'sports' as const, subtopic }, cluster: undefined, sources: 1 });
+  it('orders sub-topics by story count and ignores untagged stories', () => {
+    expect(subtopicsOf([mk('a', 'nfl'), mk('b', 'soccer'), mk('c', 'soccer'), mk('d')])).toEqual(['soccer', 'nfl']);
+    expect(subtopicsOf([])).toEqual([]);
+  });
+  it('merges a sub-topic across both lists, keeps the newest as its lead, and keeps topics apart', () => {
+    const now = new Date('2026-11-15T12:00:00Z');
+    const biz = { ...mk('b', 'markets'), item: { ...mk('b', 'markets').item, topic: 'business' as const, published: '2026-11-15T09:00:00Z' } };
+    const newer = { ...mk('n', 'nfl'), item: { ...mk('n', 'nfl').item, published: '2026-11-15T11:00:00Z' } };
+    const corners = discovery([biz, mk('x', 'markets')], now, [mk('a', 'nfl'), newer]).corners;
+    expect(corners.map((c) => [c.topic, c.id, c.total, c.lead.item.id])).toEqual([['sports', 'nfl', 2, 'n'], ['sports', 'markets', 1, 'x'], ['business', 'markets', 1, 'b']]);
+    expect(subtopicRoute('sports', 'nfl')).toBe('#/sports/nfl');
+    expect(subtopicRoute('business', 'markets')).toBe('#/discovery/markets');
+  });
+  it('lets Browse count sports tiles and send them to the Sports tab', () => {
+    const now = new Date('2026-11-15T12:00:00Z');
+    const corners = discovery([], now, [mk('a', 'nfl'), mk('b', 'nfl')]).corners;
+    expect(corners.map((c) => [c.id, c.topic, c.total])).toEqual([['nfl', 'sports', 2]]);
   });
 });
