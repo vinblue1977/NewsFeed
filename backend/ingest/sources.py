@@ -43,7 +43,14 @@ SOURCES: tuple[Source, ...] = (
     _s("nbc", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/news", "us"),
     _s("thehill", "The Hill", "https://thehill.com/feed/", "us"),
     _s("bbc-us", "BBC News", "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml", "us"),
-    _gnews("gn-ap", "AP", "apnews.com", "us"),
+    # US politics
+    _s("politico", "Politico", "https://rss.politico.com/politics-news.xml", "us"),
+    _s("npr-politics", "NPR", "https://feeds.npr.org/1014/rss.xml", "us"),
+    _s("guardian-uspolitics", "The Guardian", "https://www.theguardian.com/us-news/us-politics/rss", "us"),
+    _s("pbs-politics", "PBS NewsHour", "https://www.pbs.org/newshour/feeds/rss/politics", "us"),
+    _s("cbs-politics", "CBS News", "https://www.cbsnews.com/latest/rss/politics", "us"),
+    _s("abc-politics", "ABC News", "https://abcnews.go.com/abcnews/politicsheadlines", "us"),
+    _s("thehill-admin", "The Hill", "https://thehill.com/homenews/administration/feed/", "us"),
     _gnews("gn-cnn", "CNN", "cnn.com", "us"),
     # World
     _gnews("gn-reuters", "Reuters", "reuters.com", "world"),
