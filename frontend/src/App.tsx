@@ -603,6 +603,8 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   );
 }
 
+const MARKET_NEWS_PAGE = 10;  // market stories shown, and added by each "Show more"
+
 function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collapsed, onToggle, earnCollapsed, onToggleEarn, feed, onAllBusiness }: {
   markets: Markets | undefined; earnings: Earnings | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; collapsed: boolean; onToggle: () => void;
   earnCollapsed: boolean; onToggleEarn: () => void; feed: Feed | undefined; onAllBusiness: () => void;
@@ -617,8 +619,9 @@ function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collaps
     if (!feed) return [];
     const top = topStory(stories(feed, 'all'), now);  // the For You top story is not repeated here
     const terms = watchTerms(markets?.tickers ?? []);
-    return stories(feed, 'business').filter((s) => s.item.id !== top?.item.id && isMarketNews(s.item, terms)).slice(0, 5);
+    return stories(feed, 'business').filter((s) => s.item.id !== top?.item.id && isMarketNews(s.item, terms));
   }, [feed, now, markets]);
+  const [newsShown, setNewsShown] = useState(MARKET_NEWS_PAGE);
   return (
     <div class="wrap">
       <header class="hdr">
@@ -673,8 +676,11 @@ function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collaps
       {news.length > 0 && (
         <>
           <div class="grp">Market news</div>
-          {news.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
-          <div class="btns"><button type="button" class="btn g" onClick={onAllBusiness}>All Business ›</button></div>
+          {news.slice(0, newsShown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+          <div class="btns">
+            {news.length > newsShown && <button type="button" class="btn g" onClick={() => setNewsShown((n) => n + MARKET_NEWS_PAGE)}>Show more</button>}
+            <button type="button" class="btn g" onClick={onAllBusiness}>All Business ›</button>
+          </div>
         </>
       )}
     </div>
