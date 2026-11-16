@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULTS, parseSettings, readSize, shownCount, sourceNames, toggled, withoutSources } from './settings';
+import { DEFAULTS, parseSettings, withTeam, readSize, shownCount, sourceNames, toggled, withoutSources } from './settings';
 import type { Feed } from './types';
 
 const it_ = (id: string, source: string, cluster?: string) => ({ id, title: id, url: 'https://e.com', summary: '', published: 'p', source, topic: 'us' as const, cluster });
@@ -22,7 +22,7 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], watchKey: '' });
+    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '' });
     expect(parseSettings(JSON.stringify({ watchCollapsed: true })).watchCollapsed).toBe(true);
     expect(parseSettings(JSON.stringify({ watchCollapsed: 'yes' })).watchCollapsed).toBe(false);
     expect(parseSettings(JSON.stringify({ scoresCollapsed: ['nfl', 'bogus', 5, 'nfl', 'cricket'] })).scoresCollapsed).toEqual(['nfl', 'cricket']);
@@ -57,5 +57,21 @@ describe('shownCount', () => {
   it('ignores hidden entries that are no longer listed', () => {
     expect(shownCount(['A', 'B', 'C'], ['B', 'GONE'])).toBe(2);
     expect(shownCount([], ['B'])).toBe(0);
+  });
+});
+
+describe('my teams settings', () => {
+  it('keeps clean, short, unique names and a bounded list', () => {
+    expect(parseSettings(JSON.stringify({ myTeams: ['Bears', 'Bears', '', 5, 'x'.repeat(41)] })).myTeams).toEqual(['Bears']);
+    expect(parseSettings(JSON.stringify({ myTeams: 'Bears' })).myTeams).toEqual([]);
+    expect(parseSettings(JSON.stringify({ myTeams: ['Bears', 'bears', ' New   York '] })).myTeams).toEqual(['Bears', 'New York']);
+  });
+  it('adds a name once, ignoring case and spacing, and stops at the limit', () => {
+    expect(withTeam([], '  New   York  Giants ')).toEqual(['New York Giants']);
+    expect(withTeam(['Bears'], 'bears')).toEqual(['Bears']);
+    expect(withTeam(['Bears'], '  ')).toEqual(['Bears']);
+    expect(withTeam(['Bears'], 'x'.repeat(41))).toEqual(['Bears']);
+    const full = Array.from({ length: 20 }, (_, i) => `T${i}`);
+    expect(withTeam(full, 'More')).toEqual(full);
   });
 });

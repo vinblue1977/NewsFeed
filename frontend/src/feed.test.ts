@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -284,5 +284,14 @@ describe('sportSections', () => {
   it('gives an unknown sport a colour and no sections for no stories', () => {
     expect(sportSections([mk('a', 'curling')])[0]?.color).toMatch(/^#/);
     expect(sportSections([])).toEqual([]);
+  });
+});
+
+describe('teamStories', () => {
+  const mk = (id: string, title: string) => ({ item: { id, title, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic: 'sports' as const }, cluster: undefined, sources: 1 });
+  it('keeps the stories whose headline names a followed team, in order', () => {
+    const list = [mk('a', 'Bears rally late'), mk('b', 'Lions win'), mk('c', 'Why the bears hibernate')];
+    expect(teamStories(list, (t) => /bears/i.test(t)).map((s) => s.item.id)).toEqual(['a', 'c']);
+    expect(teamStories(list, null)).toEqual([]);
   });
 });

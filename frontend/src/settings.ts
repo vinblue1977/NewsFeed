@@ -8,19 +8,22 @@ export interface Settings {
   hiddenSources: string[];
   hiddenTickers: string[];
   watchCollapsed: boolean;  // the Markets watchlist list is folded away
+  myTeams: string[];  // teams, countries or players to follow on the Sports tab, matched by name
   scoresCollapsed: string[];  // sports (nfl, tennis, cricket) whose scores are folded away under All on the Sports tab
   watchKey: string;  // names the private watchlist file; empty when not set
 }
 
 export const SETTINGS_KEY = 'news.settings';
 export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
-export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], watchKey: '' };
+export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '' };
 export const SCORE_SPORTS = ['nfl', 'tennis', 'cricket'] as const;
 export const TEXT_SIZES: { id: TextSize; label: string; px: number }[] = [
   { id: 'small', label: 'Small', px: 16 },
   { id: 'medium', label: 'Medium', px: 18 },
   { id: 'large', label: 'Large', px: 21 },
 ];
+export const MAX_TEAMS = 20;
+export const MAX_TEAM_CHARS = 40;
 const MAX_LIST = 200;  // a corrupted or hand-edited store cannot grow without bound
 
 const strings = (v: unknown): string[] =>
@@ -34,7 +37,7 @@ export function parseSettings(raw: string | null): Settings {
     if (!v || typeof v !== 'object') return DEFAULTS;
     const size = TEXT_SIZES.find((t) => t.id === v.textSize)?.id ?? DEFAULTS.textSize;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), watchKey: key };
+    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key };
   } catch {
     return DEFAULTS;
   }
@@ -87,3 +90,10 @@ export function sourceNames(feed: Feed | undefined, hidden: string[]): string[] 
 
 /** How many of the `all` entries are not hidden (a hidden entry that is no longer listed is not counted). */
 export const shownCount = (all: string[], hidden: string[]): number => all.filter((a) => !hidden.includes(a)).length;
+
+/** `name` cleaned up and added to the followed teams; unchanged when it is empty, too long, already there (any case) or the list is full. */
+export function withTeam(teams: string[], name: string): string[] {
+  const clean = name.replace(/\s+/g, ' ').trim();
+  if (!clean || clean.length > MAX_TEAM_CHARS || teams.length >= MAX_TEAMS || teams.some((t) => t.toLowerCase() === clean.toLowerCase())) return teams;
+  return [...teams, clean];
+}

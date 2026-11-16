@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byState, cricketUpcoming, hasScores, isFresh, liveNow, parseScores, scoresFor } from './scores';
+import { byState, cricketUpcoming, hasScores, isFresh, liveNow, parseScores, scoresFor, teamCards, teamMatcher, teamSuggestions } from './scores';
 
 const doc = {
   generated: '2026-11-15T19:00:00+00:00',
@@ -118,5 +118,38 @@ describe('liveNow and cricketUpcoming', () => {
     expect(cricketUpcoming({ id: 'b', line: 'South Africa v Bangladesh 327/6 *', live: true, url: undefined })).toBe(false);
     expect(cricketUpcoming({ id: 'u', line: 'India U19 v Pakistan U19', live: false, url: undefined })).toBe(true);
     expect(cricketUpcoming({ id: 'c', line: 'India 250/4 v Australia 180', live: false, url: undefined })).toBe(false);
+  });
+});
+
+describe('my teams', () => {
+  const now = new Date('2026-11-15T19:10:00Z');
+  const scores = parseScores(doc);
+  it('matches whole words in any case and nothing when nothing is followed', () => {
+    const has = teamMatcher(['India', 'Bears']);
+    expect(has?.('india beat Indiana')).toBe(true);
+    expect(has?.('Indiana Hoosiers')).toBe(false);
+    expect(has?.('Chicago BEARS')).toBe(true);
+    expect(teamMatcher(['Man  City'])?.('Man\u00a0City win')).toBe(true);  // any run of whitespace, a non-breaking space too
+    expect(has?.('Bears')).toBe(true);  // at the very start
+    expect(teamMatcher([])).toBeNull();
+    expect(teamMatcher(['  '])).toBeNull();
+    expect(teamMatcher(['C++ (x)'])?.('C++ (x) wins')).toBe(true);  // names are text, not patterns
+  });
+  it('lists the followed games, live first, then upcoming, then finished', () => {
+    const cards = teamCards(scores, ['Falcons', 'Raiders', 'Giants'], now);
+    expect(cards.map((c) => c.state)).toEqual(['live', 'pre', 'final']);
+    expect(cards[0]?.rows.map((r) => r.name)).toEqual(['Chiefs', 'Falcons']);
+  });
+  it('shows nothing for no followed names, a name nobody plays, or stale scores', () => {
+    expect(teamCards(scores, [], now)).toEqual([]);
+    expect(teamCards(scores, ['Nobody'], now)).toEqual([]);
+    expect(teamCards(scores, ['Falcons'], new Date('2027-01-01T00:00:00Z'))).toEqual([]);
+    expect(teamCards(undefined, ['Falcons'], now)).toEqual([]);
+  });
+  it('suggests nicknames, surnames and cricket sides without repeats', () => {
+    const got = teamSuggestions(scores);
+    expect(got).toContain('Falcons');
+    expect(new Set(got.map((g) => g.toLowerCase())).size).toBe(got.length);
+    expect(teamSuggestions(undefined)).toEqual([]);
   });
 });

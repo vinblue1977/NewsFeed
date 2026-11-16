@@ -159,6 +159,7 @@ export interface ScoreView {
 
 export interface LiveCard {
   key: string;
+  state: GameState;
   sport: string;  // "NFL", "Cricket", or the tournament for tennis
   rows: { name: string; score: string }[];  // one per side; empty for cricket, whose line is plain text
   line: string;  // the plain cricket line, else ''
@@ -171,13 +172,13 @@ export function liveNow(scores: Scores | undefined, now: Date): LiveCard[] {
   if (!scores || !isFresh(scores.generated, now)) return [];
   const cards: LiveCard[] = [];
   for (const g of scores.nfl) {
-    if (g.state === 'live') cards.push({ key: `nfl-${g.id}`, sport: 'NFL', rows: [g.away, g.home].map((t) => ({ name: t.name, score: t.score === null ? '' : String(t.score) })), line: '', note: g.detail, url: g.url });
+    if (g.state === 'live') cards.push({ key: `nfl-${g.id}`, state: g.state, sport: 'NFL', rows: [g.away, g.home].map((t) => ({ name: t.name, score: t.score === null ? '' : String(t.score) })), line: '', note: g.detail, url: g.url });
   }
   for (const m of scores.tennis) {
-    if (m.state === 'live') cards.push({ key: `tennis-${m.id}`, sport: m.tournament || 'Tennis', rows: m.players.map((p) => ({ name: p.name, score: p.sets.join(' ') })), line: '', note: m.detail, url: undefined });
+    if (m.state === 'live') cards.push({ key: `tennis-${m.id}`, state: m.state, sport: m.tournament || 'Tennis', rows: m.players.map((p) => ({ name: p.name, score: p.sets.join(' ') })), line: '', note: m.detail, url: undefined });
   }
   for (const c of scores.cricket) {
-    if (c.live) cards.push({ key: `cricket-${c.id}`, sport: 'Cricket', rows: [], line: c.line, note: '', url: c.url });
+    if (c.live) cards.push({ key: `cricket-${c.id}`, state: 'live', sport: 'Cricket', rows: [], line: c.line, note: '', url: c.url });
   }
   return cards;
 }
@@ -211,3 +212,51 @@ export function scoresFor(scores: Scores | undefined, sub: string | undefined, n
 
 /** Does the view put anything on the screen (rows or a note)? */
 export const hasScores = (v: ScoreView | undefined): boolean => !!v && (v.stale || v.down.length > 0 || v.nfl.length + v.tennis.length + v.cricket.length > 0);
+
+const escaped = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A matcher for the followed names: whole words, any case, spaces in a name matching any run of whitespace, so "India" does
+ * not match "Indiana". Null when there are none. No lookbehind: older iPhones do not support it. */
+export function teamMatcher(terms: string[]): ((text: string) => boolean) | null {
+  const usable = terms.map((t) => t.trim()).filter(Boolean);
+  if (usable.length === 0) return null;
+  const names = usable.map((t) => t.split(/\s+/).map(escaped).join('\\s+'));
+  const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:${names.join('|')})(?![\\p{L}\\p{N}])`, 'iu');
+  return (text) => re.test(text);
+}
+
+const RANK: Record<GameState, number> = { live: 0, pre: 1, final: 2 };
+const MY_TEAMS_CARDS = 8;
+
+/** The games, matches and cricket lines that involve a followed name: live first, then what is coming, then what just
+ * finished. Nothing when the scores are stale or nothing is followed. */
+export function teamCards(scores: Scores | undefined, terms: string[], now: Date): LiveCard[] {
+  const has = teamMatcher(terms);
+  if (!scores || !has || !isFresh(scores.generated, now)) return [];
+  const cards: LiveCard[] = [];
+  for (const g of scores.nfl) {
+    if (has(g.away.name) || has(g.home.name)) cards.push({ key: `nfl-${g.id}`, state: g.state, sport: 'NFL', rows: [g.away, g.home].map((t) => ({ name: t.name, score: t.score === null ? '' : String(t.score) })), line: '', note: g.detail, url: g.url });
+  }
+  for (const m of scores.tennis) {
+    if (m.players.some((p) => has(p.name))) cards.push({ key: `tennis-${m.id}`, state: m.state, sport: m.tournament || 'Tennis', rows: m.players.map((p) => ({ name: p.name, score: p.sets.join(' ') })), line: '', note: m.detail, url: undefined });
+  }
+  for (const c of scores.cricket) {
+    if (has(c.line)) cards.push({ key: `cricket-${c.id}`, state: c.live ? 'live' : cricketUpcoming(c) ? 'pre' : 'final', sport: 'Cricket', rows: [], line: c.line, note: '', url: c.url });
+  }
+  return cards.sort((a, b) => RANK[a.state] - RANK[b.state]).slice(0, MY_TEAMS_CARDS);  // the sort is stable: feed order within a state
+}
+
+const lastWord = (name: string): string => name.trim().split(/\s+/).pop() ?? '';
+
+/** Names worth offering to follow, from what the scores show right now: NFL nicknames ("Bears"), tennis surnames and
+ * cricket sides, in the order they appear, without repeats. */
+export function teamSuggestions(scores: Scores | undefined): string[] {
+  if (!scores) return [];
+  const names: string[] = [];
+  for (const g of scores.nfl) names.push(lastWord(g.away.name), lastWord(g.home.name));
+  for (const m of scores.tennis) for (const p of m.players) names.push(lastWord(p.name));
+  for (const c of scores.cricket) {
+    for (const side of c.line.split(/\s+v\s+/)) names.push(side.split(',')[0]?.replace(/\d+(?:\/\d+)?\*?|&/g, ' ').replace(/\s+/g, ' ').trim() ?? '');
+  }
+  return [...new Map(names.filter((n) => n.length > 1 && n.length <= 40).map((n) => [n.toLowerCase(), n] as const)).values()].slice(0, 30);
+}
