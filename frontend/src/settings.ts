@@ -19,6 +19,8 @@ export const TEXT_SIZES: { id: TextSize; label: string; px: number }[] = [
   { id: 'medium', label: 'Medium', px: 18 },
   { id: 'large', label: 'Large', px: 21 },
 ];
+export const MAX_TEAMS = 20;
+export const MAX_TEAM_CHARS = 40;
 const MAX_LIST = 200;  // a corrupted or hand-edited store cannot grow without bound
 
 const strings = (v: unknown): string[] =>
@@ -32,7 +34,7 @@ export function parseSettings(raw: string | null): Settings {
     if (!v || typeof v !== 'object') return DEFAULTS;
     const size = TEXT_SIZES.find((t) => t.id === v.textSize)?.id ?? DEFAULTS.textSize;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, watchKey: key };
+    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, myTeams: strings(v.myTeams).filter((x) => x.length <= MAX_TEAM_CHARS).slice(0, MAX_TEAMS), watchKey: key };
   } catch {
     return DEFAULTS;
   }
@@ -85,3 +87,10 @@ export function sourceNames(feed: Feed | undefined, hidden: string[]): string[] 
 
 /** How many of the `all` entries are not hidden (a hidden entry that is no longer listed is not counted). */
 export const shownCount = (all: string[], hidden: string[]): number => all.filter((a) => !hidden.includes(a)).length;
+
+/** `name` cleaned up and added to the followed teams; unchanged when it is empty, too long, already there (any case) or the list is full. */
+export function withTeam(teams: string[], name: string): string[] {
+  const clean = name.replace(/\s+/g, ' ').trim();
+  if (!clean || clean.length > MAX_TEAM_CHARS || teams.length >= MAX_TEAMS || teams.some((t) => t.toLowerCase() === clean.toLowerCase())) return teams;
+  return [...teams, clean];
+}

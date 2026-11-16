@@ -8,9 +8,9 @@ import { badgeColor, coverage, discovery, imageSrc, initial, isStale, parseRoute
 import type { Route, Section, Story } from './feed';
 import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
-import { loadSettings, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
+import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
-import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores } from './scores';
+import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores, teamCards, teamMatcher, teamSuggestions } from './scores';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
@@ -73,12 +73,12 @@ function StoryRow({ s, now }: { s: Story; now: Date }) {
   );
 }
 
-function TopicSection({ section, now, onAll }: { section: Pick<Section, 'label' | 'color' | 'lead' | 'more' | 'total'>; now: Date; onAll: () => void }) {
+function TopicSection({ section, now, onAll }: { section: Pick<Section, 'label' | 'color' | 'lead' | 'more' | 'total'>; now: Date; onAll?: () => void }) {
   const { lead } = section;
   return (
     <section aria-label={section.label}>
       <div class="grp sech"><i style={{ background: section.color }} />{section.label}
-        <button type="button" class="all" onClick={onAll}>See all {section.total} ›</button></div>
+        {onAll && <button type="button" class="all" onClick={onAll}>See all {section.total} ›</button>}</div>
       <StoryAnchor story={lead} class="lead">
         <Pic item={lead.item} class="pic" />
         <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
@@ -421,16 +421,16 @@ function CricketRow({ c }: { c: CricketMatch }) {
 }
 
 /** The "Live now" strip: a card per match in play, across every sport, scrolling sideways. */
-function LiveStrip({ cards }: { cards: LiveCard[] }) {
+function LiveStrip({ title, cards }: { title: string; cards: LiveCard[] }) {
   if (cards.length === 0) return null;
   return (
     <>
-      <div class="grp">Live now<span class="cnt">{cards.length} {cards.length === 1 ? 'match' : 'matches'}</span></div>
+      <div class="grp">{title}<span class="cnt">{cards.length} {cards.length === 1 ? 'match' : 'matches'}</span></div>
       <div class="strip">
         {cards.map((c) => {
           const body = (
             <>
-              <div class="top"><span>{c.sport}</span><i>Live</i></div>
+              <div class="top"><span>{c.sport}</span>{c.state === 'live' && <i>Live</i>}</div>
               {c.rows.map((r, i) => <div class="r" key={i}><span>{r.name}</span><b>{r.score}</b></div>)}
               {c.line && <div class="cl">{c.line}</div>}
               {c.note && <div class="sub">{c.note}</div>}
@@ -473,6 +473,8 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
   const list = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : all), [all, sub]);
   const scoreView = useMemo(() => scoresFor(scores, sub, now), [scores, sub, now]);
   const live = useMemo(() => liveNow(scores, now), [scores, now]);
+  const mine = useMemo(() => teamCards(scores, teams, now), [scores, teams, now]);
+  const mineStories = useMemo(() => teamStories(all, teamMatcher(teams)).slice(0, 3), [all, teams]);
   const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/sports/${next}` : '#/sports'; };
   const sportGroups = useMemo(() => sportSections(all), [all]);
   const page = list.slice(0, shown);
@@ -488,7 +490,9 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
         ))}
         {sub && !subs.includes(sub) && <button type="button" class="on" aria-pressed="true">{subtopicLabel(sub)}</button>}
       </nav>
-      {!sub && <LiveStrip cards={live} />}
+      {!sub && teams.length === 0 && <p class="note"><a href="#/settings">Follow your teams</a> to see their games and stories here.</p>}
+      {!sub && <LiveStrip title="My teams" cards={mine} />}
+      {!sub && <LiveStrip title="Live now" cards={live} />}
       {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} all={!sub} />}
       {!feed && !failed && !loaded && <p class="note">Loading sports…</p>}
       {failed && !feed && (
@@ -497,6 +501,7 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
       )}
       {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
       {feed && list.length === 0 && <div class="empty"><b>No sports stories yet</b><span>{sub ? 'Nothing in this sport right now.' : 'Sports stories appear here.'}</span></div>}
+      {!sub && mineStories[0] && <TopicSection section={{ label: 'My teams', color: '#c97aa8', lead: mineStories[0], more: mineStories.slice(1), total: mineStories.length }} now={now} />}
       {!sub && sportGroups.map((g) => <TopicSection key={g.sub} section={g} now={now} onAll={() => pick(g.sub)} />)}
       {sub && list.length > 0 && hasScores(scoreView) && <div class="grp">Top stories</div>}
       {sub && lead && (
@@ -638,8 +643,32 @@ function WatchlistEditor({ watchKey, update, onSaved }: { watchKey: string; upda
   );
 }
 
-function SettingsScreen({ settings, update, sources, markets, marketsLoaded, onSaved, canGoBack }: {
-  settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; markets: Markets | undefined; marketsLoaded: boolean;
+/** Follow teams, countries or players by name: they are matched against the scores and the story headlines. */
+function TeamsEditor({ teams, suggestions, onChange }: { teams: string[]; suggestions: string[]; onChange: (next: string[]) => void }) {
+  const [text, setText] = useState('');
+  const add = (name: string) => { onChange(withTeam(teams, name)); setText(''); };
+  const offered = suggestions.filter((n) => !teams.some((t) => t.toLowerCase() === n.toLowerCase())).slice(0, 12);
+  return (
+    <div class="card fold teams">
+      {teams.length > 0 && (
+        <ul class="tchips">
+          {teams.map((t) => <li key={t}><button type="button" aria-label={`Stop following ${t}`} onClick={() => onChange(teams.filter((x) => x !== t))}>{t} <span aria-hidden="true">×</span></button></li>)}
+        </ul>
+      )}
+      <form class="fld trow" onSubmit={(e) => { e.preventDefault(); add(text); }}>
+        <input type="text" value={text} maxLength={MAX_TEAM_CHARS} placeholder="Bears, India, Sinner…" aria-label="Team, country or player" autocapitalize="words"
+          onInput={(e) => setText((e.currentTarget as HTMLInputElement).value)} />
+        <button type="submit" class="btn" disabled={!text.trim() || teams.length >= MAX_TEAMS}>Follow</button>
+      </form>
+      {offered.length > 0 && (
+        <div class="tsug"><span>In the scores now:</span>{offered.map((n) => <button key={n} type="button" onClick={() => add(n)}>+ {n}</button>)}</div>
+      )}
+    </div>
+  );
+}
+
+function SettingsScreen({ settings, update, sources, suggestions, markets, marketsLoaded, onSaved, canGoBack }: {
+  settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; suggestions: string[]; markets: Markets | undefined; marketsLoaded: boolean;
   onSaved: (key: string) => void; canGoBack: boolean;
 }) {
   const symbols = [...new Map([...(markets?.tickers ?? []).map((q) => [q.symbol, `${q.name} · ${q.symbol}`] as const),
@@ -671,6 +700,8 @@ function SettingsScreen({ settings, update, sources, markets, marketsLoaded, onS
           </ul>
         </details>
       )}
+      <div class="grp">My teams</div>
+      <TeamsEditor teams={settings.myTeams} suggestions={suggestions} onChange={(myTeams) => update({ myTeams })} />
       <div class="grp">Markets watchlist</div>
       <WatchlistEditor watchKey={settings.watchKey} update={update} onSaved={onSaved} />
       {symbols.length === 0 && <p class="note">{!settings.watchKey ? 'Add your key above to see your watchlist.' : markets ? 'No symbols yet.' : marketsLoaded ? 'Watchlist unavailable right now.' : 'Loading the watchlist…'}</p>}
@@ -894,7 +925,7 @@ export function App() {
   if (route.kind === 'settings') {
     return (
       <>
-        <SettingsScreen settings={settings} update={update} sources={sources} markets={markets} marketsLoaded={marketsLoaded}
+        <SettingsScreen settings={settings} update={update} sources={sources} suggestions={teamSuggestions(scores)} markets={markets} marketsLoaded={marketsLoaded}
           onSaved={(key) => afterSave(key)} canGoBack={inAppNavs.current > 0} />
         <TabBar current={null} />
       </>

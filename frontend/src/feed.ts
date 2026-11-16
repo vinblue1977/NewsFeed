@@ -300,6 +300,11 @@ export function sportSections(list: Story[]): SportSection[] {
   });
 }
 
+/** The sports stories whose headline names a followed team, newest first (`list` is newest first already). */
+export function teamStories(list: Story[], matches: ((text: string) => boolean) | null): Story[] {
+  return matches ? list.filter((s) => matches(s.item.title)) : [];
+}
+
 /** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */
 export function storyLink(story: Story): string {
   return story.cluster && story.sources > 1 ? `#/story/${story.cluster.id}` : `#/read/${story.item.id}`;
