@@ -174,11 +174,11 @@ export function liveNow(scores: Scores | undefined, now: Date): LiveCard[] {
   for (const g of scores.nfl) {
     if (g.state === 'live') cards.push({ key: `nfl-${g.id}`, state: g.state, sport: 'NFL', rows: [g.away, g.home].map((t) => ({ name: t.name, score: t.score === null ? '' : String(t.score) })), line: '', note: g.detail, url: g.url });
   }
-  for (const m of scores.tennis) {
-    if (m.state === 'live') cards.push({ key: `tennis-${m.id}`, state: m.state, sport: m.tournament || 'Tennis', rows: m.players.map((p) => ({ name: p.name, score: p.sets.join(' ') })), line: '', note: m.detail, url: undefined });
-  }
   for (const c of scores.cricket) {
     if (c.live) cards.push({ key: `cricket-${c.id}`, state: 'live', sport: 'Cricket', rows: [], line: c.line, note: '', url: c.url });
+  }
+  for (const m of scores.tennis) {
+    if (m.state === 'live') cards.push({ key: `tennis-${m.id}`, state: m.state, sport: m.tournament || 'Tennis', rows: m.players.map((p) => ({ name: p.name, score: p.sets.join(' ') })), line: '', note: m.detail, url: undefined });
   }
   return cards;
 }
