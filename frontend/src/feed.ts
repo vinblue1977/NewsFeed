@@ -113,6 +113,30 @@ export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   return out.sort((a, b) => b.item.published.localeCompare(a.item.published));
 }
 
+const HOUR_MS = 3600_000;
+const BREAKING_HOURS_PER_SOURCE = 2;  // each extra source covering a story makes it rank as this much newer...
+const BREAKING_MAX_EXTRA_SOURCES = 3;  // ...up to this many extra sources
+const BREAKING_FADE_MS = DAY_MS;  // ...and the lift fades away smoothly over a day, so an old story cannot climb or drop suddenly
+export const BREAKING_STEP_MS = 15 * 60_000;  // the screen re-ranks on this clock, not every minute, so the list does not shuffle while read
+
+/** `list` ordered for a sports reader: newest first, except that a story many sources are covering ranks as if it were newer,
+ * by two hours for each extra source (at most three, so at most six hours), fading to nothing as the story reaches a day old.
+ * The sort is stable (ties keep the input order) and an unreadable date sorts last. */
+export function byBreaking(list: Story[], now: Date): Story[] {
+  const score = (s: Story): number => {
+    const at = Date.parse(s.item.published);
+    if (Number.isNaN(at)) return -Infinity;
+    const sources = Number.isFinite(s.sources) ? s.sources : 1;
+    const extra = Math.min(Math.max(sources - 1, 0), BREAKING_MAX_EXTRA_SOURCES);
+    const fade = Math.max(0, 1 - Math.max(0, now.getTime() - at) / BREAKING_FADE_MS);  // a future date counts as just now
+    return at + extra * BREAKING_HOURS_PER_SOURCE * HOUR_MS * fade;
+  };
+  return list
+    .map((s) => ({ s, k: score(s) }))
+    .sort((a, b) => (a.k === b.k ? 0 : b.k - a.k))
+    .map((x) => x.s);
+}
+
 /** How old a story is. Unparseable dates give NaN (never "recent"); a date in the future counts as just now. */
 function ageMs(iso: string, now: Date): number {
   return Math.max(0, now.getTime() - new Date(iso).getTime());
