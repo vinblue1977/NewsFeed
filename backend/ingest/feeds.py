@@ -112,7 +112,8 @@ def _safe_url(url: str | None) -> str | None:
 
 
 def _image_url(node: ET.Element) -> str | None:
-    """The widest picture the entry names (media:content, media:thumbnail or an image enclosure), as an https URL."""
+    """The widest picture the entry names (media:content, media:thumbnail or an image enclosure), as an https URL.
+    An http one is upgraded: pictures are only ever fetched over https."""
     best: tuple[int, str] | None = None
     for el in node.iter():
         kind = el.get("type") or ""
@@ -130,6 +131,8 @@ def _image_url(node: ET.Element) -> str | None:
         else:
             continue
         safe = _safe_url(url) if ok else None
+        if safe and safe.startswith("http://"):
+            safe = "https://" + safe.removeprefix("http://")  # ESPNcricinfo names its pictures over http
         if not safe or not safe.startswith("https://"):
             continue
         width = int(el.get("width", "0")) if el.get("width", "").isdigit() else 0

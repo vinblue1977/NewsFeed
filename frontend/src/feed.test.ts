@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -269,5 +269,20 @@ describe('sports tab helpers', () => {
     const now = new Date('2026-11-15T12:00:00Z');
     const corners = discovery([], now, [mk('a', 'nfl'), mk('b', 'nfl')]).corners;
     expect(corners.map((c) => [c.id, c.topic, c.total])).toEqual([['nfl', 'sports', 2]]);
+  });
+});
+
+describe('sportSections', () => {
+  const mk = (id: string, subtopic?: string, img?: string) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published: '2026-11-15T10:00:00Z', source: 's', topic: 'sports' as const, subtopic, img }, cluster: undefined, sources: 1 });
+  it('makes a section per sport, most stories first, led by a story with a picture', () => {
+    const got = sportSections([mk('c1', 'cricket'), mk('n1', 'nfl'), mk('n2', 'nfl', '0123456789abcdef.jpg'), mk('n3', 'nfl'), mk('n4', 'nfl'), mk('x')]);
+    expect(got.map((g) => [g.sub, g.label, g.lead.item.id, g.more.map((m) => m.item.id), g.total])).toEqual([
+      ['nfl', 'NFL', 'n2', ['n1', 'n3'], 4],
+      ['cricket', 'Cricket', 'c1', [], 1],
+    ]);
+  });
+  it('gives an unknown sport a colour and no sections for no stories', () => {
+    expect(sportSections([mk('a', 'curling')])[0]?.color).toMatch(/^#/);
+    expect(sportSections([])).toEqual([]);
   });
 });

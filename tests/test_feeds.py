@@ -3,13 +3,14 @@ import io
 import re
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
 
 from ingest import feeds
-from ingest.feeds import FeedError, clean_text, fetch, parse_feed
+from ingest.feeds import FeedError, _image_url, clean_text, fetch, parse_feed
 from ingest.sources import SOURCES, Source
 
 SRC = Source("t", "Test News", "https://example.com/feed", "us")
@@ -294,3 +295,11 @@ def test_links_with_userinfo_or_absurd_length_are_dropped() -> None:
 
 def test_entities_are_decoded_once() -> None:
     assert clean_text("&amp;lt;b&amp;gt; &amp; more") == "&lt;b&gt; & more"
+
+
+def test_image_url_upgrades_http_to_https() -> None:
+    node = ET.fromstring(  # noqa: S314  (a literal in a test)
+        '<item xmlns:media="http://search.yahoo.com/mrss/">'
+        '<media:content medium="image" url="http://p.example.com/a.jpg" width="1400"/></item>'
+    )
+    assert _image_url(node) == "https://p.example.com/a.jpg"
