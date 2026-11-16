@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -385,5 +385,27 @@ describe('mixSources', () => {
     const copy = [...list];
     mixSources(list);
     expect(list).toEqual(copy);
+  });
+});
+
+describe('World News corner', () => {
+  const now = new Date('2026-11-16T12:00:00Z');
+  const mk = (id: string, topic: string, subtopic?: string, published = '2026-11-16T10:00:00Z') => ({ item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic: topic as 'world', subtopic }, cluster: undefined, sources: 1 });
+
+  it('treats an untagged world story as the world sub-topic, and leaves a tagged or other story alone', () => {
+    expect(subtopicOf(mk('a', 'world').item)).toBe('world');
+    expect(subtopicOf(mk('b', 'tech', 'gadgets').item)).toBe('gadgets');
+    expect(subtopicOf(mk('c', 'us').item)).toBeUndefined();
+    expect(subtopicLabel('world')).toBe('World News');
+  });
+
+  it('adds a World News tile with the newest world story and the count', () => {
+    const list = [mk('w1', 'world', undefined, '2026-11-16T09:00:00Z'), mk('w2', 'world', undefined, '2026-11-16T11:00:00Z'), mk('g1', 'tech', 'gadgets', '2026-11-16T08:00:00Z'), mk('u1', 'us')];
+    const corners = discovery(list, now).corners;
+    const world = corners.find((c) => c.id === 'world');
+    expect(world).toMatchObject({ label: 'World News', topic: 'world', total: 2 });
+    expect(world?.lead.item.id).toBe('w2');
+    expect(corners.some((c) => c.id === 'gadgets')).toBe(true);
+    expect(subtopicRoute('world', 'world')).toBe('#/discovery/world');
   });
 });
