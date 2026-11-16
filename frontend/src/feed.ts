@@ -137,6 +137,41 @@ export function byBreaking(list: Story[], now: Date): Story[] {
     .map((x) => x.s);
 }
 
+const MIX_MAX_RUN = 2;  // at most this many stories in a row from one source...
+const MIX_LOOKAHEAD = 8;  // ...when another source has a story within this many places
+
+/** `list` with long runs from one source broken up: after MIX_MAX_RUN single-source stories in a row from the same source, the
+ * next story from a different source (looking at most MIX_LOOKAHEAD places ahead) comes next. A story that several sources cover
+ * is never moved and never counts towards a run, so the breaking-news order holds. Nothing is dropped, each source keeps its
+ * own order, and when no other source is nearby the order is unchanged. */
+export function mixSources(list: Story[]): Story[] {
+  const rest = [...list];
+  const out: Story[] = [];
+  let runSource: string | undefined;  // the source of the latest run of single-source stories...
+  let runLength = 0;  // ...and how long it is
+  while (rest.length > 0) {
+    const first = rest[0];
+    let at = 0;
+    if (first && first.sources <= 1 && runLength >= MIX_MAX_RUN && first.item.source === runSource) {
+      const other = rest.slice(0, MIX_LOOKAHEAD).findIndex((s) => s.sources <= 1 && s.item.source !== runSource);
+      at = Math.max(other, 0);
+    }
+    const [next] = rest.splice(at, 1);
+    if (!next) break;
+    out.push(next);
+    if (next.sources > 1) {  // a widely covered story ends the run
+      runSource = undefined;
+      runLength = 0;
+    } else if (next.item.source === runSource) {
+      runLength += 1;
+    } else {
+      runSource = next.item.source;
+      runLength = 1;
+    }
+  }
+  return out;
+}
+
 /** How old a story is. Unparseable dates give NaN (never "recent"); a date in the future counts as just now. */
 function ageMs(iso: string, now: Date): number {
   return Math.max(0, now.getTime() - new Date(iso).getTime());

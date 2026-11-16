@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BREAKING_STEP_MS, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -512,15 +512,15 @@ function ScoresPanel({ view, generated, now, all, collapsed, onFold }: {
   );
 }
 
-/** Every sports story, newest first (a story many sources cover ranks a little higher), with a chip per sub-topic (NFL, cricket, tennis). */
+/** Every sports story, newest first (a story many sources cover ranks a little higher, and no source runs on for long), with a chip per sub-topic (NFL, cricket, tennis). */
 function SportsScreen({ feed, scores, collapsed, onFold, teams, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
   feed: Feed | undefined; scores: Scores | undefined; collapsed: string[]; onFold: (sport: string) => void; teams: string[]; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
   const step = Math.floor(now.getTime() / BREAKING_STEP_MS);  // re-rank only every few minutes
   const rankNow = useMemo(() => new Date(step * BREAKING_STEP_MS), [step]);
-  const all = useMemo(() => (feed ? byBreaking(stories(feed, 'sports'), rankNow) : []), [feed, rankNow]);
+  const all = useMemo(() => (feed ? mixSources(byBreaking(stories(feed, 'sports'), rankNow)) : []), [feed, rankNow]);
   const subs = useMemo(() => subtopicsOf(all), [all]);
-  const list = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : all), [all, sub]);
+  const list = useMemo(() => (sub ? mixSources(all.filter((s) => s.item.subtopic === sub)) : all), [all, sub]);  // mixed again once filtered
   const scoreView = useMemo(() => scoresFor(scores, sub, now), [scores, sub, now]);
   const live = useMemo(() => liveNow(scores, now), [scores, now]);
   const mine = useMemo(() => teamCards(scores, teams, now), [scores, teams, now]);
