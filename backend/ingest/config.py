@@ -23,6 +23,19 @@ def watch_name(key: str) -> str:
     return f"watch-{hashlib.sha256(key.encode()).hexdigest()}"
 
 
+@functools.cache
+def finnhub_key() -> str:
+    """The Finnhub API key, read once per container from the SecureString parameter named by FINNHUB_PARAM. It is never logged
+    or put in a URL. Raises (KeyError, ClientError) when it is not configured: the earnings step then fails soft."""
+    ssm = boto3.client("ssm")
+    return str(ssm.get_parameter(Name=os.environ["FINNHUB_PARAM"], WithDecryption=True)["Parameter"]["Value"])
+
+
+def earnings_name(key: str) -> str:
+    """The earnings file name, from the same key as the quotes file (so it is private in the same way)."""
+    return f"earn-{hashlib.sha256(key.encode()).hexdigest()}"
+
+
 class ConfigError(Exception):
     """The location parameter is missing, not JSON, or lacks a required field."""
 

@@ -1,7 +1,7 @@
 import { parseFeed } from './feed';
 import type { Feed } from './types';
 import { type Articles, parseArticles } from './article';
-import { type Markets, parseMarkets } from './markets';
+import { type Earnings, type Markets, parseEarnings, parseMarkets } from './markets';
 import { WATCH_KEY } from './settings';
 import { parseScores, type Scores } from './scores';
 import { parseWeather, type Weather } from './weather';
@@ -52,6 +52,18 @@ export async function loadWatchlist(key: string): Promise<Markets | undefined> {
   try {
     const response = await fetch(`/data/${await watchFile(key)}.json`, { cache: 'no-cache' });
     return response.ok ? parseMarkets(await response.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The private earnings dates, or undefined (no key, a bad key, no file yet, a stale file or any problem). */
+export async function loadEarnings(key: string, now: Date = new Date()): Promise<Earnings | undefined> {
+  if (!WATCH_KEY.test(key)) return undefined;
+  try {
+    const name = (await watchFile(key)).replace(/^watch-/, 'earn-');  // the same hash of the key, under the earnings prefix
+    const response = await fetch('/data/' + name + '.json', { cache: 'no-cache' });
+    return response.ok ? parseEarnings(await response.json(), now) : undefined;
   } catch {
     return undefined;
   }

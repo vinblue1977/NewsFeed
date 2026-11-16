@@ -9,7 +9,7 @@ from botocore.exceptions import ClientError
 
 from ingest import handler as handler_module
 from ingest import pipeline
-from ingest.config import watch_name
+from ingest.config import earnings_name, watch_name
 from ingest.feeds import FeedError
 from ingest.pipeline import collect, local_sources
 from ingest.sources import Source
@@ -384,6 +384,10 @@ def _watch_setup(monkeypatch: pytest.MonkeyPatch, s3: FakeS3, markets: Any, *, k
         return markets
 
     monkeypatch.setattr(handler_module, "build_markets", build)
+    monkeypatch.setattr(handler_module, "finnhub_key", lambda: "token")  # never SSM
+    monkeypatch.setattr(
+        handler_module, "build_earnings", lambda symbols, token: {"generated": "e", "symbols": symbols, "items": []}
+    )  # never the network
     return asked
 
 
@@ -408,7 +412,10 @@ def test_full_run_writes_the_quotes_to_the_private_file_only(monkeypatch: pytest
         "data/weather.json",
         "data/scores.json",
         f"data/{watch_name(KEY)}.json",
+        f"data/{earnings_name(KEY)}.json",
     }
+    assert result["earnings"] == "ok"
+    assert written[f"data/{earnings_name(KEY)}.json"] == {"generated": "e", "symbols": ["AAA"], "items": []}
 
 
 @pytest.mark.parametrize("key", [None, KEY])
@@ -416,7 +423,8 @@ def test_full_run_without_a_key_or_symbols_publishes_nothing(monkeypatch: pytest
     s3 = WatchS3(["AAA"] if key is None else None)  # a key without symbols, or symbols without a key
     asked = _watch_setup(monkeypatch, s3, CLOSED, key=key)
     result = handler_module.handler({}, object())
-    assert result["markets"] == "skipped" and not any("watch" in p["Key"] for p in s3.puts)
+    assert result["markets"] == "skipped" and not any("watch" in p["Key"] or "earn" in p["Key"] for p in s3.puts)
+    assert result["earnings"] == "skipped"
     assert asked == []  # nothing to show, so no quotes are fetched at all
 
 
@@ -471,7 +479,9 @@ def test_scores_and_the_watchlist_are_written_even_when_the_feed_run_is_rejected
     monkeypatch.setattr(handler_module, "build_scores", lambda: {"generated": "s"})
     with pytest.raises(RuntimeError, match="keeping the previous feed"):
         handler_module.handler({}, object())
-    assert sorted(p["Key"] for p in s3.puts) == ["data/scores.json", f"data/{watch_name(KEY)}.json"]
+    assert sorted(p["Key"] for p in s3.puts) == sorted(
+        ["data/scores.json", f"data/{watch_name(KEY)}.json", f"data/{earnings_name(KEY)}.json"]
+    )
 
 
 def test_handler_writes_the_feed_without_pictures_when_that_step_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -514,6 +524,80 @@ def test_a_storage_error_is_not_an_empty_watchlist(monkeypatch: pytest.MonkeyPat
     _watch_setup(monkeypatch, s3, OPEN)
     assert handler_module.handler({"only": "markets"}, object())["markets"] == "failed"
     assert handler_module.handler({}, object())["markets"] == "skipped" and not any("watch-" in p["Key"] for p in s3.puts)
+
+
+def test_earnings_are_not_rebuilt_while_the_file_is_fresh_and_the_list_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Fresh(WatchS3):
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == f"data/{earnings_name(KEY)}.json":
+                doc = {"generated": datetime.now(UTC).isoformat(), "symbols": ["AAA"], "items": []}
+                return {"Body": io.BytesIO(json.dumps(doc).encode())}
+            return super().get_object(**kw)
+
+    s3 = Fresh(["AAA"])
+    _watch_setup(monkeypatch, s3, CLOSED)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(handler_module, "build_earnings", lambda symbols, token: calls.append(symbols))
+    assert handler_module.handler({}, object())["earnings"] == "fresh"
+    assert calls == [] and not any("earn-" in p["Key"] for p in s3.puts)
+
+
+def test_a_failed_earnings_build_keeps_the_old_file_and_the_rest_of_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    _watch_setup(monkeypatch, s3, CLOSED)
+
+    def blocked(symbols: list[str], token: str) -> dict[str, Any]:
+        raise OSError("calendar blocked")
+
+    monkeypatch.setattr(handler_module, "build_earnings", blocked)
+    result = handler_module.handler({}, object())
+    assert (result["status"], result["earnings"], result["markets"]) == ("ok", "failed", "ok")
+    assert not any("earn-" in p["Key"] for p in s3.puts)
+
+
+def test_an_unreadable_earnings_file_is_not_a_missing_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Denied(WatchS3):
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == f"data/{earnings_name(KEY)}.json":
+                raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+            return super().get_object(**kw)
+
+    s3 = Denied(["AAA"])
+    _watch_setup(monkeypatch, s3, CLOSED)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(handler_module, "build_earnings", lambda symbols, token: calls.append(symbols))
+    result = handler_module.handler({}, object())
+    assert result["earnings"] == "fresh" and calls == []  # asking every run would spend the shared free-tier calls
+    assert not any("earn-" in p["Key"] for p in s3.puts)
+
+
+def test_a_corrupt_earnings_file_is_rebuilt(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Corrupt(WatchS3):
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == f"data/{earnings_name(KEY)}.json":
+                return {"Body": io.BytesIO(b"not json")}
+            return super().get_object(**kw)
+
+    s3 = Corrupt(["AAA"])
+    _watch_setup(monkeypatch, s3, CLOSED)
+    assert handler_module.handler({}, object())["earnings"] == "ok"
+
+
+def test_earnings_are_not_written_when_the_list_was_edited_during_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Edited(WatchS3):
+        reads = 0
+
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == "private/watchlist.json":
+                self.reads += 1
+                self.symbols = ["AAA"] if self.reads == 1 else ["BBB"]
+            return super().get_object(**kw)
+
+    s3 = Edited(["AAA"])
+    _watch_setup(monkeypatch, s3, OPEN)
+    result = handler_module.handler({}, object())
+    assert (result["earnings"], result["markets"]) == ("superseded", "superseded")
+    assert not any("earn-" in p["Key"] or "watch-" in p["Key"] for p in s3.puts)
 
 
 def test_a_24_hour_symbol_counts_as_an_open_market() -> None:

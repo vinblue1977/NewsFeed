@@ -208,7 +208,7 @@ def test_a_failed_ingest_is_not_retried_by_lambda() -> None:
     template.has_resource_properties("AWS::Lambda::EventInvokeConfig", {"MaximumRetryAttempts": 0})
 
 
-def test_ingest_can_read_back_only_the_feed_and_the_watchlist_objects() -> None:
+def test_ingest_can_read_back_only_the_feed_the_watchlist_and_the_private_earnings_file() -> None:
     template = _synthesized(ACCOUNT)[1]
     statements = [
         stmt
@@ -218,7 +218,24 @@ def test_ingest_can_read_back_only_the_feed_and_the_watchlist_objects() -> None:
     ]
     assert len(statements) == 1
     keys = sorted(r["Fn::Join"][1][-1] for r in statements[0]["Resource"])
-    assert keys == ["/data/feed.json", "/private/watchlist.json"]  # bucket ARN + exactly this key, no wildcard
+    # bucket ARN + exact keys; the one wildcard is the earnings file, whose name is a hash of a secret unknown at deploy time
+    assert keys == ["/data/earn-*", "/data/feed.json", "/private/watchlist.json"]
+
+
+def test_ingest_can_read_exactly_the_location_and_the_finnhub_parameters() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    ssm = [
+        stmt
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        if stmt["Action"] == "ssm:GetParameter" and "finnhub" in json.dumps(stmt["Resource"])
+    ]
+    assert len(ssm) == 1  # one statement, one action, no wildcard in the parameter name
+    assert "*" not in json.dumps(ssm[0]["Resource"]).replace("parameter/portfolio-tracker/finnhub-api-key", "")
+    template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {"Environment": {"Variables": Match.object_like({"FINNHUB_PARAM": "/portfolio-tracker/finnhub-api-key"})}},
+    )
 
 
 def test_headers_policy_has_permissions_policy_and_no_remote_images() -> None:

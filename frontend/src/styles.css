@@ -245,3 +245,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .gfold:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
 .gfold .chev { font-size: 18px; letter-spacing: 0; transition: transform .15s; }
 .gfold .chev.open { transform: rotate(90deg); }
+.etag { display: inline-block; margin-top: 4px; font-size: 11px; font-weight: 600; font-style: normal; padding: 2px 7px; border-radius: 6px; background: rgba(224, 165, 63, .16); color: #e0a53f; border: 1px solid rgba(224, 165, 63, .4); }
+.etag.today { background: rgba(255, 107, 107, .16); color: #ff6b6b; border-color: rgba(255, 107, 107, .4); }
+.er { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; color: inherit; text-decoration: none; }
+.ql li + li > .er { border-top: 1px solid var(--line); }
+.er .when b { display: block; font-size: 15px; font-weight: 600; }
+.er .when span { font-size: 12px; color: var(--muted); }
+.er.today .when b { color: #ff6b6b; }
+.er .eps { text-align: right; font-size: 12px; color: var(--muted); }
+.er .eps b { display: block; font-size: 15px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }

@@ -55,13 +55,15 @@ def fetch(
     deadline_seconds: float | None = None,
     user_agent: str = USER_AGENT,
     head_bytes: int | None = None,
+    headers: dict[str, str] | None = None,
 ) -> bytes:
     """GET a feed over HTTPS (redirects too), with a socket timeout, a total deadline and a size cap.
-    `head_bytes` reads only that many bytes and returns them (a page whose head is all that is wanted), not failing on size."""
+    `head_bytes` reads only that many bytes and returns them (a page whose head is all that is wanted), not failing on size.
+    `headers` are extra request headers, such as an API token (never put a token in the URL)."""
     if urlsplit(url).scheme != "https":
         raise FeedError("only https feeds are fetched")
-    headers = {"User-Agent": user_agent, "Accept": accept}
-    request = urllib.request.Request(url, headers=headers)  # noqa: S310  (https scheme checked above)
+    sent = {**(headers or {}), "User-Agent": user_agent, "Accept": accept}
+    request = urllib.request.Request(url, headers=sent)  # noqa: S310  (https scheme checked above)
     deadline = time.monotonic() + (DEADLINE_SECONDS if deadline_seconds is None else deadline_seconds)
     body = bytearray()
     try:

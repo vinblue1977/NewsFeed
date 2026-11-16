@@ -22,9 +22,11 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '' });
+    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '' });
     expect(parseSettings(JSON.stringify({ watchCollapsed: true })).watchCollapsed).toBe(true);
     expect(parseSettings(JSON.stringify({ watchCollapsed: 'yes' })).watchCollapsed).toBe(false);
+    expect(parseSettings(JSON.stringify({ earningsCollapsed: true })).earningsCollapsed).toBe(true);
+    expect(parseSettings(JSON.stringify({ earningsCollapsed: 1 })).earningsCollapsed).toBe(false);
     expect(parseSettings(JSON.stringify({ scoresCollapsed: ['nfl', 'bogus', 5, 'nfl', 'cricket'] })).scoresCollapsed).toEqual(['nfl', 'cricket']);
     expect(parseSettings(JSON.stringify({ scoresCollapsed: 'nfl' })).scoresCollapsed).toEqual([]);
     expect(parseSettings(JSON.stringify({ watchKey: 'a1b2c3d4e5f6a7b8' })).watchKey).toBe('a1b2c3d4e5f6a7b8');
