@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BREAKING_STEP_MS, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -352,7 +352,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
   const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
   const sportsAll = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
   const found = useMemo(() => discovery(all, now, sportsAll), [all, sportsAll, now]);
-  const inSub = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : []), [all, sub]);
+  const inSub = useMemo(() => (sub ? all.filter((s) => subtopicOf(s.item) === sub) : []), [all, sub]);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/discovery'; };
   useEffect(() => {  // an old link to a sports sub-topic (#/discovery/cricket) now lives in the Sports tab
     if (sub && feed && inSub.length === 0 && sportsAll.some((s) => s.item.subtopic === sub)) location.replace(subtopicRoute('sports', sub));

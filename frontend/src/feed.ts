@@ -278,11 +278,17 @@ export function parseRoute(hash: string): Route {
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
 }
 
-const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL' };
+const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', world: 'World News' };
 
 /** A sub-topic id ("cricket") as a title ("Cricket"). */
 export function subtopicLabel(id: string): string {
   return SUBTOPIC_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/** The sub-topic a story belongs to: the feed's own tag, or "world" for any world story (the world feeds carry no tag), so
+ * World News is a Browse tile like the others. */
+export function subtopicOf(item: Item): string | undefined {
+  return item.subtopic ?? (item.topic === 'world' ? 'world' : undefined);
 }
 
 export interface Corner {
@@ -312,7 +318,7 @@ export function discovery(list: Story[], now: Date, sportsList: Story[] = []): {
   const justIn = rest.filter((s) => !seen.has(s)).slice(0, DISCOVERY_PER_SECTION);
   const byKey = new Map<string, Corner>();  // keyed by topic too: two topics may use one sub-topic id, and each tile opens one tab
   for (const s of [...list, ...sportsList]) {
-    const id = s.item.subtopic;
+    const id = subtopicOf(s.item);
     if (!id) continue;
     const key = `${s.item.topic}/${id}`;
     const have = byKey.get(key);
