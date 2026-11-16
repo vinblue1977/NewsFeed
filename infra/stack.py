@@ -23,6 +23,7 @@ MANIFEST = "manifest.webmanifest"
 DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
 IMAGE_DAYS = 3  # story pictures (data/img/*) are deleted after this; the stories they belong to are gone by then
 WATCHLIST_KEY = "private/watchlist.json"  # outside data/, so CloudFront never serves it
+FINNHUB_PARAM = "/portfolio-tracker/finnhub-api-key"  # shared with the portfolio tracker: read-only, one parameter
 LOCATION_PARAM = "/news/location"  # created by hand (see README); holds the home town, so it stays out of the repo
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
@@ -165,7 +166,12 @@ class NewsStack(Stack):
         manifest_deploy.node.add_dependency(site_deploy)  # one after the other, not in parallel
 
         # ---- scheduled ingest: EventBridge -> Lambda -> JSON in the data bucket
-        env = {"DATA_BUCKET": data_bucket.bucket_name, "LOCATION_PARAM": LOCATION_PARAM, "WATCHLIST_KEY": WATCHLIST_KEY}
+        env = {
+            "DATA_BUCKET": data_bucket.bucket_name,
+            "LOCATION_PARAM": LOCATION_PARAM,
+            "WATCHLIST_KEY": WATCHLIST_KEY,
+            "FINNHUB_PARAM": FINNHUB_PARAM,
+        }
         location_param_arn = self.format_arn(service="ssm", resource="parameter", resource_name=LOCATION_PARAM.lstrip("/"))
         fn = lambda_.Function(
             self,
@@ -186,6 +192,9 @@ class NewsStack(Stack):
         fn.add_to_role_policy(  # reads back last run's feed so story clusters keep their ids: one object, one action
             iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/feed.json")])
         )
+        fn.add_to_role_policy(  # last run's private earnings file (named from a secret: only the prefix is known)
+            iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/earn-*")])
+        )
         fn.add_to_role_policy(  # the saved watchlist symbols
             iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(WATCHLIST_KEY)])
         )
@@ -193,6 +202,12 @@ class NewsStack(Stack):
             iam.PolicyStatement(
                 actions=["ssm:GetParameter"],
                 resources=[location_param_arn],
+            )
+        )
+        fn.add_to_role_policy(  # the Finnhub key for earnings dates: read only, one parameter
+            iam.PolicyStatement(
+                actions=["ssm:GetParameter"],
+                resources=[self.format_arn(service="ssm", resource="parameter", resource_name=FINNHUB_PARAM.lstrip("/"))],
             )
         )
         events.Rule(
@@ -278,8 +293,9 @@ class NewsStack(Stack):
                 reason("AwsSolutions-IAM4", "Basic execution role only writes this function's logs", [LOGS_POLICY]),
                 reason(
                     "AwsSolutions-IAM5",
-                    "Write access is limited to the data/ prefix of one bucket",
-                    [RegexAppliesTo(regex=r"/^Resource::.*/data/\*$/g")],
+                    "Write access is limited to the data/ prefix of one bucket; reads of the private earnings "
+                    "file are limited to data/earn-* (its name is a hash of a secret, unknown at deploy time)",
+                    [RegexAppliesTo(regex=r"/^Resource::.*/data/(earn-)?\*$/g")],
                 ),
             ],
             apply_to_children=True,

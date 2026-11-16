@@ -1,12 +1,12 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
+import { loadArticles, loadEarnings, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Route, Section, Story } from './feed';
-import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
+import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
@@ -256,13 +256,13 @@ function SettingsLink() {
   );
 }
 
-function QuoteRow({ q, index = false }: { q: Quote; index?: boolean }) {
+function QuoteRow({ q, index = false, earn, now }: { q: Quote; index?: boolean; earn?: Earning; now?: Date }) {
   const { text, dir } = formatMove(q.change, q.changePct, q.currency);
   const points = sparkline(q.series);
   return (
     <li>
       <a class="q" href={`#/quote/${encodeURIComponent(q.symbol)}`}>
-        <div class="qn"><b>{q.name}</b><span>{q.symbol.replace('^', '')}</span></div>
+        <div class="qn"><b>{q.name}</b><span>{q.symbol.replace('^', '')}</span>{earn && now && <EarnTag e={earn} now={now} />}</div>
         {points && (
           <svg class={`qs ${dir}`} viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
             <polyline points={points} fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" />
@@ -274,13 +274,22 @@ function QuoteRow({ q, index = false }: { q: Quote; index?: boolean }) {
   );
 }
 
+/** "Earnings Thu · before open", red when it is today. */
+function EarnTag({ e, now }: { e: Earning; now: Date }) {
+  const day = earningDay(e.date, now);
+  const time = earningTime(e.time);
+  const when = day.today || day.label === 'Tomorrow' ? day.label.toLowerCase() : day.label;
+  return <em class={day.today ? 'etag today' : 'etag'}>Earnings {when}{time ? ' · ' + time : ''}</em>;
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return value ? <li><span>{label}</span><b>{value}</b></li> : null;
 }
 
 /** One watchlist symbol: today's numbers and the 3-month graph. */
-function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Markets | undefined; loaded: boolean; symbol: string; now: Date; canGoBack: boolean }) {
+function QuoteScreen({ markets, earnings, loaded, symbol, now, canGoBack }: { markets: Markets | undefined; earnings: Earnings | undefined; loaded: boolean; symbol: string; now: Date; canGoBack: boolean }) {
   const q = markets?.tickers.find((t) => t.symbol === symbol);
+  const next = upcoming(earnings, [symbol], now)[0];
   const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/markets'; };
   const move = q ? formatMove(q.change, q.changePct, q.currency) : undefined;
   // the stored history ends at an earlier (possibly in-progress) daily bar: end the graph on the live price
@@ -311,6 +320,16 @@ function QuoteScreen({ markets, loaded, symbol, now, canGoBack }: { markets: Mar
               {trendMove && <div class={`chg ${trendMove.dir}`}>{trendMove.text} over 3 months</div>}
             </div>
           ) : <p class="note">The 3-month history is not available right now.</p>}
+          {next && (
+            <>
+              <div class="grp">Next earnings</div>
+              <ul class="set stats">
+                <Stat label="Date" value={earningDate(next.date)} />
+                <Stat label="Time" value={next.time === 'pre' ? 'Before the open' : next.time === 'post' ? 'After the close' : 'Not announced'} />
+                <Stat label="EPS estimate" value={next.eps !== null ? epsLabel(next.eps) : ''} />
+              </ul>
+            </>
+          )}
           <div class="grp">Today</div>
           <ul class="set stats">
             <Stat label="Previous close" value={q.prevClose !== null ? priceLabel(q.prevClose, q.currency, false) : ''} />
@@ -584,10 +603,13 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   );
 }
 
-function MarketsScreen({ markets, hasKey, loaded, now, hidden, collapsed, onToggle, feed, onAllBusiness }: {
-  markets: Markets | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; collapsed: boolean; onToggle: () => void; feed: Feed | undefined; onAllBusiness: () => void;
+function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collapsed, onToggle, earnCollapsed, onToggleEarn, feed, onAllBusiness }: {
+  markets: Markets | undefined; earnings: Earnings | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; collapsed: boolean; onToggle: () => void;
+  earnCollapsed: boolean; onToggleEarn: () => void; feed: Feed | undefined; onAllBusiness: () => void;
 }) {
   const tickers = markets ? markets.tickers.filter((q) => !hidden.includes(q.symbol)) : [];
+  const soon = useMemo(() => upcoming(earnings, tickers.map((q) => q.symbol), now, EARNINGS_DAYS), [earnings, tickers, now]);
+  const nextBy = useMemo(() => new Map(soon.map((e) => [e.symbol, e] as const)), [soon]);
   const stale = markets ? !marketsFresh(markets.generated, now) : false;
   const open = markets && !stale ? tickers.some((q) => q.open) : false;  // `open` is frozen at build time
   const traded = tickers.find((q) => q.lastTrade)?.lastTrade;
@@ -610,12 +632,36 @@ function MarketsScreen({ markets, hasKey, loaded, now, hidden, collapsed, onTogg
       {hasKey && !markets && !loaded && <p class="note">Loading quotes…</p>}
       {hasKey && !markets && loaded && <p class="note">No watchlist quotes yet. Add symbols in Settings; they appear within a few minutes.</p>}
       {markets && stale && <p class="note warn">Updated {timeAgo(markets.generated, now)}; prices may be out of date.</p>}
+      {soon.length > 0 && (
+        <>
+          <button type="button" class="grp fold-h" aria-expanded={!earnCollapsed} onClick={onToggleEarn}>
+            <span>Upcoming earnings{earnCollapsed ? ' (' + soon.length + ')' : ''}</span><span class={'chev' + (earnCollapsed ? '' : ' open')} aria-hidden="true">›</span>
+          </button>
+          {!earnCollapsed && (
+            <ul class="ql">
+              {soon.map((e) => {
+                const q = tickers.find((t) => t.symbol === e.symbol);
+                const day = earningDay(e.date, now);
+                return (
+                  <li key={e.symbol}>
+                    <a class={day.today ? 'er today' : 'er'} href={'#/quote/' + encodeURIComponent(e.symbol)}>
+                      <div class="when"><b>{day.label}</b><span>{earningTime(e.time)}</span></div>
+                      <div class="qn"><b>{e.symbol.replace('^', '')}</b><span>{q?.name ?? ''}</span></div>
+                      <div class="eps">{e.eps !== null && <><b>{epsLabel(e.eps)}</b><span>EPS est.</span></>}</div>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
       {tickers.length > 0 && (
         <>
           <button type="button" class="grp fold-h" aria-expanded={!collapsed} onClick={onToggle}>
             <span>Watchlist{collapsed ? ` (${tickers.length})` : ''}</span><span class={`chev${collapsed ? '' : ' open'}`} aria-hidden="true">›</span>
           </button>
-          {!collapsed && <ul class="ql">{tickers.map((q) => <QuoteRow key={q.symbol} q={q} />)}</ul>}
+          {!collapsed && <ul class="ql">{tickers.map((q) => <QuoteRow key={q.symbol} q={q} earn={nextBy.get(q.symbol)} now={now} />)}</ul>}
         </>
       )}
       {!collapsed && markets && markets.missing > 0 && <p class="note">{markets.missing} {markets.missing === 1 ? 'quote is' : 'quotes are'} unavailable right now.</p>}
@@ -774,6 +820,7 @@ export function App() {
   const [scores, setScores] = useState<Scores | undefined>();
   const [markets, setMarkets] = useState<Markets | undefined>();
   const [marketsLoaded, setMarketsLoaded] = useState(false);
+  const [earnings, setEarnings] = useState<Earnings | undefined>();
   const [settings, setSettings] = useState<Settings>(() => {
     const s = loadSettings();
     document.documentElement.style.setProperty('--read-size', `${readSize(s.textSize)}px`);  // before the first paint, so no reflow
@@ -806,7 +853,12 @@ export function App() {
   const refreshMarkets = (keyNow?: string) => {
     const mine = ++latestMarkets.current;  // a slower, older response must not overwrite a newer one
     const key = keyNow ?? settingsRef.current.watchKey;
-    if (!key) { setMarkets(undefined); setMarketsLoaded(true); return; }
+    if (!key) { setMarkets(undefined); setEarnings(undefined); setMarketsLoaded(true); return; }
+    void loadEarnings(key).then((e) => {
+      if (mine !== latestMarkets.current) return;
+      if (e) setEarnings(e);  // a failed refresh keeps the last good dates
+      else if (keyNow !== undefined) setEarnings(undefined);  // ...but never another key's dates
+    });
     void loadWatchlist(key).then((m) => {
       if (mine !== latestMarkets.current) return;
       if (m) setMarkets(m);  // a failed refresh keeps the last good quotes
@@ -866,6 +918,7 @@ export function App() {
     });
   };
   const toggleWatchlist = () => change((prev) => ({ ...prev, watchCollapsed: !prev.watchCollapsed }));
+  const toggleEarnings = () => change((prev) => ({ ...prev, earningsCollapsed: !prev.earningsCollapsed }));
   const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
   const update = (next: Partial<Settings>) => change((prev) => ({ ...prev, ...next }));
   useEffect(() => {
@@ -930,7 +983,7 @@ export function App() {
     return (
       <>
         <PullIndicator {...pull} />
-        <MarketsScreen markets={markets} hasKey={settings.watchKey !== ''} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers}
+        <MarketsScreen markets={markets} earnings={earnings} earnCollapsed={settings.earningsCollapsed} onToggleEarn={toggleEarnings} hasKey={settings.watchKey !== ''} loaded={marketsLoaded} now={now} hidden={settings.hiddenTickers}
           collapsed={settings.watchCollapsed} onToggle={toggleWatchlist}
           feed={feed} onAllBusiness={() => { setTopic('business'); location.hash = '#'; }} />
         <TabBar current="markets" />
@@ -941,7 +994,7 @@ export function App() {
   if (route.kind === 'quote') {
     return (
       <>
-        <QuoteScreen key={route.id} markets={markets} loaded={marketsLoaded} symbol={route.id} now={now} canGoBack={inAppNavs.current > 0} />
+        <QuoteScreen key={route.id} markets={markets} earnings={earnings} loaded={marketsLoaded} symbol={route.id} now={now} canGoBack={inAppNavs.current > 0} />
         <TabBar current="markets" />
       </>
     );

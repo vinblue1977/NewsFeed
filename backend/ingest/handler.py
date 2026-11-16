@@ -10,10 +10,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 
 from ingest.articles import build_articles, dumps
 from ingest.cluster import cluster_items
-from ingest.config import cached_location, watch_name
+from ingest.config import cached_location, earnings_name, finnhub_key, watch_name
+from ingest.earnings import build_earnings, is_due
 from ingest.espn_pictures import add_pictures
 from ingest.images import attach_images, known_images
 from ingest.markets import build_markets
@@ -115,6 +117,34 @@ def run_markets(s3: Any, location: dict[str, Any], force: bool = False) -> dict[
     return {"status": "ok", "markets": write_doc(s3, watch_name(key), doc)}
 
 
+def read_doc(s3: Any, name: str) -> Any:
+    """data/<name>.json as parsed JSON, or None if it is missing or not JSON. Any other error (access denied, throttling,
+    an outage) is raised, so a hiccup is never mistaken for a missing file."""
+    try:
+        body = s3.get_object(Bucket=os.environ["DATA_BUCKET"], Key=f"{os.environ['DATA_PREFIX']}/{name}.json")["Body"].read()
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            return None
+        raise
+    try:
+        return json.loads(body)
+    except ValueError:
+        return None
+
+
+def earnings_needed(s3: Any, key: str | None, symbols: list[str]) -> bool:
+    """Whether to ask Finnhub again. A file that cannot be read (as opposed to missing) means no: asking every run would spend
+    the free-tier calls that the portfolio tracker shares."""
+    if not (key and symbols):
+        return False
+    try:
+        previous = read_doc(s3, earnings_name(key))
+    except Exception:  # noqa: BLE001
+        logger.exception("could not read the earnings file; not rebuilding it this run")
+        return False
+    return is_due(previous, symbols)
+
+
 def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     """Write data/<name>.json ("failed" if there is nothing to write or the write fails). Each document carries `generated`."""
     if doc is None:
@@ -143,13 +173,16 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         return run_markets(s3, location, force=event.get("force") is True)
     watch_key = location.get("watch_key")
     symbols = saved_symbols(s3, watch_key) or []
-    pool = ThreadPoolExecutor(max_workers=3)
+    pool = ThreadPoolExecutor(max_workers=4)
     side = {
         "weather": pool.submit(soft, "weather", lambda: build_weather(location["lat"], location["lon"])),
         "scores": pool.submit(soft, "scores", build_scores),
     }
     if watch_key and symbols:  # no watchlist, no quotes to fetch
         side["markets"] = pool.submit(soft, "markets", lambda: build_markets(symbols))
+    earnings_due = earnings_needed(s3, watch_key, symbols)
+    if earnings_due:
+        side["earnings"] = pool.submit(soft, "earnings", lambda: build_earnings(symbols, finnhub_key()))
     statuses: dict[str, str] = {}
     articles_status = "failed"
     try:
@@ -184,16 +217,21 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         )
     finally:
         docs = {name: future.result() for name, future in side.items()}
+        earnings = docs.pop("earnings", None)
         watch, _ = watch_doc(docs.pop("markets", None))  # no public markets file: the quotes go to one only you can name
         statuses = {name: write_doc(s3, name, doc) for name, doc in docs.items()}
         if not (watch_key and symbols):
+            statuses["earnings"] = "skipped"
             statuses["markets"] = "skipped"
-        elif (
-            now_saved := saved_symbols(s3, watch_key)
-        ) is not None and now_saved != symbols:  # the list was edited meanwhile: the refresh that edit started wins
-            statuses["markets"] = "superseded"
         else:
-            statuses["markets"] = write_doc(s3, watch_name(watch_key), watch)
+            now_saved = saved_symbols(s3, watch_key)
+            edited = (
+                now_saved is not None and now_saved != symbols
+            )  # the list was edited meanwhile: the refresh that edit started wins
+            statuses["earnings"] = (
+                "fresh" if not earnings_due else "superseded" if edited else write_doc(s3, earnings_name(watch_key), earnings)
+            )
+            statuses["markets"] = "superseded" if edited else write_doc(s3, watch_name(watch_key), watch)
         pool.shutdown(wait=False)
     return {
         "status": "ok",

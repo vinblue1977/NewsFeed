@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatChange, formatPrice, isFresh, parseMarkets, priceLabel, sparkline, formatMove, dayRange, historyChange, isMarketNews, watchTerms } from './markets';
+import { formatChange, formatPrice, isFresh, parseMarkets, priceLabel, sparkline, formatMove, dayRange, historyChange, isMarketNews, watchTerms, parseEarnings, earningDay, earningTime, epsLabel, upcoming, dayKey, earningDate } from './markets';
 
 const quote = (over: Record<string, unknown> = {}) => ({
   symbol: '^GSPC', name: 'S&P 500', ok: true, price: 7561.67, change: -30.73, change_pct: -0.4,
@@ -111,5 +111,47 @@ describe('market news', () => {
     expect(isMarketNews({ title: 'Reliance Industries plans a new unit' }, terms)).toBe(true);
     expect(isMarketNews({ title: 'Crop yields fall after drought' })).toBe(false);
     expect(isMarketNews({ title: 'Campaign rally draws thousands' })).toBe(false);
+  });
+});
+
+describe('earnings', () => {
+  const now = new Date(2026, 10, 16, 9, 30);  // Mon Nov 16, local time
+  const doc = (items: unknown[], generated = '2026-11-16T08:00:00Z') => ({ generated, items });
+  const item = (symbol: string, date: string, time = 'pre', eps: unknown = 0.64) => ({ symbol, date, time, eps });
+
+  it('reads the file field by field and drops what is not usable', () => {
+    const got = parseEarnings(doc([item('WMT', '2026-11-19'), item('BAD', '19/11/2026'), item('NOPE', '2026-13-45'), { symbol: 5, date: '2026-11-19' }, null, item('X', '2026-11-20', 'weird', 'n/a')]), now);
+    expect(got?.items).toEqual([
+      { symbol: 'WMT', date: '2026-11-19', time: 'pre', eps: 0.64 },
+      { symbol: 'X', date: '2026-11-20', time: 'tbd', eps: null },
+    ]);
+  });
+
+  it('shows nothing for a missing, malformed or stale file', () => {
+    expect(parseEarnings(null, now)).toBeUndefined();
+    expect(parseEarnings({ generated: 5, items: [] }, now)).toBeUndefined();
+    expect(parseEarnings({ generated: '2026-11-16T08:00:00Z', items: 'x' }, now)).toBeUndefined();
+    expect(parseEarnings(doc([item('WMT', '2026-11-19')], '2026-11-10T08:00:00Z'), now)).toBeUndefined();  // a week old
+    expect(parseEarnings(doc([item('WMT', '2026-11-19')], 'not a date'), now)).toBeUndefined();
+  });
+
+  it('labels the day and the time', () => {
+    expect(earningDay('2026-11-16', now)).toEqual({ label: 'Today', today: true });
+    expect(earningDay('2026-11-17', now)).toEqual({ label: 'Tomorrow', today: false });
+    const later = earningDay('2026-11-19', now);
+    expect(later.today).toBe(false);
+    expect(later.label).toMatch(/19/);
+    expect([earningTime('pre'), earningTime('post'), earningTime('tbd')]).toEqual(['before open', 'after close', '']);
+    expect([epsLabel(0.64), epsLabel(-0.1), epsLabel(2)]).toEqual(['$0.64', '−$0.10', '$2.00']);
+    expect(dayKey(new Date(2026, 0, 5))).toBe('2026-01-05');
+    expect(earningDate('2026-11-19')).toMatch(/2026/);
+  });
+
+  it('lists only shown symbols, from today on, within the days asked, soonest first', () => {
+    const e = parseEarnings(doc([item('WMT', '2026-11-19'), item('INTU', '2026-11-16', 'post'), item('NVDA', '2026-12-30'), item('OLD', '2026-11-10'), item('HID', '2026-11-18')]), now);
+    const shown = ['WMT', 'INTU', 'NVDA', 'OLD'];
+    expect(upcoming(e, shown, now, 14).map((x) => x.symbol)).toEqual(['INTU', 'WMT']);
+    expect(upcoming(e, shown, now).map((x) => x.symbol)).toEqual(['INTU', 'WMT', 'NVDA']);  // any date, as on a symbol's own page
+    expect(upcoming(undefined, shown, now)).toEqual([]);
   });
 });

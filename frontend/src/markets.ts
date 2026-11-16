@@ -156,3 +156,71 @@ export function watchTerms(quotes: Quote[]): RegExp[] {
 export function isMarketNews(item: { title: string; subtopic?: string }, terms: RegExp[] = []): boolean {
   return item.subtopic === 'markets' || MARKET_WORDS.test(item.title) || terms.some((t) => t.test(item.title));
 }
+
+/** The next report of one watchlist symbol, from the private earnings file. */
+export interface Earning {
+  symbol: string;
+  date: string;  // YYYY-MM-DD, the exchange's calendar day
+  time: 'pre' | 'post' | 'tbd';  // before the open, after the close, or not announced
+  eps: number | null;  // the consensus estimate
+}
+
+export interface Earnings {
+  generated: string;
+  items: Earning[];
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const EARNINGS_MAX_AGE_MS = 3 * 24 * 3600_000;  // a file this old means the calendar has stopped updating: show nothing
+export const EARNINGS_DAYS = 14;  // the Markets tab shows this far ahead; a symbol's own page shows any date
+
+/** The earnings document, checked field by field: the file is not trusted, and a bad entry is dropped. */
+export function parseEarnings(value: unknown, now: Date): Earnings | undefined {
+  const v = value as Record<string, unknown> | null;
+  if (!v || typeof v.generated !== 'string' || !Array.isArray(v.items)) return undefined;
+  const age = now.getTime() - new Date(v.generated).getTime();
+  if (!(age < EARNINGS_MAX_AGE_MS)) return undefined;  // also false for NaN
+  const items: Earning[] = [];
+  for (const raw of v.items as unknown[]) {
+    const o = raw as Record<string, unknown> | null;
+    if (!o || typeof o.symbol !== 'string' || typeof o.date !== 'string' || !ISO_DAY.test(o.date) || Number.isNaN(Date.parse(o.date))) continue;
+    const time = o.time === 'pre' || o.time === 'post' ? o.time : 'tbd';
+    items.push({ symbol: o.symbol, date: o.date, time, eps: typeof o.eps === 'number' && Number.isFinite(o.eps) ? o.eps : null });
+  }
+  return { generated: v.generated, items };
+}
+
+const pad = (n: number): string => String(n).padStart(2, '0');
+
+/** A local calendar day as YYYY-MM-DD. */
+export const dayKey = (d: Date): string => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+
+const addDays = (d: Date, n: number): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 12);
+
+/** "Today", "Tomorrow" or "Thu 19" for a report date, and whether it is today. */
+export function earningDay(date: string, now: Date): { label: string; today: boolean } {
+  if (date === dayKey(now)) return { label: 'Today', today: true };
+  if (date === dayKey(addDays(now, 1))) return { label: 'Tomorrow', today: false };
+  const [y = 0, m = 1, d = 1] = date.split('-').map(Number);
+  return { label: new Date(y, m - 1, d, 12).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }), today: false };
+}
+
+/** A report date for a symbol's own page, e.g. "Thu, Nov 19, 2026". */
+export const earningDate = (date: string): string =>
+  new Date(date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+
+export const earningTime = (time: Earning['time']): string => (time === 'pre' ? 'before open' : time === 'post' ? 'after close' : '');
+
+/** An estimate as dollars: "$0.64", "−$0.12". */
+export const epsLabel = (eps: number): string => (eps < 0 ? '−' : '') + '$' + Math.abs(eps).toFixed(2);
+
+/** The reports from today on, soonest first, for the symbols in `shown`; `days` limits how far ahead (none: any date). */
+export function upcoming(earnings: Earnings | undefined, shown: string[], now: Date, days?: number): Earning[] {
+  if (!earnings) return [];
+  const first = dayKey(now);
+  const last = days === undefined ? '9999-12-31' : dayKey(addDays(now, days));
+  const keep = new Set(shown);
+  return earnings.items
+    .filter((e) => keep.has(e.symbol) && e.date >= first && e.date <= last)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.symbol.localeCompare(b.symbol));
+}
