@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import type { Route, Section, Story } from './feed';
 import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -73,7 +73,7 @@ function StoryRow({ s, now }: { s: Story; now: Date }) {
   );
 }
 
-function TopicSection({ section, now, onAll }: { section: Section; now: Date; onAll: () => void }) {
+function TopicSection({ section, now, onAll }: { section: Pick<Section, 'label' | 'color' | 'lead' | 'more' | 'total'>; now: Date; onAll: () => void }) {
   const { lead } = section;
   return (
     <section aria-label={section.label}>
@@ -503,6 +503,10 @@ function SportsScreen({ feed, scores, collapsed, onFold, loaded, failed, now, su
   const scoreView = useMemo(() => scoresFor(scores, sub, now), [scores, sub, now]);
   const live = useMemo(() => liveNow(scores, now), [scores, now]);
   const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/sports/${next}` : '#/sports'; };
+  const sportGroups = useMemo(() => sportSections(all), [all]);
+  const page = list.slice(0, shown);
+  const lead = page.find((s) => imageSrc(s.item) !== undefined);  // the first story with a picture opens the list as a big card
+  const rest = lead ? page.filter((s) => s !== lead) : page;
   return (
     <div class="wrap">
       <header class="hdr"><div><div class="e">Scores and stories</div><h1>Sports</h1></div><SettingsLink /></header>
@@ -522,9 +526,17 @@ function SportsScreen({ feed, scores, collapsed, onFold, loaded, failed, now, su
       )}
       {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
       {feed && list.length === 0 && <div class="empty"><b>No sports stories yet</b><span>{sub ? 'Nothing in this sport right now.' : 'Sports stories appear here.'}</span></div>}
-      {list.length > 0 && hasScores(scoreView) && <div class="grp">Top stories</div>}
-      {list.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
-      {list.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
+      {!sub && sportGroups.map((g) => <TopicSection key={g.sub} section={g} now={now} onAll={() => pick(g.sub)} />)}
+      {sub && list.length > 0 && hasScores(scoreView) && <div class="grp">Top stories</div>}
+      {sub && lead && (
+        <StoryAnchor story={lead} class="lead">
+          <Pic item={lead.item} class="pic" />
+          <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
+          <h2>{lead.item.title}</h2>
+        </StoryAnchor>
+      )}
+      {sub && rest.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+      {sub && list.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
     </div>
   );
 }

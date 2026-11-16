@@ -14,6 +14,7 @@ import boto3
 from ingest.articles import build_articles, dumps
 from ingest.cluster import cluster_items
 from ingest.config import cached_location, watch_name
+from ingest.espn_pictures import add_pictures
 from ingest.images import attach_images, known_images
 from ingest.markets import build_markets
 from ingest.pipeline import collect, local_sources
@@ -41,6 +42,7 @@ def previous_state(s3: Any) -> tuple[dict[str, str], dict[str, str]]:
 def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """The feed and the articles document (None if it could not be built). Items flagged `full` are exactly those in it."""
     items, status = collect([*SOURCES, *local_sources(location["feeds"])], location["nearby"])
+    add_pictures(items)  # ESPN's RSS has none; its news API does (fail-soft)
     bodies = {i["id"]: i.pop("_html") for i in items if "_html" in i}  # the raw HTML never goes into feed.json or clustering
     try:
         clusters = cluster_items(items, previous)
