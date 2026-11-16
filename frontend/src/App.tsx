@@ -443,30 +443,59 @@ function LiveStrip({ cards }: { cards: LiveCard[] }) {
   );
 }
 
-/** A section heading; under All it links to the sport's own list when more rows exist than are shown. */
-function Group({ title, sport, shown, total, all }: { title: string; sport?: string; shown: number; total: number; all: boolean }) {
-  return <div class="grp">{title}{all && sport && total > shown && <a class="cnt" href={`#/sports/${sport}`}>All {total}</a>}</div>;
+/** A score section's heading. Under All it folds the section (state kept on the phone) and links to the sport's own list when
+ * more rows exist than are shown; under a sport chip it is a plain heading. */
+function Group({ title, sport, shown, total, all, folded, onFold }: {
+  title: string; sport?: string; shown: number; total: number; all: boolean; folded?: boolean; onFold?: (sport: string) => void;
+}) {
+  if (!all || !sport || !onFold) return <div class="grp">{title}</div>;
+  return (
+    <div class="grp ghead">
+      <button type="button" class="gfold" aria-expanded={!folded} onClick={() => onFold(sport)}>
+        <span>{title}{folded ? ` · ${total}` : ''}</span><span class={`chev${folded ? '' : ' open'}`} aria-hidden="true">›</span>
+      </button>
+      {!folded && total > shown && <a class="cnt" href={`#/sports/${sport}`}>All {total}</a>}
+    </div>
+  );
 }
 
 /** The scores part of the Sports tab: rows per sport, or a note when they are out of date or could not be read. */
-function ScoresPanel({ view, generated, now, all }: { view: ScoreView; generated: string; now: Date; all: boolean }) {
+function ScoresPanel({ view, generated, now, all, collapsed, onFold }: {
+  view: ScoreView; generated: string; now: Date; all: boolean; collapsed: string[]; onFold: (sport: string) => void;
+}) {
   if (view.stale) return <p class="note warn">Scores are out of date (updated {timeAgo(generated, now)}).</p>;
   const tennisShown = view.tennis.reduce((n, g) => n + g.matches.length, 0);
+  const folded = (sport: string) => all && collapsed.includes(sport);
+  const tennis = folded('tennis') ? view.tennis.slice(0, 1) : view.tennis;  // folded: one heading for the whole sport
   return (
     <>
       {view.down.length > 0 && <p class="note">{view.down.join(' and ')} scores are unavailable right now.</p>}
-      {view.nfl.length > 0 && (<><Group title="NFL" sport="nfl" shown={view.nfl.length} total={view.total.nfl} all={all} /><div class="sc">{view.nfl.map((g) => <GameRow key={g.id} g={g} />)}</div></>)}
-      {view.tennis.map((t, i) => (
-        <div key={t.tournament}><Group title={t.tournament || 'Tennis'} sport="tennis" shown={tennisShown} total={view.total.tennis} all={all && i === view.tennis.length - 1} /><div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div></div>
+      {view.nfl.length > 0 && (
+        <>
+          <Group title="NFL" sport="nfl" shown={view.nfl.length} total={view.total.nfl} all={all} folded={folded('nfl')} onFold={onFold} />
+          {!folded('nfl') && <div class="sc">{view.nfl.map((g) => <GameRow key={g.id} g={g} />)}</div>}
+        </>
+      )}
+      {tennis.map((t, i) => (  // only the first tournament's heading folds the sport and links to its list
+        <div key={t.tournament}>
+          <Group title={folded('tennis') ? 'Tennis' : t.tournament || 'Tennis'} sport="tennis" shown={tennisShown} total={view.total.tennis}
+            all={all && i === 0} folded={folded('tennis')} onFold={onFold} />
+          {!folded('tennis') && <div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div>}
+        </div>
       ))}
-      {view.cricket.length > 0 && (<><Group title="Cricket" sport="cricket" shown={view.cricket.length} total={view.total.cricket} all={all} /><div class="sc">{view.cricket.map((c) => <CricketRow key={c.id} c={c} />)}</div></>)}
+      {view.cricket.length > 0 && (
+        <>
+          <Group title="Cricket" sport="cricket" shown={view.cricket.length} total={view.total.cricket} all={all} folded={folded('cricket')} onFold={onFold} />
+          {!folded('cricket') && <div class="sc">{view.cricket.map((c) => <CricketRow key={c.id} c={c} />)}</div>}
+        </>
+      )}
     </>
   );
 }
 
 /** Every sports story, newest first, with a chip per sub-topic (NFL, cricket, tennis). */
-function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
-  feed: Feed | undefined; scores: Scores | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
+function SportsScreen({ feed, scores, collapsed, onFold, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+  feed: Feed | undefined; scores: Scores | undefined; collapsed: string[]; onFold: (sport: string) => void; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
   const all = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
   const subs = useMemo(() => subtopicsOf(all), [all]);
@@ -489,7 +518,7 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
         {sub && !subs.includes(sub) && <button type="button" class="on" aria-pressed="true">{subtopicLabel(sub)}</button>}
       </nav>
       {!sub && <LiveStrip cards={live} />}
-      {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} all={!sub} />}
+      {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} all={!sub} collapsed={collapsed} onFold={onFold} />}
       {!feed && !failed && !loaded && <p class="note">Loading sports…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -796,22 +825,17 @@ export function App() {
   const raw = load.state === 'ready' ? load.feed : undefined;  // the Reader opens any article, even from a hidden source
   const feed = useMemo(() => (raw ? withoutSources(raw, settings.hiddenSources) : undefined), [raw, settings.hiddenSources]);
   const sources = useMemo(() => sourceNames(raw, settings.hiddenSources), [raw, settings.hiddenSources]);
-  const toggleWatchlist = () => {
-    setSettings((prev) => {  // flips the latest state, so two quick taps cancel out
-      const merged = { ...prev, watchCollapsed: !prev.watchCollapsed };
+  const change = (next: (prev: Settings) => Settings) => {
+    setSettings((prev) => {  // from the latest state, so two quick taps both count (or cancel out, for a toggle)
+      const merged = next(prev);
       saveSettings(merged);
       settingsRef.current = merged;
       return merged;
     });
   };
-  const update = (next: Partial<Settings>) => {
-    setSettings((prev) => {  // from the latest state, so two quick taps both count
-      const merged = { ...prev, ...next };
-      saveSettings(merged);
-      settingsRef.current = merged;
-      return merged;
-    });
-  };
+  const toggleWatchlist = () => change((prev) => ({ ...prev, watchCollapsed: !prev.watchCollapsed }));
+  const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
+  const update = (next: Partial<Settings>) => change((prev) => ({ ...prev, ...next }));
   useEffect(() => {
     document.documentElement.style.setProperty('--read-size', `${readSize(settings.textSize)}px`);
   }, [settings.textSize]);
@@ -851,7 +875,7 @@ export function App() {
     return (
       <>
         <PullIndicator {...pull} />
-        <SportsScreen key={route.sub ?? ''} feed={feed} scores={scores} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
+        <SportsScreen key={route.sub ?? ''} feed={feed} scores={scores} collapsed={settings.scoresCollapsed} onFold={toggleScores} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
           shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)}
           onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="sports" />
