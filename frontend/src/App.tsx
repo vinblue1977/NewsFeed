@@ -605,7 +605,7 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   );
 }
 
-const MARKET_NEWS_PAGE = 10;  // market stories shown, and added by each "Show more"
+const MARKET_NEWS_PAGE = 20;  // market stories shown, and added by each "Show more"
 
 function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collapsed, onToggle, earnCollapsed, onToggleEarn, feed, onAllBusiness }: {
   markets: Markets | undefined; earnings: Earnings | undefined; hasKey: boolean; loaded: boolean; now: Date; hidden: string[]; collapsed: boolean; onToggle: () => void;
