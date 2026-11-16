@@ -44,10 +44,18 @@ def _state(status: Any) -> tuple[str, str]:
     return state, clean_text(kind.get("shortDetail") or kind.get("description"), 40)
 
 
-def _event_link(links: Any) -> str | None:
-    for link in links if isinstance(links, list) else []:
-        if isinstance(link, dict) and "summary" in (link.get("rel") or []):
-            return _link(link.get("href"))
+# a game has a "summary" page before and after play; during it ESPN labels its pages "live", "boxscore" and "pbp"
+_LIVE_RELS = ("live", "boxscore", "pbp")
+
+
+def _event_link(links: Any, *, live: bool = False) -> str | None:
+    """The game's summary page. Only a game in play falls back to its live page, box score or play-by-play: for one that
+    has not started, those pages are empty."""
+    rels = ("summary", *_LIVE_RELS) if live else ("summary",)
+    for rel in rels:
+        for link in links if isinstance(links, list) else []:
+            if isinstance(link, dict) and rel in (link.get("rel") or []) and (href := _link(link.get("href"))):
+                return href
     return None
 
 
@@ -112,7 +120,7 @@ def parse_nfl(body: bytes) -> list[dict[str, Any]]:
                             "name": clean_text(teams["away"]["team"]["displayName"], 40),
                             "score": _score(teams["away"], started=started),
                         },
-                        "url": _event_link(event.get("links")),
+                        "url": _event_link(event.get("links"), live=state == "live"),
                     }
                 )
             except KeyError, IndexError, TypeError, AttributeError:
