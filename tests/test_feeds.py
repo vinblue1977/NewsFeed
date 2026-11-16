@@ -192,8 +192,8 @@ def test_source_list_is_sane() -> None:
     assert all(s.url.startswith("https://") for s in SOURCES)
     assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business"}
     headline_only = {s.id for s in SOURCES if s.headline_only}
-    assert headline_only == {"gn-ap", "gn-cnn", "gn-reuters"}
-    assert all(urlsplit(s.url).hostname == "news.google.com" for s in SOURCES if s.id in headline_only)
+    assert headline_only == {"gn-ap", "gn-cnn", "gn-reuters", "nfl-com"}  # nfl-com: a sitemap, no summaries
+    assert all(urlsplit(s.url).hostname == "news.google.com" for s in SOURCES if s.id in headline_only and not s.sitemap)
     assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
 
 

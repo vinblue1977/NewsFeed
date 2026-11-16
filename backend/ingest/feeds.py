@@ -28,6 +28,8 @@ MAX_URL_CHARS = 2000
 ATOM = "{http://www.w3.org/2005/Atom}"
 CONTENT = "{http://purl.org/rss/1.0/modules/content/}encoded"
 MEDIA = "{http://search.yahoo.com/mrss/}"
+SITEMAP = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+SITEMAP_NEWS = "{http://www.google.com/schemas/sitemap-news/0.9}"
 MIN_IMAGE_WIDTH = 100
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
@@ -46,8 +48,16 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_HttpsOnlyRedirects)
 
 
-def fetch(url: str, *, accept: str = ACCEPT, deadline_seconds: float | None = None, user_agent: str = USER_AGENT) -> bytes:
-    """GET a feed over HTTPS (redirects too), with a socket timeout, a total deadline and a size cap."""
+def fetch(
+    url: str,
+    *,
+    accept: str = ACCEPT,
+    deadline_seconds: float | None = None,
+    user_agent: str = USER_AGENT,
+    head_bytes: int | None = None,
+) -> bytes:
+    """GET a feed over HTTPS (redirects too), with a socket timeout, a total deadline and a size cap.
+    `head_bytes` reads only that many bytes and returns them (a page whose head is all that is wanted), not failing on size."""
     if urlsplit(url).scheme != "https":
         raise FeedError("only https feeds are fetched")
     headers = {"User-Agent": user_agent, "Accept": accept}
@@ -58,6 +68,8 @@ def fetch(url: str, *, accept: str = ACCEPT, deadline_seconds: float | None = No
         with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
             while chunk := response.read(8192):
                 body += chunk
+                if head_bytes is not None and len(body) >= head_bytes:
+                    return bytes(body[:head_bytes])
                 if len(body) > MAX_BYTES:
                     raise FeedError("feed is larger than the size cap")
                 if time.monotonic() > deadline:
@@ -243,6 +255,42 @@ def parse_xml(body: bytes) -> ET.Element:
     return ET.fromstring(body)  # noqa: S314  (no DOCTYPE or entity survived the guard pass)
 
 
+def _parse_news_sitemap(root: ET.Element, source: Source) -> list[dict[str, Any]]:
+    """A Google News sitemap (nfl.com has no RSS): each <url> with a <news:news> block is a story: link, headline, time.
+    Only links on the source's own host are kept. There is no summary and no picture here."""
+    host = (urlsplit(source.url).hostname or "").removeprefix("www.")
+    items: list[dict[str, Any]] = []
+    for node in root.iter(f"{SITEMAP}url"):
+        news = node.find(f"{SITEMAP_NEWS}news")
+        link = _safe_url(_child(node, f"{SITEMAP}loc"))
+        if (
+            news is None
+            or not link
+            or (urlsplit(link).hostname or "").lower().removeprefix("www.") != host
+            or not urlsplit(link).path.startswith("/news/")
+        ):
+            continue
+        title = clean_text(_child(news, f"{SITEMAP_NEWS}title"), MAX_TITLE_CHARS)
+        published = _parse_date(_child(news, f"{SITEMAP_NEWS}publication_date"))
+        if not (title and published):
+            continue
+        item: dict[str, Any] = {
+            "id": hashlib.sha256(link.encode()).hexdigest()[:16],
+            "title": title,
+            "url": link,
+            "summary": "",
+            "published": published.isoformat(timespec="seconds"),
+            "source": source.name,
+            "domain": host,
+            "source_id": source.id,
+            "topic": source.topic,
+        }
+        if source.subtopic:
+            item["subtopic"] = source.subtopic
+        items.append(item)
+    return items
+
+
 def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
     """Parse an RSS 2.0 or Atom document into items. Entries without a title, a safe link or a date are dropped."""
     check_safe_xml(body)
@@ -250,6 +298,8 @@ def parse_feed(body: bytes, source: Source) -> list[dict[str, Any]]:
         root = parse_xml(body)
     except ET.ParseError as exc:
         raise FeedError(f"not valid XML: {exc}") from exc
+    if source.sitemap:
+        return _parse_news_sitemap(root, source)
     items: list[dict[str, Any]] = []
     for node in [*root.iter("item"), *root.iter(f"{ATOM}entry")]:
         atom = node.tag == f"{ATOM}entry"
