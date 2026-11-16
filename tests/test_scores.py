@@ -373,3 +373,32 @@ def test_default_getter_uses_the_right_accept_and_a_short_deadline(monkeypatch: 
     assert len(calls) == 3
     assert sorted(kw["accept"] for _, kw in calls) == sorted([scores.JSON_ACCEPT, scores.JSON_ACCEPT, scores.XML_ACCEPT])
     assert all(kw["deadline_seconds"] == scores.DEADLINE_SECONDS for _, kw in calls)
+
+
+def test_parse_nfl_links_a_game_in_play_to_its_live_page() -> None:
+    links = [
+        {"rel": ["pbp", "desktop"], "href": "https://example.com/pbp/1"},
+        {"rel": ["boxscore", "desktop"], "href": "https://example.com/box/1"},
+        {"rel": ["live", "desktop", "event"], "href": "https://example.com/live/1"},
+    ]
+
+    def url(state: str, extra: list | None = None, drop: int = 0) -> str | None:
+        event = game("1", state, "2026-11-13T01:15Z", links=[*links[drop:], *(extra or [])])
+        return parse_nfl(nfl_doc(event))[0]["url"]
+
+    assert url("in") == "https://example.com/live/1"
+    assert url("in", drop=2) == "https://example.com/live/1"
+    assert url("in", extra=[{"rel": ["summary"], "href": "https://example.com/s/1"}]) == "https://example.com/s/1"
+    assert url("in", extra=[{"rel": ["live"], "href": "javascript:x"}], drop=2) == "https://example.com/live/1"
+
+
+def test_parse_nfl_gives_a_game_not_in_play_only_its_summary() -> None:
+    links = [{"rel": ["boxscore"], "href": "https://example.com/box/1"}, {"rel": ["live"], "href": "https://example.com/live/1"}]
+    for state in ("pre", "post"):
+        assert parse_nfl(nfl_doc(game("1", state, "2026-11-13T01:15Z", links=links)))[0]["url"] is None
+    assert (
+        parse_nfl(
+            nfl_doc(game("2", "in", "2026-11-13T01:15Z", links=[{"rel": ["boxscore"], "href": "https://example.com/box/2"}]))
+        )[0]["url"]
+        == "https://example.com/box/2"
+    )
