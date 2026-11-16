@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byState, hasScores, isFresh, parseScores, scoresFor } from './scores';
+import { byState, cricketUpcoming, hasScores, isFresh, liveNow, parseScores, scoresFor } from './scores';
 
 const doc = {
   generated: '2026-11-15T19:00:00+00:00',
@@ -101,5 +101,22 @@ describe('long ids and lines', () => {
   it('orders by real dates, not strings: an offset or seconds do not confuse it, and a missing start is last', () => {
     const g = (id: string, start: string) => ({ id, state: 'pre' as const, start });
     expect(byState([g('none', ''), g('late', '2026-11-15T21:05:30Z'), g('early', '2026-11-15T20:00+00:00')]).map((x) => x.id)).toEqual(['early', 'late', 'none']);
+  });
+});
+
+describe('liveNow and cricketUpcoming', () => {
+  const now = new Date('2026-11-15T19:10:00Z');
+  it('lists only matches in play, and nothing when the scores are stale', () => {
+    const cards = liveNow(parseScores(doc), now);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((c) => c.rows.length === 2 || c.line !== '')).toBe(true);
+    expect(liveNow(parseScores(doc), new Date('2027-01-01T00:00:00Z'))).toEqual([]);
+    expect(liveNow(undefined, now)).toEqual([]);
+  });
+  it('treats a cricket line with no score and no star as upcoming', () => {
+    expect(cricketUpcoming({ id: 'a', line: 'New South Wales v South Australia', live: false, url: undefined })).toBe(true);
+    expect(cricketUpcoming({ id: 'b', line: 'South Africa v Bangladesh 327/6 *', live: true, url: undefined })).toBe(false);
+    expect(cricketUpcoming({ id: 'u', line: 'India U19 v Pakistan U19', live: false, url: undefined })).toBe(true);
+    expect(cricketUpcoming({ id: 'c', line: 'India 250/4 v Australia 180', live: false, url: undefined })).toBe(false);
   });
 });

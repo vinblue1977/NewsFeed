@@ -219,7 +219,7 @@ export function parseRoute(hash: string): Route {
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
 }
 
-const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', nba: 'NBA', nhl: 'NHL', f1: 'F1' };
+const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL' };
 
 /** A sub-topic id ("cricket") as a title ("Cricket"). */
 export function subtopicLabel(id: string): string {
