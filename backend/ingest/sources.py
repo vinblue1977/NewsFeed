@@ -56,11 +56,6 @@ SOURCES: tuple[Source, ...] = (
     _s("espn-nfl", "ESPN", "https://www.espn.com/espn/rss/nfl/news", "sports", "nfl"),
     _s("cricinfo", "ESPNcricinfo", "https://www.espncricinfo.com/rss/content/story/feeds/0.xml", "sports", "cricket"),
     _s("bbc-tennis", "BBC Sport", "https://feeds.bbci.co.uk/sport/tennis/rss.xml", "sports", "tennis"),
-    _s("espn-nba", "ESPN", "https://www.espn.com/espn/rss/nba/news", "sports", "nba"),
-    _s("espn-nhl", "ESPN", "https://www.espn.com/espn/rss/nhl/news", "sports", "nhl"),
-    _s("espn-soccer", "ESPN", "https://www.espn.com/espn/rss/soccer/news", "sports", "soccer"),
-    _s("bbc-football", "BBC Sport", "https://feeds.bbci.co.uk/sport/football/rss.xml", "sports", "soccer"),
-    _s("bbc-f1", "BBC Sport", "https://feeds.bbci.co.uk/sport/formula1/rss.xml", "sports", "f1"),
     # Technology
     _s("ars-gadgets", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/gadgets", "tech", "gadgets"),
     _s("ars", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "tech"),

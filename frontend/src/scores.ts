@@ -154,7 +154,36 @@ export interface ScoreView {
   nfl: Game[];
   tennis: { tournament: string; matches: Match[] }[];  // one group per tournament, in order
   cricket: CricketMatch[];
+  total: { nfl: number; tennis: number; cricket: number };  // how many there are in all, for "Show all" under All
 }
+
+export interface LiveCard {
+  key: string;
+  sport: string;  // "NFL", "Cricket", or the tournament for tennis
+  rows: { name: string; score: string }[];  // one per side; empty for cricket, whose line is plain text
+  line: string;  // the plain cricket line, else ''
+  note: string;  // the clock or set, e.g. "Q3 4:12"
+  url: string | undefined;
+}
+
+/** Everything in play right now, across sports, for the "Live now" strip. Nothing when the scores are stale. */
+export function liveNow(scores: Scores | undefined, now: Date): LiveCard[] {
+  if (!scores || !isFresh(scores.generated, now)) return [];
+  const cards: LiveCard[] = [];
+  for (const g of scores.nfl) {
+    if (g.state === 'live') cards.push({ key: `nfl-${g.id}`, sport: 'NFL', rows: [g.away, g.home].map((t) => ({ name: t.name, score: t.score === null ? '' : String(t.score) })), line: '', note: g.detail, url: g.url });
+  }
+  for (const m of scores.tennis) {
+    if (m.state === 'live') cards.push({ key: `tennis-${m.id}`, sport: m.tournament || 'Tennis', rows: m.players.map((p) => ({ name: p.name, score: p.sets.join(' ') })), line: '', note: m.detail, url: undefined });
+  }
+  for (const c of scores.cricket) {
+    if (c.live) cards.push({ key: `cricket-${c.id}`, sport: 'Cricket', rows: [], line: c.line, note: '', url: c.url });
+  }
+  return cards;
+}
+
+/** A "Team v Team" line with no score (a number standing on its own, so "U19" does not count) and no star is a fixture that has not started. */
+export const cricketUpcoming = (c: CricketMatch): boolean => !c.live && / v /.test(c.line) && !/(^|\s)\d+(\/\d+)?(\s|$)/.test(c.line);
 
 /** What the Sports tab shows for `sub` (every sport under All, or the chosen one); undefined when there is nothing to show
  * at all: no scores file, or a sub-topic that has no scores. */
@@ -162,8 +191,9 @@ export function scoresFor(scores: Scores | undefined, sub: string | undefined, n
   if (!scores) return undefined;
   const only = sub ? SPORT_OF.get(sub) : undefined;
   if (sub && !only) return undefined;
-  const view: ScoreView = { stale: !isFresh(scores.generated, now), down: [], nfl: [], tennis: [], cricket: [] };
+  const view: ScoreView = { stale: !isFresh(scores.generated, now), down: [], nfl: [], tennis: [], cricket: [], total: { nfl: 0, tennis: 0, cricket: 0 } };
   if (view.stale) return view;
+  view.total = { nfl: scores.nfl.length, tennis: scores.tennis.length, cricket: scores.cricket.length };
   const cap = LIMITS[sub ? 'one' : 'all'];
   const shown = (sport: Sport) => !only || only === sport;
   view.down = scores.down.filter(shown).map((k) => LABELS[k]);

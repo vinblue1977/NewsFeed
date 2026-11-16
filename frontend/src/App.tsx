@@ -10,7 +10,7 @@ import { dayRange, formatMove, historyChange, isFresh as marketsFresh, isMarketN
 import { usePullToRefresh } from './pull';
 import { loadSettings, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources } from './settings';
 import type { Feed, Item, Topic } from './types';
-import { type CricketMatch, type Game, hasScores, type Match, type ScoreView, scoresFor, type Scores } from './scores';
+import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores } from './scores';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
@@ -236,10 +236,10 @@ function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; curren
   return (
     <nav class={hidden ? 'tabbar hide' : 'tabbar'} aria-label="Sections">
       {link('home', '#', 'For you')}
-      {link('discovery', '#/discovery', BROWSE)}
       {link('local', '#/local', 'Local')}
       {link('sports', '#/sports', 'Sports')}
       {link('markets', '#/markets', 'Markets')}
+      {link('discovery', '#/discovery', BROWSE)}
     </nav>
   );
 }
@@ -416,26 +416,55 @@ function MatchRow({ m }: { m: Match }) {
 }
 
 function CricketRow({ c }: { c: CricketMatch }) {
-  const body = <><div class="teams"><div><span class="wrap">{c.line}</span></div></div>{c.live && <div class="st live"><b>LIVE</b></div>}</>;
+  const body = <><div class="ln">{c.line}</div>{c.live ? <div class="st live"><b>LIVE</b></div> : cricketUpcoming(c) && <div class="st"><span>Upcoming</span></div>}</>;
   return c.url ? <a class="g" href={c.url} {...EXTERNAL}>{body}</a> : <div class="g">{body}</div>;
 }
 
-/** The scores part of the Sports tab: rows per sport, or a note when they are out of date or could not be read. */
-function ScoresPanel({ view, generated, now }: { view: ScoreView; generated: string; now: Date }) {
-  if (view.stale) return <p class="note warn">Scores are out of date (updated {timeAgo(generated, now)}).</p>;
+/** The "Live now" strip: a card per match in play, across every sport, scrolling sideways. */
+function LiveStrip({ cards }: { cards: LiveCard[] }) {
+  if (cards.length === 0) return null;
   return (
     <>
-      {view.down.length > 0 && <p class="note">{view.down.join(' and ')} scores are unavailable right now.</p>}
-      {view.nfl.length > 0 && (<><div class="grp">NFL</div><div class="sc">{view.nfl.map((g) => <GameRow key={g.id} g={g} />)}</div></>)}
-      {view.tennis.map((t) => (
-        <div key={t.tournament}><div class="grp">{t.tournament || 'Tennis'}</div><div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div></div>
-      ))}
-      {view.cricket.length > 0 && (<><div class="grp">Cricket</div><div class="sc">{view.cricket.map((c) => <CricketRow key={c.id} c={c} />)}</div></>)}
+      <div class="grp">Live now<span class="cnt">{cards.length} {cards.length === 1 ? 'match' : 'matches'}</span></div>
+      <div class="strip">
+        {cards.map((c) => {
+          const body = (
+            <>
+              <div class="top"><span>{c.sport}</span><i>Live</i></div>
+              {c.rows.map((r, i) => <div class="r" key={i}><span>{r.name}</span><b>{r.score}</b></div>)}
+              {c.line && <div class="cl">{c.line}</div>}
+              {c.note && <div class="sub">{c.note}</div>}
+            </>
+          );
+          return c.url ? <a key={c.key} class="lc" href={c.url} {...EXTERNAL}>{body}</a> : <div key={c.key} class="lc">{body}</div>;
+        })}
+      </div>
     </>
   );
 }
 
-/** Every sports story, newest first, with a chip per sub-topic (NFL, soccer, cricket...). */
+/** A section heading; under All it links to the sport's own list when more rows exist than are shown. */
+function Group({ title, sport, shown, total, all }: { title: string; sport?: string; shown: number; total: number; all: boolean }) {
+  return <div class="grp">{title}{all && sport && total > shown && <a class="cnt" href={`#/sports/${sport}`}>All {total}</a>}</div>;
+}
+
+/** The scores part of the Sports tab: rows per sport, or a note when they are out of date or could not be read. */
+function ScoresPanel({ view, generated, now, all }: { view: ScoreView; generated: string; now: Date; all: boolean }) {
+  if (view.stale) return <p class="note warn">Scores are out of date (updated {timeAgo(generated, now)}).</p>;
+  const tennisShown = view.tennis.reduce((n, g) => n + g.matches.length, 0);
+  return (
+    <>
+      {view.down.length > 0 && <p class="note">{view.down.join(' and ')} scores are unavailable right now.</p>}
+      {view.nfl.length > 0 && (<><Group title="NFL" sport="nfl" shown={view.nfl.length} total={view.total.nfl} all={all} /><div class="sc">{view.nfl.map((g) => <GameRow key={g.id} g={g} />)}</div></>)}
+      {view.tennis.map((t, i) => (
+        <div key={t.tournament}><Group title={t.tournament || 'Tennis'} sport="tennis" shown={tennisShown} total={view.total.tennis} all={all && i === view.tennis.length - 1} /><div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div></div>
+      ))}
+      {view.cricket.length > 0 && (<><Group title="Cricket" sport="cricket" shown={view.cricket.length} total={view.total.cricket} all={all} /><div class="sc">{view.cricket.map((c) => <CricketRow key={c.id} c={c} />)}</div></>)}
+    </>
+  );
+}
+
+/** Every sports story, newest first, with a chip per sub-topic (NFL, cricket, tennis). */
 function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
   feed: Feed | undefined; scores: Scores | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
@@ -443,6 +472,7 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
   const subs = useMemo(() => subtopicsOf(all), [all]);
   const list = useMemo(() => (sub ? all.filter((s) => s.item.subtopic === sub) : all), [all, sub]);
   const scoreView = useMemo(() => scoresFor(scores, sub, now), [scores, sub, now]);
+  const live = useMemo(() => liveNow(scores, now), [scores, now]);
   const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/sports/${next}` : '#/sports'; };
   return (
     <div class="wrap">
@@ -454,7 +484,8 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
         ))}
         {sub && !subs.includes(sub) && <button type="button" class="on" aria-pressed="true">{subtopicLabel(sub)}</button>}
       </nav>
-      {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} />}
+      {!sub && <LiveStrip cards={live} />}
+      {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} all={!sub} />}
       {!feed && !failed && !loaded && <p class="note">Loading sports…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -462,7 +493,7 @@ function SportsScreen({ feed, scores, loaded, failed, now, sub, shown, onMore, o
       )}
       {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
       {feed && list.length === 0 && <div class="empty"><b>No sports stories yet</b><span>{sub ? 'Nothing in this sport right now.' : 'Sports stories appear here.'}</span></div>}
-      {list.length > 0 && hasScores(scoreView) && <div class="grp">Stories</div>}
+      {list.length > 0 && hasScores(scoreView) && <div class="grp">Top stories</div>}
       {list.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
       {list.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
     </div>

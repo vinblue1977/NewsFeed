@@ -193,7 +193,7 @@ def test_source_list_is_sane() -> None:
     headline_only = {s.id for s in SOURCES if s.headline_only}
     assert headline_only == {"gn-ap", "gn-cnn", "gn-reuters"}
     assert all(urlsplit(s.url).hostname == "news.google.com" for s in SOURCES if s.id in headline_only)
-    assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis", "nba", "nhl", "soccer", "f1"}
+    assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
 
 
 ITEM = "<item><title>T</title><link>https://e.com/a</link><pubDate>Fri, 13 Nov 2026 12:00:00 GMT</pubDate>{extra}</item>"
