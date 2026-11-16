@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -293,5 +293,47 @@ describe('teamStories', () => {
     const list = [mk('a', 'Bears rally late'), mk('b', 'Lions win'), mk('c', 'Why the bears hibernate')];
     expect(teamStories(list, (t) => /bears/i.test(t)).map((s) => s.item.id)).toEqual(['a', 'c']);
     expect(teamStories(list, null)).toEqual([]);
+  });
+});
+
+describe('byBreaking', () => {
+  const now = new Date('2026-11-16T12:00:00Z');
+  const mk = (id: string, published: string, sources = 1) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic: 'sports' as const }, cluster: undefined, sources });
+  const hoursAgo = (h: number) => new Date(now.getTime() - h * 3600_000).toISOString();
+  const ids = (list: ReturnType<typeof mk>[]) => byBreaking(list, now).map((s) => s.item.id);
+
+  it('keeps plain newest-first order when every story has one source', () => {
+    expect(ids([mk('old', hoursAgo(5)), mk('new', hoursAgo(1)), mk('mid', hoursAgo(3))])).toEqual(['new', 'mid', 'old']);
+  });
+
+  it('lifts a widely covered story, a little less the older it is', () => {
+    // covered3 (4h old, 2 extra sources) ranks about 0.7h ago and covered2 (2.5h old, 1 extra) about 0.7h ago: both above the 1h story
+    expect(ids([mk('fresh', hoursAgo(1)), mk('covered3', hoursAgo(4), 3), mk('covered2', hoursAgo(2.5), 2)])).toEqual(['covered3', 'covered2', 'fresh']);
+  });
+
+  it('caps the lift at three extra sources and gives a day-old story none', () => {
+    // huge (10h, 9 sources) ranks as 10h - 3.5h = 6.5h ago: behind the 3h story. The two over a day old have no lift.
+    expect(ids([mk('huge', hoursAgo(10), 9), mk('new', hoursAgo(3)), mk('stale', hoursAgo(30), 4), mk('newer', hoursAgo(29))])).toEqual(['new', 'huge', 'newer', 'stale']);
+  });
+
+  it('fades smoothly: a story does not jump when it reaches a day old', () => {
+    const before = ids([mk('wide', hoursAgo(23.9), 5), mk('b', hoursAgo(20))]);
+    const after = ids([mk('wide', hoursAgo(24.1), 5), mk('b', hoursAgo(20))]);
+    expect(before).toEqual(['b', 'wide']);
+    expect(after).toEqual(before);  // no change across the 24 hour mark
+  });
+
+  it('treats a future date as just now and a bad source count as one source', () => {
+    expect(ids([mk('now', hoursAgo(0.5)), mk('future', new Date(now.getTime() + 3600_000).toISOString())])).toEqual(['future', 'now']);
+    const odd = [mk('nan', hoursAgo(2), Number.NaN), mk('inf', hoursAgo(3), Number.POSITIVE_INFINITY), mk('neg', hoursAgo(4), -3), mk('one', hoursAgo(1))];
+    expect(ids(odd)).toEqual(['one', 'nan', 'inf', 'neg']);
+  });
+
+  it('sorts an unreadable date last, keeps input order on ties, and does not change the input', () => {
+    const list = [mk('bad1', 'not a date', 3), mk('ok', hoursAgo(2)), mk('bad2', 'also bad')];
+    const copy = [...list];
+    expect(ids(list)).toEqual(['ok', 'bad1', 'bad2']);
+    expect(list).toEqual(copy);
+    expect(byBreaking([], now)).toEqual([]);
   });
 });
