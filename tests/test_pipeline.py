@@ -313,6 +313,45 @@ def test_only_google_news_local_feeds_are_trusted() -> None:
     assert [s.trusted for s in made] == [True, False]
 
 
+def test_a_publisher_limited_google_search_is_checked_for_a_place() -> None:
+    made = local_sources(
+        [
+            "https://news.google.com/rss/search?q=%22Buffalo+Grove%22+when%3A2d",  # scoped to the places: trusted
+            "https://news.google.com/rss/search?q=site%3Adailyherald.com+%28%22Buffalo+Grove%22%29+when%3A3d",
+            "https://news.google.com/rss/search?q=site:patch.com+Palatine",
+            "https://news.google.com/rss/search?q=SITE%3APatch.com",  # any case
+        ]
+    )
+    assert [s.trusted for s in made] == [True, False, False, False]
+
+
+def test_only_a_real_publisher_limit_makes_a_search_checked() -> None:
+    made = local_sources(
+        [
+            "https://news.google.com/rss/search?q=%22Buffalo+Grove%22+-site%3Ayoutube.com",  # a negation is not a limit
+            "https://news.google.com/rss/search?q=website%3Aexample+Palatine",  # nor is another word ending in "site"
+            "https://news.google.com/rss/search?q=inurl%3Apatch.com+Palatine",
+            "https://news.google.com/rss/search?q=source%3APatch+Palatine",
+            "https://www.google.com/rss/search?q=site%3Apatch.com",  # not Google News: checked like any feed
+        ]
+    )
+    assert [s.trusted for s in made] == [True, True, False, False, False]
+
+
+def test_a_publisher_limited_search_drops_items_that_name_no_place() -> None:
+    when = b"<pubDate>Mon, 16 Nov 2026 01:00:00 GMT</pubDate>"
+    xml = (
+        b"<rss><channel>"
+        b"<item><title>Buffalo Grove trustees vote</title><link>https://a.example/1</link>" + when + b"</item>"
+        b"<item><title>Council approves budget</title><link>https://a.example/2</link>" + when + b"</item>"
+        b"</channel></rss>"
+    )
+    source = local_sources(["https://news.google.com/rss/search?q=site%3Aa.example+%22Buffalo+Grove%22"])[0]
+    now = datetime(2026, 11, 16, 2, 0, tzinfo=UTC)
+    items, _ = collect([source], ["Buffalo Grove"], now=now, fetcher=lambda _url: xml)
+    assert [i["title"] for i in items] == ["Buffalo Grove trustees vote"]
+
+
 def test_previous_state_reads_the_last_feed_and_fails_soft(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATA_BUCKET", "bucket")
     monkeypatch.setenv("DATA_PREFIX", "data")

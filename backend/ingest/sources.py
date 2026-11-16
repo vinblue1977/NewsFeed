@@ -18,7 +18,9 @@ class Source:
     metered: bool = False
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
     site: str | None = None  # Google News `site:` query: the publisher's domain when an item has no <source>
-    trusted: bool = False  # a search the query already scoped (local Google News): skip the nearby-place filter
+    trusted: bool = (
+        False  # a Google News search already scoped to the places (not one limited to a publisher): skip the place filter
+    )
     sitemap: bool = False  # the URL is a Google News sitemap (title, link, time), not RSS or Atom
 
 
