@@ -195,6 +195,9 @@ class NewsStack(Stack):
         fn.add_to_role_policy(  # last run's private earnings file (named from a secret: only the prefix is known)
             iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/earn-*")])
         )
+        fn.add_to_role_policy(  # last run's NFL schedule, so it is rebuilt only every few hours
+            iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/schedule.json")])
+        )
         fn.add_to_role_policy(  # the saved watchlist symbols
             iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(WATCHLIST_KEY)])
         )

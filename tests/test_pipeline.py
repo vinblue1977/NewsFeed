@@ -123,6 +123,7 @@ def no_side_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handler_module, "build_weather", down)
     monkeypatch.setattr(handler_module, "build_markets", down)
     monkeypatch.setattr(handler_module, "build_scores", down)
+    monkeypatch.setattr(handler_module, "build_schedule", down)
 
 
 def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -677,3 +678,55 @@ def test_local_stories_are_kept_for_a_week_and_other_topics_for_three_days() -> 
     kept_other, _ = collect([other], [], now=now, fetcher=lambda _url: feed(1, 2, 4, 5))
     assert [i["title"] for i in kept_local] == ["Story 1 days old", "Story 5 days old", "Story 6 days old"]  # 8 days: too old
     assert [i["title"] for i in kept_other] == ["Story 1 days old", "Story 2 days old"]  # 4 days: past the 72 hours
+
+
+class NoSchedule(FakeS3):
+    """A store where the schedule file does not exist yet (a clean not-found, unlike the base fake's generic error)."""
+
+    def get_object(self, **kw: Any) -> Any:
+        if kw["Key"] == "data/schedule.json":
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return super().get_object(**kw)
+
+
+def test_the_schedule_is_written_publicly_when_missing_and_not_rebuilt_while_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = NoSchedule()
+    _weather_handler_setup(monkeypatch, s3)
+    doc = {"generated": datetime.now(UTC).isoformat(), "week": 11, "games": []}
+    monkeypatch.setattr(handler_module, "build_schedule", lambda: doc)
+    result = handler_module.handler({}, object())
+    assert result["schedule"] == "ok"
+    assert json.loads(next(p for p in s3.puts if p["Key"] == "data/schedule.json")["Body"]) == doc
+
+    class Fresh(FakeS3):
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == "data/schedule.json":
+                return {"Body": io.BytesIO(json.dumps(doc).encode())}
+            return super().get_object(**kw)
+
+    fresh = Fresh()
+    _weather_handler_setup(monkeypatch, fresh)
+    calls: list[int] = []
+    monkeypatch.setattr(handler_module, "build_schedule", lambda: calls.append(1))
+    assert handler_module.handler({}, object())["schedule"] == "fresh"
+    assert calls == [] and not any(p["Key"] == "data/schedule.json" for p in fresh.puts)
+
+
+def test_an_unreadable_schedule_file_is_not_rebuilt_and_a_failed_build_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Denied(FakeS3):
+        def get_object(self, **kw: Any) -> Any:
+            if kw["Key"] == "data/schedule.json":
+                raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+            return super().get_object(**kw)
+
+    denied = Denied()
+    _weather_handler_setup(monkeypatch, denied)
+    calls: list[int] = []
+    monkeypatch.setattr(handler_module, "build_schedule", lambda: calls.append(1))
+    assert handler_module.handler({}, object())["schedule"] == "fresh" and calls == []  # nothing asked of ESPN
+
+    broken = NoSchedule()
+    _weather_handler_setup(monkeypatch, broken)  # missing file: due, but ESPN is down (the fixture's default)
+    result = handler_module.handler({}, object())
+    assert result["schedule"] == "failed" and result["status"] == "ok"
+    assert not any(p["Key"] == "data/schedule.json" for p in broken.puts)
