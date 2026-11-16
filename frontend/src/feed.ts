@@ -278,6 +278,28 @@ export function subtopicsOf(list: Story[]): string[] {
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
 }
 
+export interface SportSection {
+  sub: string;
+  label: string;
+  color: string;
+  lead: Story;
+  more: Story[];
+  total: number;
+}
+
+const SPORT_COLORS = new Map<string, string>([['nfl', '#5b86c9'], ['cricket', '#3fb6a8'], ['tennis', '#e0a53f']]);
+
+/** The Sports tab's sections, one per sport: the story with a picture leads, then up to two more, most stories first. A story
+ * without a sub-topic is left out. */
+export function sportSections(list: Story[]): SportSection[] {
+  return subtopicsOf(list).flatMap((sub) => {
+    const here = list.filter((s) => s.item.subtopic === sub);
+    const lead = here.find((s) => imageSrc(s.item)) ?? here[0];
+    if (!lead) return [];
+    return [{ sub, label: subtopicLabel(sub), color: SPORT_COLORS.get(sub) ?? '#8a8f98', lead, more: here.filter((s) => s !== lead).slice(0, PER_SECTION - 1), total: here.length }];
+  });
+}
+
 /** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */
 export function storyLink(story: Story): string {
   return story.cluster && story.sources > 1 ? `#/story/${story.cluster.id}` : `#/read/${story.item.id}`;
