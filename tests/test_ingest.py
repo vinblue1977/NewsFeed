@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from ingest.config import ConfigError, cached_location, load_location, parse_location
+from ingest.config import LOCATION_TTL_SECONDS, ConfigError, cached_location, load_location, parse_location, reset_location_cache
 
 LOCATION = {"town": "Exampleville", "lat": 40.0, "lon": -90.0, "nearby": ["Springfield"], "feeds": ["https://example.com/rss"]}
 
@@ -55,13 +55,47 @@ def test_load_location_creates_a_client_when_none_given(monkeypatch: pytest.Monk
     assert load_location()["town"] == "Exampleville"
 
 
-def test_cached_location_reads_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[int] = []
-    monkeypatch.setattr("ingest.config.load_location", lambda: calls.append(1) or LOCATION)
-    cached_location.cache_clear()
-    assert cached_location() == cached_location() == LOCATION
-    assert len(calls) == 1
-    cached_location.cache_clear()
+def test_cached_location_is_reread_only_after_the_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [1000.0]
+    reads: list[dict] = []
+
+    def load() -> dict:
+        reads.append({**LOCATION, "town": f"read{len(reads) + 1}"})
+        return reads[-1]
+
+    monkeypatch.setattr("ingest.config.load_location", load)
+    monkeypatch.setattr("ingest.config.time.monotonic", lambda: clock[0])
+    reset_location_cache()
+    assert cached_location()["town"] == "read1" and cached_location()["town"] == "read1"
+    assert len(reads) == 1
+    clock[0] += LOCATION_TTL_SECONDS - 1
+    assert cached_location()["town"] == "read1"
+    clock[0] += 2  # past the TTL: an edit made meanwhile is picked up
+    assert cached_location()["town"] == "read2"
+    reset_location_cache()
+
+
+def test_a_failed_refresh_keeps_the_last_good_location_but_a_failed_first_read_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [1000.0]
+    ok = [True]
+
+    def load() -> dict:
+        if not ok[0]:
+            raise ConfigError("ssm is down")
+        return LOCATION
+
+    monkeypatch.setattr("ingest.config.load_location", load)
+    monkeypatch.setattr("ingest.config.time.monotonic", lambda: clock[0])
+    reset_location_cache()
+    ok[0] = False
+    with pytest.raises(ConfigError):
+        cached_location()  # nothing cached yet: the failure is raised, and not remembered
+    ok[0] = True
+    assert cached_location() == LOCATION
+    ok[0] = False
+    clock[0] += LOCATION_TTL_SECONDS + 1
+    assert cached_location() == LOCATION  # the refresh failed: the last good value is used
+    reset_location_cache()
 
 
 def test_parse_location_accepts_an_optional_watch_key() -> None:

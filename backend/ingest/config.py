@@ -4,12 +4,16 @@ it lives in one SSM Parameter Store parameter that is created by hand and read h
 import functools
 import hashlib
 import json
+import logging
 import math
 import os
 import re
+import time
 from typing import Any
 
 import boto3
+
+logger = logging.getLogger()
 
 LOCATION_PARAM_ENV = "LOCATION_PARAM"
 SYMBOL = re.compile(r"[A-Za-z0-9^][A-Za-z0-9.^=_-]{0,14}")  # a quote symbol: starts with a letter, digit or ^, then . ^ = _ - too
@@ -72,7 +76,28 @@ def load_location(ssm: Any = None) -> dict[str, Any]:
     return parse_location(client.get_parameter(Name=name)["Parameter"]["Value"])
 
 
-@functools.cache
+LOCATION_TTL_SECONDS = 600  # an edit to the parameter reaches a warm container within this long
+_location: tuple[float, dict[str, Any]] | None = None
+
+
+def reset_location_cache() -> None:
+    global _location
+    _location = None
+
+
 def cached_location() -> dict[str, Any]:
-    """The location, read once per Lambda container (a failure is not cached, so a fixed parameter is picked up)."""
-    return load_location()
+    """The location, re-read at most every LOCATION_TTL_SECONDS (a warm Lambda container lives for hours, and the parameter is
+    edited by hand). A failed refresh keeps the last good value; a failed first read raises and is not cached."""
+    global _location
+    now = time.monotonic()
+    if _location is not None and now - _location[0] < LOCATION_TTL_SECONDS:
+        return _location[1]
+    try:
+        loaded = load_location()
+    except Exception:
+        if _location is None:
+            raise
+        logger.warning("could not refresh the location parameter; using the last good value")
+        return _location[1]
+    _location = (now, loaded)
+    return loaded
