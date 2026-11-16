@@ -12,6 +12,7 @@ from ingest.filters import block_reason
 from ingest.sources import Source
 
 MAX_AGE = timedelta(hours=72)
+MAX_AGE_LOCAL = timedelta(days=7)  # a suburb has few stories a day, so Local keeps a week (its Earlier section shows them)
 MAX_FUTURE = timedelta(hours=12)  # a small clock or timezone slip is clamped; more than this is bogus and dropped
 MAX_PER_SOURCE = 40
 WORKERS = 8
@@ -95,7 +96,7 @@ def collect(
             if kept >= MAX_PER_SOURCE:  # the cap counts stories that survive the filters, not raw entries
                 break
             published = datetime.fromisoformat(item["published"])
-            if now - published > MAX_AGE:
+            if now - published > (MAX_AGE_LOCAL if source.topic == "local" else MAX_AGE):
                 continue
             if published - now > MAX_FUTURE:
                 continue

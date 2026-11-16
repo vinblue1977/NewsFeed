@@ -1,6 +1,6 @@
 import io
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import boto3
@@ -659,3 +659,21 @@ def test_an_unreadable_list_at_write_time_does_not_discard_the_quotes(monkeypatc
     s3 = Flaky(["AAA"])
     _watch_setup(monkeypatch, s3, OPEN)
     assert handler_module.handler({}, object())["markets"] == "ok"
+
+
+def test_local_stories_are_kept_for_a_week_and_other_topics_for_three_days() -> None:
+    now = datetime(2026, 11, 16, 2, 0, tzinfo=UTC)
+
+    def feed(*days: int) -> bytes:
+        def row(d: int) -> str:
+            when = (now - timedelta(days=d)).strftime("%a, %d %b %Y %H:%M:%S GMT")
+            return f"<item><title>Story {d} days old</title><link>https://a.example/{d}</link><pubDate>{when}</pubDate></item>"
+
+        return f"<rss><channel>{''.join(row(d) for d in days)}</channel></rss>".encode()
+
+    local = Source("l", "Local", "https://a.example/l", "local", trusted=True)
+    other = Source("o", "Other", "https://a.example/o", "us")
+    kept_local, _ = collect([local], [], now=now, fetcher=lambda _url: feed(1, 5, 6, 8))
+    kept_other, _ = collect([other], [], now=now, fetcher=lambda _url: feed(1, 2, 4, 5))
+    assert [i["title"] for i in kept_local] == ["Story 1 days old", "Story 5 days old", "Story 6 days old"]  # 8 days: too old
+    assert [i["title"] for i in kept_other] == ["Story 1 days old", "Story 2 days old"]  # 4 days: past the 72 hours
