@@ -19,6 +19,7 @@ class Source:
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
     site: str | None = None  # Google News `site:` query: the publisher's domain when an item has no <source>
     trusted: bool = False  # a search the query already scoped (local Google News): skip the nearby-place filter
+    sitemap: bool = False  # the URL is a Google News sitemap (title, link, time), not RSS or Atom
 
 
 def _s(id: str, name: str, url: str, topic: str, subtopic: str | None = None, *, metered: bool = False) -> Source:  # noqa: A002
@@ -53,6 +54,9 @@ SOURCES: tuple[Source, ...] = (
     _s("thehindu", "The Hindu", "https://www.thehindu.com/news/national/feeder/default.rss", "india", metered=True),
     _s("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "india"),
     # Sports
+    Source(
+        "nfl-com", "NFL.com", "https://www.nfl.com/sitemap-fast-changing.xml", "sports", "nfl", headline_only=True, sitemap=True
+    ),
     _s("espn-nfl", "ESPN", "https://www.espn.com/espn/rss/nfl/news", "sports", "nfl"),
     _s("cricinfo", "ESPNcricinfo", "https://www.espncricinfo.com/rss/content/story/feeds/0.xml", "sports", "cricket"),
     _s("guardian-tennis", "The Guardian", "https://www.theguardian.com/sport/tennis/rss", "sports", "tennis"),

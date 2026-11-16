@@ -17,6 +17,7 @@ from ingest.config import cached_location, watch_name
 from ingest.espn_pictures import add_pictures
 from ingest.images import attach_images, known_images
 from ingest.markets import build_markets
+from ingest.page_pictures import add_page_pictures
 from ingest.pipeline import collect, local_sources
 from ingest.scores import build_scores
 from ingest.sources import SOURCES
@@ -39,10 +40,13 @@ def previous_state(s3: Any) -> tuple[dict[str, str], dict[str, str]]:
         return {}, {}
 
 
-def build_feed(location: dict[str, Any], previous: dict[str, str] | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+def build_feed(
+    location: dict[str, Any], previous: dict[str, str] | None = None, pictures: dict[str, str] | None = None
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """The feed and the articles document (None if it could not be built). Items flagged `full` are exactly those in it."""
     items, status = collect([*SOURCES, *local_sources(location["feeds"])], location["nearby"])
     add_pictures(items)  # ESPN's RSS has none; its news API does (fail-soft)
+    add_page_pictures(items, pictures)  # NFL.com's sitemap has none; its story pages do (new stories only, fail-soft)
     bodies = {i["id"]: i.pop("_html") for i in items if "_html" in i}  # the raw HTML never goes into feed.json or clustering
     try:
         clusters = cluster_items(items, previous)
@@ -150,7 +154,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     articles_status = "failed"
     try:
         clusters_before, images_before = previous_state(s3)
-        feed, articles = build_feed(location, clusters_before)
+        feed, articles = build_feed(location, clusters_before, images_before)
         failed = [sid for sid, s in feed["sources"].items() if not s["ok"]]
         if len(failed) * 2 > len(feed["sources"]) or not feed["items"]:  # a bad run must not replace a good feed
             raise RuntimeError(f"{len(failed)} of {len(feed['sources'])} sources failed; keeping the previous feed")
