@@ -443,18 +443,18 @@ function LiveStrip({ title, cards }: { title: string; cards: LiveCard[] }) {
   );
 }
 
-/** A score section's heading. Under All it folds the section (state kept on the phone) and links to the sport's own list when
- * more rows exist than are shown; under a sport chip it is a plain heading. */
-function Group({ title, sport, shown, total, all, folded, onFold }: {
-  title: string; sport?: string; shown: number; total: number; all: boolean; folded?: boolean; onFold?: (sport: string) => void;
+/** A score section's heading. It folds the section (the choice is kept on the phone); under All it also links to the sport's own
+ * list when more rows exist than are shown. */
+function Group({ title, sport, shown, total, all, foldable = true, folded, onFold }: {
+  title: string; sport?: string; shown: number; total: number; all: boolean; foldable?: boolean; folded?: boolean; onFold?: (sport: string) => void;
 }) {
-  if (!all || !sport || !onFold) return <div class="grp">{title}</div>;
+  if (!foldable || !sport || !onFold) return <div class="grp">{title}</div>;
   return (
     <div class="grp ghead">
       <button type="button" class="gfold" aria-expanded={!folded} onClick={() => onFold(sport)}>
         <span>{title}{folded ? ` · ${total}` : ''}</span><span class={`chev${folded ? '' : ' open'}`} aria-hidden="true">›</span>
       </button>
-      {!folded && total > shown && <a class="cnt" href={`#/sports/${sport}`}>All {total}</a>}
+      {all && !folded && total > shown && <a class="cnt" href={`#/sports/${sport}`}>All {total}</a>}
     </div>
   );
 }
@@ -465,7 +465,7 @@ function ScoresPanel({ view, generated, now, all, collapsed, onFold }: {
 }) {
   if (view.stale) return <p class="note warn">Scores are out of date (updated {timeAgo(generated, now)}).</p>;
   const tennisShown = view.tennis.reduce((n, g) => n + g.matches.length, 0);
-  const folded = (sport: string) => all && collapsed.includes(sport);
+  const folded = (sport: string) => collapsed.includes(sport);
   const tennis = folded('tennis') ? view.tennis.slice(0, 1) : view.tennis;  // folded: one heading for the whole sport
   return (
     <>
@@ -476,19 +476,19 @@ function ScoresPanel({ view, generated, now, all, collapsed, onFold }: {
           {!folded('nfl') && <div class="sc">{view.nfl.map((g) => <GameRow key={g.id} g={g} />)}</div>}
         </>
       )}
-      {tennis.map((t, i) => (  // only the first tournament's heading folds the sport and links to its list
-        <div key={t.tournament}>
-          <Group title={folded('tennis') ? 'Tennis' : t.tournament || 'Tennis'} sport="tennis" shown={tennisShown} total={view.total.tennis}
-            all={all && i === 0} folded={folded('tennis')} onFold={onFold} />
-          {!folded('tennis') && <div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div>}
-        </div>
-      ))}
       {view.cricket.length > 0 && (
         <>
           <Group title="Cricket" sport="cricket" shown={view.cricket.length} total={view.total.cricket} all={all} folded={folded('cricket')} onFold={onFold} />
           {!folded('cricket') && <div class="sc">{view.cricket.map((c) => <CricketRow key={c.id} c={c} />)}</div>}
         </>
       )}
+      {tennis.map((t, i) => (  // only the first tournament's heading folds the sport (and, under All, links to its list)
+        <div key={t.tournament}>
+          <Group title={folded('tennis') ? 'Tennis' : t.tournament || 'Tennis'} sport="tennis" shown={tennisShown} total={view.total.tennis}
+            all={all && i === 0} foldable={i === 0} folded={folded('tennis')} onFold={onFold} />
+          {!folded('tennis') && <div class="sc">{t.matches.map((m) => <MatchRow key={m.id} m={m} />)}</div>}
+        </div>
+      ))}
     </>
   );
 }
