@@ -129,6 +129,8 @@ describe('my teams', () => {
     expect(has?.('india beat Indiana')).toBe(true);
     expect(has?.('Indiana Hoosiers')).toBe(false);
     expect(has?.('Chicago BEARS')).toBe(true);
+    expect(teamMatcher(['Man  City'])?.('Man\u00a0City win')).toBe(true);  // any run of whitespace, a non-breaking space too
+    expect(has?.('Bears')).toBe(true);  // at the very start
     expect(teamMatcher([])).toBeNull();
     expect(teamMatcher(['  '])).toBeNull();
     expect(teamMatcher(['C++ (x)'])?.('C++ (x) wins')).toBe(true);  // names are text, not patterns

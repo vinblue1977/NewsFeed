@@ -240,3 +240,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .trow { display: flex; gap: 8px; align-items: center; }
 .trow input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
 .tsug { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.ghead { padding-top: 0; padding-bottom: 0; align-items: center; }
+.gfold { flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: flex-start; gap: 6px; background: none; border: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; text-align: left; cursor: pointer; }
+.gfold:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 6px; }
+.gfold .chev { font-size: 18px; letter-spacing: 0; transition: transform .15s; }
+.gfold .chev.open { transform: rotate(90deg); }

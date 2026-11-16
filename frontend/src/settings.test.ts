@@ -22,9 +22,11 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, watchKey: '' });
+    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '' });
     expect(parseSettings(JSON.stringify({ watchCollapsed: true })).watchCollapsed).toBe(true);
     expect(parseSettings(JSON.stringify({ watchCollapsed: 'yes' })).watchCollapsed).toBe(false);
+    expect(parseSettings(JSON.stringify({ scoresCollapsed: ['nfl', 'bogus', 5, 'nfl', 'cricket'] })).scoresCollapsed).toEqual(['nfl', 'cricket']);
+    expect(parseSettings(JSON.stringify({ scoresCollapsed: 'nfl' })).scoresCollapsed).toEqual([]);
     expect(parseSettings(JSON.stringify({ watchKey: 'a1b2c3d4e5f6a7b8' })).watchKey).toBe('a1b2c3d4e5f6a7b8');
     for (const bad of ['short', 'UPPERCASEUPPERCASE', '../data/feed', 5, '']) expect(parseSettings(JSON.stringify({ watchKey: bad })).watchKey).toBe('');
     expect(parseSettings(JSON.stringify({ textSize: 'huge' })).textSize).toBe('medium');
@@ -62,6 +64,7 @@ describe('my teams settings', () => {
   it('keeps clean, short, unique names and a bounded list', () => {
     expect(parseSettings(JSON.stringify({ myTeams: ['Bears', 'Bears', '', 5, 'x'.repeat(41)] })).myTeams).toEqual(['Bears']);
     expect(parseSettings(JSON.stringify({ myTeams: 'Bears' })).myTeams).toEqual([]);
+    expect(parseSettings(JSON.stringify({ myTeams: ['Bears', 'bears', ' New   York '] })).myTeams).toEqual(['Bears', 'New York']);
   });
   it('adds a name once, ignoring case and spacing, and stops at the limit', () => {
     expect(withTeam([], '  New   York  Giants ')).toEqual(['New York Giants']);

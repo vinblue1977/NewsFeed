@@ -8,12 +8,15 @@ export interface Settings {
   hiddenSources: string[];
   hiddenTickers: string[];
   watchCollapsed: boolean;  // the Markets watchlist list is folded away
+  myTeams: string[];  // teams, countries or players to follow on the Sports tab, matched by name
+  scoresCollapsed: string[];  // sports (nfl, tennis, cricket) whose scores are folded away under All on the Sports tab
   watchKey: string;  // names the private watchlist file; empty when not set
 }
 
 export const SETTINGS_KEY = 'news.settings';
 export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
-export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, watchKey: '' };
+export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '' };
+export const SCORE_SPORTS = ['nfl', 'tennis', 'cricket'] as const;
 export const TEXT_SIZES: { id: TextSize; label: string; px: number }[] = [
   { id: 'small', label: 'Small', px: 16 },
   { id: 'medium', label: 'Medium', px: 18 },
@@ -34,7 +37,7 @@ export function parseSettings(raw: string | null): Settings {
     if (!v || typeof v !== 'object') return DEFAULTS;
     const size = TEXT_SIZES.find((t) => t.id === v.textSize)?.id ?? DEFAULTS.textSize;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, myTeams: strings(v.myTeams).filter((x) => x.length <= MAX_TEAM_CHARS).slice(0, MAX_TEAMS), watchKey: key };
+    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key };
   } catch {
     return DEFAULTS;
   }

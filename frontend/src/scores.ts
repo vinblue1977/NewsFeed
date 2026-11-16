@@ -215,11 +215,13 @@ export const hasScores = (v: ScoreView | undefined): boolean => !!v && (v.stale 
 
 const escaped = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** A matcher for the followed names: whole words, any case, so "India" does not match "Indiana". Null when there are none. */
+/** A matcher for the followed names: whole words, any case, spaces in a name matching any run of whitespace, so "India" does
+ * not match "Indiana". Null when there are none. No lookbehind: older iPhones do not support it. */
 export function teamMatcher(terms: string[]): ((text: string) => boolean) | null {
   const usable = terms.map((t) => t.trim()).filter(Boolean);
   if (usable.length === 0) return null;
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${usable.map(escaped).join('|')})(?![\\p{L}\\p{N}])`, 'iu');
+  const names = usable.map((t) => t.split(/\s+/).map(escaped).join('\\s+'));
+  const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:${names.join('|')})(?![\\p{L}\\p{N}])`, 'iu');
   return (text) => re.test(text);
 }
 
@@ -241,7 +243,7 @@ export function teamCards(scores: Scores | undefined, terms: string[], now: Date
   for (const c of scores.cricket) {
     if (has(c.line)) cards.push({ key: `cricket-${c.id}`, state: c.live ? 'live' : cricketUpcoming(c) ? 'pre' : 'final', sport: 'Cricket', rows: [], line: c.line, note: '', url: c.url });
   }
-  return cards.map((c, i) => [i, c] as const).sort((a, b) => RANK[a[1].state] - RANK[b[1].state] || a[0] - b[0]).map(([, c]) => c).slice(0, MY_TEAMS_CARDS);
+  return cards.sort((a, b) => RANK[a.state] - RANK[b.state]).slice(0, MY_TEAMS_CARDS);  // the sort is stable: feed order within a state
 }
 
 const lastWord = (name: string): string => name.trim().split(/\s+/).pop() ?? '';
@@ -254,7 +256,7 @@ export function teamSuggestions(scores: Scores | undefined): string[] {
   for (const g of scores.nfl) names.push(lastWord(g.away.name), lastWord(g.home.name));
   for (const m of scores.tennis) for (const p of m.players) names.push(lastWord(p.name));
   for (const c of scores.cricket) {
-    for (const side of c.line.split(/\s+v\s+/)) names.push(side.replace(/\d+(?:\/\d+)?\*?|&/g, ' ').replace(/\s+/g, ' ').trim());
+    for (const side of c.line.split(/\s+v\s+/)) names.push(side.split(',')[0]?.replace(/\d+(?:\/\d+)?\*?|&/g, ' ').replace(/\s+/g, ' ').trim() ?? '');
   }
   return [...new Map(names.filter((n) => n.length > 1 && n.length <= 40).map((n) => [n.toLowerCase(), n] as const)).values()].slice(0, 30);
 }
