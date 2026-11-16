@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
@@ -335,5 +335,55 @@ describe('byBreaking', () => {
     expect(ids(list)).toEqual(['ok', 'bad1', 'bad2']);
     expect(list).toEqual(copy);
     expect(byBreaking([], now)).toEqual([]);
+  });
+});
+
+describe('mixSources', () => {
+  const mk = (id: string, source: string) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published: '2026-11-16T10:00:00Z', source, topic: 'sports' as const }, cluster: undefined, sources: 1 });
+  const ids = (list: ReturnType<typeof mk>[]) => mixSources(list).map((s) => s.item.id);
+
+  it('breaks a long run from one source with the next story of another', () => {
+    const list = [mk('e1', 'ESPN'), mk('e2', 'ESPN'), mk('e3', 'ESPN'), mk('e4', 'ESPN'), mk('n1', 'NFL.com'), mk('n2', 'NFL.com')];
+    expect(ids(list)).toEqual(['e1', 'e2', 'n1', 'e3', 'e4', 'n2']);
+  });
+
+  it('keeps each source in its own order and drops nothing', () => {
+    const list = [mk('e1', 'ESPN'), mk('e2', 'ESPN'), mk('e3', 'ESPN'), mk('n1', 'NFL.com'), mk('n2', 'NFL.com'), mk('n3', 'NFL.com'), mk('e4', 'ESPN')];
+    const got = ids(list);
+    expect([...got].sort()).toEqual(['e1', 'e2', 'e3', 'e4', 'n1', 'n2', 'n3']);
+    expect(got.filter((i) => i.startsWith('e'))).toEqual(['e1', 'e2', 'e3', 'e4']);
+    expect(got.filter((i) => i.startsWith('n'))).toEqual(['n1', 'n2', 'n3']);
+    expect(got).toEqual(['e1', 'e2', 'n1', 'e3', 'n2', 'n3', 'e4']);
+  });
+
+  it('leaves the order alone when sources already alternate, when there is one source, and for an empty list', () => {
+    const alternating = [mk('e1', 'ESPN'), mk('n1', 'NFL.com'), mk('e2', 'ESPN'), mk('n2', 'NFL.com')];
+    expect(ids(alternating)).toEqual(['e1', 'n1', 'e2', 'n2']);
+    const one = [mk('a', 'ESPN'), mk('b', 'ESPN'), mk('c', 'ESPN'), mk('d', 'ESPN')];
+    expect(ids(one)).toEqual(['a', 'b', 'c', 'd']);
+    expect(mixSources([])).toEqual([]);
+  });
+
+  it('only reaches for another source within the look-ahead', () => {
+    const far = [...Array.from({ length: 10 }, (_, i) => mk('e' + i, 'ESPN')), mk('n1', 'NFL.com')];
+    // n1 is 11th: it is out of reach until the ESPN run has been taken down far enough, then it is pulled in
+    expect(ids(far)).toEqual(['e0', 'e1', 'e2', 'n1', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8', 'e9']);
+    const veryFar = [...Array.from({ length: 30 }, (_, i) => mk('e' + i, 'ESPN')), mk('n1', 'NFL.com')];
+    expect(ids(veryFar).indexOf('n1')).toBe(23);  // 30 + 1 stories: pulled in once it is within 8 places
+  });
+
+  it('never moves a widely covered story or counts it towards a run', () => {
+    const wide = { ...mk('w', 'ESPN'), sources: 3 };
+    const list = [mk('e1', 'ESPN'), mk('e2', 'ESPN'), wide, mk('e3', 'ESPN'), mk('n1', 'NFL.com')];
+    expect(ids(list)).toEqual(['e1', 'e2', 'w', 'e3', 'n1']);  // w stays third; the run restarts after it
+    const lead = [wide, mk('e1', 'ESPN'), mk('e2', 'ESPN'), mk('e3', 'ESPN'), mk('n1', 'NFL.com')];
+    expect(ids(lead)).toEqual(['w', 'e1', 'e2', 'n1', 'e3']);
+  });
+
+  it('does not change the input', () => {
+    const list = [mk('e1', 'ESPN'), mk('e2', 'ESPN'), mk('e3', 'ESPN'), mk('n1', 'NFL.com')];
+    const copy = [...list];
+    mixSources(list);
+    expect(list).toEqual(copy);
   });
 });
