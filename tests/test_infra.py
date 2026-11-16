@@ -219,7 +219,7 @@ def test_ingest_can_read_back_only_the_feed_the_watchlist_and_the_private_earnin
     assert len(statements) == 1
     keys = sorted(r["Fn::Join"][1][-1] for r in statements[0]["Resource"])
     # bucket ARN + exact keys; the one wildcard is the earnings file, whose name is a hash of a secret unknown at deploy time
-    assert keys == ["/data/earn-*", "/data/feed.json", "/private/watchlist.json"]
+    assert keys == ["/data/earn-*", "/data/feed.json", "/data/schedule.json", "/private/watchlist.json"]
 
 
 def test_ingest_can_read_exactly_the_location_and_the_finnhub_parameters() -> None:

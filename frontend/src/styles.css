@@ -254,3 +254,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .er.today .when b { color: #ff6b6b; }
 .er .eps { text-align: right; font-size: 12px; color: var(--muted); }
 .er .eps b { display: block; font-size: 15px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+.sched .st-team { padding: 11px 14px 4px; font-size: 15px; }
+.sched div:not(:first-child) > .st-team { border-top: 1px solid var(--line); }
+.sched .gm { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 14px; font-size: 14px; }
+.sched .gm .d b { display: block; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sched .gm .d span { font-size: 12px; color: var(--muted); }
+.sched .gm .o span { color: var(--muted); font-size: 12px; }
+.sched .gm .w { font-size: 12px; color: var(--muted); }
+.sched .gm.bye { background: rgba(224, 165, 63, .14); color: #e0a53f; }
+.sched .gm.bye .d span, .sched .gm.bye .w, .sched .gm.bye .o { color: #e0a53f; }
+.sched .more-sched { display: block; width: 100%; background: none; border: 0; border-top: 1px solid var(--line); padding: 11px 14px; font-size: 13px; color: var(--accent); min-height: 44px; }

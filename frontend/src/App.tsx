@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadEarnings, loadFeed, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
+import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, BREAKING_STEP_MS, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
@@ -10,6 +10,7 @@ import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Ea
 import { usePullToRefresh } from './pull';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
+import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
 import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores, teamCards, teamMatcher, teamSuggestions } from './scores';
 import { degrees, describe, isFresh, type Weather } from './weather';
 
@@ -512,9 +513,48 @@ function ScoresPanel({ view, generated, now, all, collapsed, onFold }: {
   );
 }
 
+/** The next games of each followed NFL team, with local kickoff times and the weeks off. */
+function ScheduleCard({ items, collapsed, onToggle }: { items: TeamSchedule[]; collapsed: boolean; onToggle: () => void }) {
+  const [all, setAll] = useState(false);
+  const total = items.length;
+  return (
+    <>
+      <button type="button" class="grp fold-h" aria-expanded={!collapsed} onClick={onToggle}>
+        <span>My schedule{collapsed ? ' (' + total + (total === 1 ? ' team)' : ' teams)') : ''}</span>
+        <span class={'chev' + (collapsed ? '' : ' open')} aria-hidden="true">›</span>
+      </button>
+      {!collapsed && (
+        <div class="sc sched">
+          {items.map((t) => {
+            const rows = all ? t.rows : t.rows.slice(0, SCHEDULE_ROWS);
+            return (
+              <div key={t.team}>
+                <div class="st-team"><b>{t.team}</b></div>
+                {rows.map((r) => r.kind === 'bye' ? (
+                  <div key={'bye' + r.week} class="gm bye"><div class="d"><b>Bye</b><span>no game</span></div><div class="o">Week off</div><div class="w">Wk {r.week}</div></div>
+                ) : (
+                  <div key={r.game.id} class="gm">
+                    <div class="d"><b>{new Date(r.game.start).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</b>
+                      <span>{new Date(r.game.start).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span></div>
+                    <div class="o"><span>{r.atHome ? 'vs' : 'at'}</span> {r.opponent}</div>
+                    <div class="w">Wk {r.week}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {items.some((t) => t.rows.length > SCHEDULE_ROWS) && (
+            <button type="button" class="more-sched" onClick={() => setAll(!all)}>{all ? 'Show fewer' : 'Show the rest of the season'}</button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Every sports story, newest first (a story many sources cover ranks a little higher, and no source runs on for long), with a chip per sub-topic (NFL, cricket, tennis). */
-function SportsScreen({ feed, scores, collapsed, onFold, teams, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
-  feed: Feed | undefined; scores: Scores | undefined; collapsed: string[]; onFold: (sport: string) => void; teams: string[]; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
+function SportsScreen({ feed, scores, schedule, scheduleCollapsed, onToggleSchedule, collapsed, onFold, teams, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+  feed: Feed | undefined; scores: Scores | undefined; schedule: Schedule | undefined; scheduleCollapsed: boolean; onToggleSchedule: () => void; collapsed: string[]; onFold: (sport: string) => void; teams: string[]; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
   const step = Math.floor(now.getTime() / BREAKING_STEP_MS);  // re-rank only every few minutes
   const rankNow = useMemo(() => new Date(step * BREAKING_STEP_MS), [step]);
@@ -524,6 +564,7 @@ function SportsScreen({ feed, scores, collapsed, onFold, teams, loaded, failed, 
   const scoreView = useMemo(() => scoresFor(scores, sub, now), [scores, sub, now]);
   const live = useMemo(() => liveNow(scores, now), [scores, now]);
   const mine = useMemo(() => teamCards(scores, teams, now), [scores, teams, now]);
+  const mySchedule = useMemo(() => teamSchedules(schedule, teams, now), [schedule, teams, now]);
   const liveRest = useMemo(() => live.filter((c) => !mine.some((m) => m.key === c.key)), [live, mine]);  // a followed live game is in My teams only
   const mineStories = useMemo(() => teamStories(all, teamMatcher(teams)).slice(0, 3), [all, teams]);
   const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/sports/${next}` : '#/sports'; };
@@ -543,6 +584,7 @@ function SportsScreen({ feed, scores, collapsed, onFold, teams, loaded, failed, 
       </nav>
       {!sub && teams.length === 0 && <p class="note"><a href="#/settings">Follow your teams</a> to see their games and stories here.</p>}
       {!sub && <LiveStrip title="My teams" cards={mine} />}
+      {!sub && mySchedule.length > 0 && <ScheduleCard items={mySchedule} collapsed={scheduleCollapsed} onToggle={onToggleSchedule} />}
       {!sub && <LiveStrip title="Live now" cards={liveRest} />}
       {scoreView && scores && <ScoresPanel view={scoreView} generated={scores.generated} now={now} all={!sub} collapsed={collapsed} onFold={onFold} />}
       {!feed && !failed && !loaded && <p class="note">Loading sports…</p>}
@@ -605,6 +647,8 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   );
 }
 
+const SCHEDULE_RECHECK_MS = 30 * 60_000;
+const SCHEDULE_ROWS = 4;  // games (or weeks off) listed per team before "Show the rest of the season"
 const MARKET_NEWS_PAGE = 20;  // market stories shown, and added by each "Show more"
 
 function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collapsed, onToggle, earnCollapsed, onToggleEarn, feed, onAllBusiness }: {
@@ -826,6 +870,8 @@ export function App() {
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
   const [scores, setScores] = useState<Scores | undefined>();
+  const [schedule, setSchedule] = useState<Schedule | undefined>();
+  const scheduleAt = useRef(0);  // when the schedule was last asked for
   const [markets, setMarkets] = useState<Markets | undefined>();
   const [marketsLoaded, setMarketsLoaded] = useState(false);
   const [earnings, setEarnings] = useState<Earnings | undefined>();
@@ -839,7 +885,13 @@ export function App() {
   const routeRef = useRef(route);
   const inAppNavs = useRef(0);  // hash changes since the app opened: more than zero means there is an app screen to go back to
 
-  const refreshScores = () => { void loadScores().then((c) => { if (c) setScores(c); }); };  // a failed refresh keeps the last good ones
+  const refreshScores = () => {
+    void loadScores().then((c) => { if (c) setScores(c); });  // a failed refresh keeps the last good ones
+    if (Date.now() - scheduleAt.current > SCHEDULE_RECHECK_MS) {  // the file changes every few hours: no need to ask on every refresh
+      scheduleAt.current = Date.now();
+      void loadSchedule().then((s) => { if (s) setSchedule(s); else scheduleAt.current = 0; });
+    }
+  };
   const latest = useRef(0);
   const refresh = () => {
     const mine = ++latest.current;  // a slower, older response must not overwrite a newer one
@@ -927,6 +979,7 @@ export function App() {
   };
   const toggleWatchlist = () => change((prev) => ({ ...prev, watchCollapsed: !prev.watchCollapsed }));
   const toggleEarnings = () => change((prev) => ({ ...prev, earningsCollapsed: !prev.earningsCollapsed }));
+  const toggleSchedule = () => change((prev) => ({ ...prev, scheduleCollapsed: !prev.scheduleCollapsed }));
   const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
   const update = (next: Partial<Settings>) => change((prev) => ({ ...prev, ...next }));
   useEffect(() => {
@@ -968,7 +1021,7 @@ export function App() {
     return (
       <>
         <PullIndicator {...pull} />
-        <SportsScreen key={route.sub ?? ''} feed={feed} scores={scores} collapsed={settings.scoresCollapsed} onFold={toggleScores} teams={settings.myTeams} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
+        <SportsScreen key={route.sub ?? ''} feed={feed} scores={scores} schedule={schedule} scheduleCollapsed={settings.scheduleCollapsed} onToggleSchedule={toggleSchedule} collapsed={settings.scoresCollapsed} onFold={toggleScores} teams={settings.myTeams} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
           shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)}
           onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="sports" />

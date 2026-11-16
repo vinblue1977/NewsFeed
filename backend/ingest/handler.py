@@ -21,6 +21,8 @@ from ingest.images import attach_images, known_images
 from ingest.markets import build_markets
 from ingest.page_pictures import add_page_pictures
 from ingest.pipeline import collect, local_sources
+from ingest.schedule import build_schedule
+from ingest.schedule import is_due as schedule_is_due
 from ingest.scores import build_scores
 from ingest.sources import SOURCES
 from ingest.watchlist import read_watchlist
@@ -145,6 +147,17 @@ def earnings_needed(s3: Any, key: str | None, symbols: list[str]) -> bool:
     return is_due(previous, symbols)
 
 
+def schedule_needed(s3: Any) -> bool:
+    """Whether to rebuild the NFL schedule: it is missing or old. A file that cannot be read (as opposed to missing) means no,
+    so a storage hiccup does not turn into eight ESPN requests on every run."""
+    try:
+        previous = read_doc(s3, "schedule")
+    except Exception:  # noqa: BLE001
+        logger.exception("could not read the schedule file; not rebuilding it this run")
+        return False
+    return schedule_is_due(previous)
+
+
 def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     """Write data/<name>.json ("failed" if there is nothing to write or the write fails). Each document carries `generated`."""
     if doc is None:
@@ -173,13 +186,15 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         return run_markets(s3, location, force=event.get("force") is True)
     watch_key = location.get("watch_key")
     symbols = saved_symbols(s3, watch_key) or []
-    pool = ThreadPoolExecutor(max_workers=4)
+    pool = ThreadPoolExecutor(max_workers=5)
     side = {
         "weather": pool.submit(soft, "weather", lambda: build_weather(location["lat"], location["lon"])),
         "scores": pool.submit(soft, "scores", build_scores),
     }
     if watch_key and symbols:  # no watchlist, no quotes to fetch
         side["markets"] = pool.submit(soft, "markets", lambda: build_markets(symbols))
+    if schedule_needed(s3):
+        side["schedule"] = pool.submit(soft, "schedule", build_schedule)
     earnings_due = earnings_needed(s3, watch_key, symbols)
     if earnings_due:
         side["earnings"] = pool.submit(soft, "earnings", lambda: build_earnings(symbols, finnhub_key()))
@@ -232,6 +247,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
                 "fresh" if not earnings_due else "superseded" if edited else write_doc(s3, earnings_name(watch_key), earnings)
             )
             statuses["markets"] = "superseded" if edited else write_doc(s3, watch_name(watch_key), watch)
+        statuses.setdefault("schedule", "fresh")  # not rebuilt this run
         pool.shutdown(wait=False)
     return {
         "status": "ok",

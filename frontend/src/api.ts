@@ -3,6 +3,7 @@ import type { Feed } from './types';
 import { type Articles, parseArticles } from './article';
 import { type Earnings, type Markets, parseEarnings, parseMarkets } from './markets';
 import { WATCH_KEY } from './settings';
+import { parseSchedule, type Schedule } from './schedule';
 import { parseScores, type Scores } from './scores';
 import { parseWeather, type Weather } from './weather';
 
@@ -35,6 +36,18 @@ export async function loadScores(): Promise<Scores | undefined> {
   try {
     const response = await fetch(SCORES_URL, { cache: 'no-cache' });
     return response.ok ? parseScores(await response.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const SCHEDULE_URL = '/data/schedule.json';
+
+/** The NFL schedule, or undefined (no file yet, a stale one, or any problem). */
+export async function loadSchedule(now: Date = new Date()): Promise<Schedule | undefined> {
+  try {
+    const response = await fetch(SCHEDULE_URL, { cache: 'no-cache' });
+    return response.ok ? parseSchedule(await response.json(), now) : undefined;
   } catch {
     return undefined;
   }
