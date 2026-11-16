@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from ingest.feeds import FeedError, fetch, parse_feed
 from ingest.filters import block_reason
@@ -18,10 +18,22 @@ WORKERS = 8
 RUN_BUDGET_SECONDS = 40  # whole run; the Lambda timeout is 60 s and the feed must still be written
 
 
+PUBLISHER_LIMIT = re.compile(r"(?<![-\w])(?:site|inurl|source):")  # not a negated "-site:" or a word such as "website:"
+
+
+def _scoped_search(url: str) -> bool:
+    """A Google News search whose query already names the places, so its items need no place check. A search limited to one
+    publisher (`site:`, `inurl:` or `source:`) is not: Google matches the places anywhere in an article, so its results are
+    checked like any feed. The cost is that a story whose headline does not name a place is dropped."""
+    parts = urlsplit(url)
+    return parts.hostname == "news.google.com" and not PUBLISHER_LIMIT.search(unquote_plus(parts.query).lower())
+
+
 def local_sources(urls: Iterable[str]) -> list[Source]:
-    """Sources for the feed URLs in the location parameter. Their items are kept only if they mention a nearby place."""
+    """Sources for the feed URLs in the location parameter. Their items are kept only if they mention a nearby place, except
+    for a Google News search that is already scoped to the places."""
     return [
-        Source(id=f"local-{i}", name=_host(url), url=url, topic="local", trusted=urlsplit(url).hostname == "news.google.com")
+        Source(id=f"local-{i}", name=_host(url), url=url, topic="local", trusted=_scoped_search(url))
         for i, url in enumerate(urls)
     ]
 
