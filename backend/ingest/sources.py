@@ -28,12 +28,6 @@ def _s(id: str, name: str, url: str, topic: str, subtopic: str | None = None, *,
     return Source(id, name, url, topic, subtopic, metered=metered)
 
 
-def _gnews(id: str, name: str, site: str, topic: str) -> Source:  # noqa: A002
-    """Reuters, AP and CNN have no usable direct feed; Google News `site:` search is fresh and headline-only."""
-    url = f"https://news.google.com/rss/search?q=site:{site}+when:1d&hl=en-US&gl=US&ceid=US:en"
-    return Source(id, name, url, topic, headline_only=True, site=site)
-
-
 SOURCES: tuple[Source, ...] = (
     # US
     _s("npr", "NPR", "https://feeds.npr.org/1001/rss.xml", "us"),
@@ -51,9 +45,7 @@ SOURCES: tuple[Source, ...] = (
     _s("cbs-politics", "CBS News", "https://www.cbsnews.com/latest/rss/politics", "us"),
     _s("abc-politics", "ABC News", "https://abcnews.go.com/abcnews/politicsheadlines", "us"),
     _s("thehill-admin", "The Hill", "https://thehill.com/homenews/administration/feed/", "us"),
-    _gnews("gn-cnn", "CNN", "cnn.com", "us"),
     # World
-    _gnews("gn-reuters", "Reuters", "reuters.com", "world"),
     _s("bbc-world", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml", "world"),
     _s("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "world"),
     _s("guardian-world", "The Guardian", "https://www.theguardian.com/world/rss", "world"),

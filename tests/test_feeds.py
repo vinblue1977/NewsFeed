@@ -5,7 +5,6 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any
-from urllib.parse import urlsplit
 
 import pytest
 
@@ -192,8 +191,7 @@ def test_source_list_is_sane() -> None:
     assert all(s.url.startswith("https://") for s in SOURCES)
     assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business"}
     headline_only = {s.id for s in SOURCES if s.headline_only}
-    assert headline_only == {"gn-cnn", "gn-reuters", "nfl-com"}  # nfl-com: a sitemap, no summaries
-    assert all(urlsplit(s.url).hostname == "news.google.com" for s in SOURCES if s.id in headline_only and not s.sitemap)
+    assert headline_only == {"nfl-com"}  # a sitemap, no summaries: kept on purpose, no other headline-only source is wanted
     assert {s.subtopic for s in SOURCES if s.topic == "sports"} == {"nfl", "cricket", "tennis"}
 
 
