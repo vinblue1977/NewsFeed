@@ -42,6 +42,18 @@ DOCS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fixtures are dated 2026-11-13: the handler must not judge their age against the real clock, or every test that
+    builds a feed starts failing a few days after the fixtures were written."""
+    real_collect = handler_module.collect
+
+    def collect_at_fixed_time(sources: Any, nearby: Any = (), **kw: Any) -> Any:
+        return real_collect(sources, nearby, **{"now": NOW, **kw})
+
+    monkeypatch.setattr(handler_module, "collect", collect_at_fixed_time)
+
+
 def fake_fetcher(url: str) -> bytes:
     if url not in DOCS:
         raise FeedError("fetch failed: 404")

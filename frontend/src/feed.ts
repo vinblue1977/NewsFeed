@@ -85,8 +85,9 @@ export interface Story {
   sources: number;
 }
 
-/** One story per cluster, newest first. The cluster's lead item stands for it; if the lead is missing or in another
- * topic, the newest member in this topic does. Unclustered items stand alone.
+/** One story per cluster, newest first. The cluster's lead item stands for it; if the lead is missing, the newest member in
+ * this topic does. A news tab (not `all`, not local or sports) lists only the clusters that belong to its topic, so a story is
+ * in one tab only. Unclustered items stand alone.
  * `all` is every topic except the tab-only ones (local, sports), which only their own topic returns. */
 export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   const wanted = (i: Item) => (topic === 'all' ? !TAB_ONLY_TOPICS.has(i.topic) : i.topic === topic);
@@ -102,6 +103,7 @@ export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   for (const c of feed.clusters) {
     known.add(c.id);
     if (topic === 'all' && TAB_ONLY_TOPICS.has(c.topic)) continue;  // a local cluster stays in the Local tab, whatever else joined it
+    if (topic !== 'all' && !TAB_ONLY_TOPICS.has(topic) && c.topic !== topic) continue;  // a news tab shows only the stories that belong to it: one story, one tab
     const here = members.get(c.id) ?? [];
     const item = here.find((i) => i.id === c.lead) ?? [...here].sort((a, b) => b.published.localeCompare(a.published))[0];
     if (item) out.push({ item, cluster: c, sources: c.sources });

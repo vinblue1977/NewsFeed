@@ -92,6 +92,17 @@ describe('feed helpers', () => {
     expect(topStory([at('future', '2026-11-14T09:00:00+00:00')], NOW)?.item.id).toBe('future');  // a clock slip counts as just now
   });
 
+  it('a news tab lists only the stories that belong to it: a story with members in two topics shows in one tab', () => {
+    const two: Feed = {
+      generated: '2026-11-13T11:50:00+00:00',
+      items: [item('w', { topic: 'world', cluster: 'cx' }), item('t', { topic: 'tech', cluster: 'cx' }), item('u', { topic: 'tech' })],
+      clusters: [{ id: 'cx', title: 'X', topic: 'world', lead: 'w', published: '2026-11-13T11:00:00+00:00', sources: 2, items: ['w', 't'] }],
+    };
+    expect(stories(two, 'world').map((s) => s.item.id)).toEqual(['w']);
+    expect(stories(two, 'tech').map((s) => s.item.id)).toEqual(['u']);  // not the world story's tech member
+    expect(stories(two, 'all').map((s) => s.item.id).sort()).toEqual(['u', 'w']);
+  });
+
   it('lists coverage from other sources only', () => {
     const lead = stories(feed, 'us')[0];
     if (!lead) throw new Error('no lead');
