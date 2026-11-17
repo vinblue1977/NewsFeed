@@ -742,3 +742,63 @@ def test_an_unreadable_schedule_file_is_not_rebuilt_and_a_failed_build_is_report
     result = handler_module.handler({}, object())
     assert result["schedule"] == "failed" and result["status"] == "ok"
     assert not any(p["Key"] == "data/schedule.json" for p in broken.puts)
+
+
+GOOGLE = "https://news.google.com/rss/search?q=site:a.example"
+GOOD = rss(("Story", "https://x.example/g1", "", "Fri, 13 Nov 2026 11:00:00 GMT"))
+
+
+def _flaky(failures: list[FeedError | None]) -> Any:
+    """A fetcher that raises the given errors one call at a time (None: succeeds), and counts its calls."""
+    calls = {"n": 0}
+
+    def fetcher(url: str) -> bytes:
+        error = failures[calls["n"]] if calls["n"] < len(failures) else None
+        calls["n"] += 1
+        if error:
+            raise error
+        return GOOD
+
+    fetcher.calls = calls  # type: ignore[attr-defined]
+    return fetcher
+
+
+@pytest.fixture
+def no_pause(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    pauses: list[float] = []
+    monkeypatch.setattr("ingest.pipeline.time.sleep", pauses.append)
+    return pauses
+
+
+def test_a_google_news_search_is_retried_once_after_a_busy_answer(no_pause: list[float]) -> None:
+    fetcher = _flaky([FeedError("fetch failed: HTTPError 503", 503)])
+    items, status = collect([Source("g", "G", GOOGLE, "local", trusted=True)], now=NOW, fetcher=fetcher)
+    assert status["g"]["ok"] and len(items) == 1 and fetcher.calls["n"] == 2
+    assert len(no_pause) == 1 and 1.0 <= no_pause[0] <= 3.0
+
+
+def test_a_google_news_search_that_fails_twice_is_reported_failed(no_pause: list[float]) -> None:
+    fetcher = _flaky([FeedError("fetch failed: HTTPError 429", 429)] * 2)
+    _, status = collect([Source("g", "G", GOOGLE, "local", trusted=True)], now=NOW, fetcher=fetcher)
+    assert status["g"] == {"ok": False, "items": 0, "error": "fetch failed: HTTPError 429"} and fetcher.calls["n"] == 2
+
+
+def test_other_failures_are_not_retried(no_pause: list[float]) -> None:
+    not_busy = _flaky([FeedError("fetch failed: HTTPError 404", 404)])
+    collect([Source("g", "G", GOOGLE, "local", trusted=True)], now=NOW, fetcher=not_busy)
+    elsewhere = _flaky([FeedError("fetch failed: HTTPError 503", 503)])
+    collect([Source("e", "E", "https://a.example/f", "us")], now=NOW, fetcher=elsewhere)
+    assert not_busy.calls["n"] == 1 and elsewhere.calls["n"] == 1 and no_pause == []
+
+
+def test_a_retry_that_fails_unexpectedly_is_reported_as_such(no_pause: list[float]) -> None:
+    calls = {"n": 0}
+
+    def fetcher(url: str) -> bytes:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise FeedError("fetch failed: HTTPError 503", 503)
+        raise ValueError("boom")
+
+    _, status = collect([Source("g", "G", GOOGLE, "local", trusted=True)], now=NOW, fetcher=fetcher)
+    assert status["g"]["error"] == "unexpected ValueError" and calls["n"] == 2
