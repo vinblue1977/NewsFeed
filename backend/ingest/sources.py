@@ -47,6 +47,10 @@ SOURCES: tuple[Source, ...] = (
     _s("thehill-admin", "The Hill", "https://thehill.com/homenews/administration/feed/", "us"),
     # World
     _s("bbc-world", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml", "world"),
+    _s("nyt-world", "The New York Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "world", metered=True),
+    _s("dw", "DW", "https://rss.dw.com/xml/rss-en-world", "world"),
+    _s("france24", "France 24", "https://www.france24.com/en/rss", "world"),
+    _s("sky-world", "Sky News", "https://feeds.skynews.com/feeds/rss/world.xml", "world"),
     _s("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "world"),
     _s("guardian-world", "The Guardian", "https://www.theguardian.com/world/rss", "world"),
     # India
@@ -54,6 +58,8 @@ SOURCES: tuple[Source, ...] = (
     _s("ndtv", "NDTV", "https://feeds.feedburner.com/ndtvnews-top-stories", "india"),
     _s("thehindu", "The Hindu", "https://www.thehindu.com/news/national/feeder/default.rss", "india", metered=True),
     _s("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "india"),
+    _s("indianexpress", "The Indian Express", "https://indianexpress.com/feed/", "india"),
+    _s("livemint", "Mint", "https://www.livemint.com/rss/news", "india"),
     # Sports
     Source(
         "nfl-com", "NFL.com", "https://www.nfl.com/sitemap-fast-changing.xml", "sports", "nfl", headline_only=True, sitemap=True
@@ -80,4 +86,13 @@ SOURCES: tuple[Source, ...] = (
     _s("cnbc-investing", "CNBC", "https://www.cnbc.com/id/15839069/device/rss/rss.html", "business", "markets"),
     _s("cnbc", "CNBC", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "business"),
     _s("et", "Economic Times", "https://economictimes.indiatimes.com/rssfeedstopstories.cms", "business"),
+    _s("bbc-business", "BBC News", "https://feeds.bbci.co.uk/news/business/rss.xml", "business"),
+    _s("guardian-business", "The Guardian", "https://www.theguardian.com/uk/business/rss", "business"),
+    _s(
+        "nyt-business",
+        "The New York Times",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+        "business",
+        metered=True,
+    ),
 )
