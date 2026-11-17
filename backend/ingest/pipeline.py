@@ -1,6 +1,8 @@
 """Collect items from many sources: parallel fetch, one failing source never sinks the rest, dedupe, filter, sort."""
 
+import random
 import re
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import UTC, datetime, timedelta
@@ -16,6 +18,8 @@ MAX_AGE_LOCAL = timedelta(days=7)  # a suburb has few stories a day, so Local ke
 MAX_FUTURE = timedelta(hours=12)  # a small clock or timezone slip is clamped; more than this is bogus and dropped
 MAX_PER_SOURCE = 40
 WORKERS = 8
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})  # a busy or rate-limiting server: worth one more try
+RETRY_PAUSE_SECONDS = (1.0, 3.0)  # random, so the retried searches do not all land together again
 RUN_BUDGET_SECONDS = 40  # whole run; the Lambda timeout is 60 s and the feed must still be written
 
 
@@ -72,8 +76,19 @@ def collect(
     place_re = re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in places) + r")(?!\w)", re.IGNORECASE) if places else None
 
     def run(source: Source) -> tuple[Source, list[dict[str, Any]], str | None]:
-        try:
+        def once() -> tuple[Source, list[dict[str, Any]], str | None]:
             return source, parse_feed(fetcher(source.url), source), None
+
+        try:
+            try:
+                return once()
+            except FeedError as exc:
+                # Google News answers a burst of searches (the local ones run together) with an occasional 429 or 503:
+                # one retry after a short random pause usually gets through.
+                if urlsplit(source.url).hostname != "news.google.com" or exc.status not in RETRY_STATUSES:
+                    raise
+                time.sleep(random.uniform(*RETRY_PAUSE_SECONDS))  # noqa: S311  (jitter, not security)
+                return once()
         except FeedError as exc:
             return source, [], str(exc)
         except Exception as exc:  # (one bad feed, whatever it raises, must not sink the run)

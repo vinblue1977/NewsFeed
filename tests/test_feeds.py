@@ -135,6 +135,14 @@ def test_fetch_wraps_network_errors(monkeypatch: pytest.MonkeyPatch, error: Exce
         fetch("https://example.com/f")
 
 
+def test_fetch_reports_the_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = urllib.error.HTTPError("https://example.com/f", 429, "Too Many Requests", None, None)  # type: ignore[arg-type]
+    monkeypatch.setattr(feeds, "_OPENER", FakeOpener(error))
+    with pytest.raises(FeedError, match="HTTPError 429") as caught:
+        fetch("https://example.com/f")
+    assert caught.value.status == 429
+
+
 def test_fetch_enforces_the_size_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(feeds, "MAX_BYTES", 10)
     monkeypatch.setattr(feeds, "_OPENER", FakeOpener(FakeResponse(b"x" * 100)))

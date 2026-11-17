@@ -5,6 +5,7 @@ import html
 import http.client
 import re
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET  # noqa: S405  (DOCTYPE/ENTITY declarations are rejected first; see parse_xml)
 from datetime import UTC, datetime
@@ -35,7 +36,11 @@ IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
 
 class FeedError(Exception):
-    """A feed could not be fetched or parsed."""
+    """A feed could not be fetched or parsed. `status` is the HTTP status when the server answered with an error."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -77,7 +82,11 @@ def fetch(
                 if time.monotonic() > deadline:
                     raise FeedError("feed is too slow")
     except (OSError, http.client.HTTPException) as exc:  # URLError, HTTPError, timeouts, IncompleteRead
-        raise FeedError(f"fetch failed: {type(exc).__name__}") from exc
+        status = None
+        if isinstance(exc, urllib.error.HTTPError):
+            status = exc.code
+            exc.close()  # the error holds the open response: release the socket now, not at garbage collection
+        raise FeedError(f"fetch failed: {type(exc).__name__}" + (f" {status}" if status else ""), status) from exc
     return bytes(body)
 
 
