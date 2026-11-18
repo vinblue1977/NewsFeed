@@ -802,3 +802,36 @@ def test_a_retry_that_fails_unexpectedly_is_reported_as_such(no_pause: list[floa
 
     _, status = collect([Source("g", "G", GOOGLE, "local", trusted=True)], now=NOW, fetcher=fetcher)
     assert status["g"]["error"] == "unexpected ValueError" and calls["n"] == 2
+
+
+def test_handler_runs_the_push_step_after_the_feed_and_survives_its_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    order: list[str] = []
+    real_put = s3.put_object
+    s3.put_object = lambda **kw: (order.append(kw["Key"]), real_put(**kw))[1]  # type: ignore[method-assign]
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed: (order.append("push"), "sent:1")[1])
+    result = handler_module.handler({}, object())
+    assert result["push"] == "sent:1" and order[-1] == "push" and "data/feed.json" in order[:-1]
+
+    def boom(s3_: Any, feed: dict[str, Any]) -> str:
+        raise RuntimeError("push exploded")
+
+    monkeypatch.setattr("ingest.push.run_push", boom)
+    assert handler_module.handler({}, object())["push"] == "failed"
+
+
+def test_handler_skips_the_push_step_when_the_run_is_late(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "PUSH_CUTOFF_SECONDS", -1)
+    assert handler_module.handler({}, object())["push"] == "late"
+
+
+def test_handler_without_push_configuration_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    for name in ("PUSH_KEY_PARAM", "PUSH_REG_PARAM", "SITE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    result = handler_module.handler({}, object())
+    assert result["push"] == "off" and [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
