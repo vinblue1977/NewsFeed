@@ -83,6 +83,12 @@ export interface Story {
   item: Item;
   cluster: Cluster | undefined;
   sources: number;
+  outlets?: string[];  // the distinct sources present for a clustered story, the lead's first
+}
+
+/** The distinct sources among a cluster's members, the lead item's source first. */
+function outletsOf(lead: Item, members: Item[]): string[] {
+  return [...new Set([lead.source, ...members.map((m) => m.source)])];
 }
 
 /** One story per cluster, newest first. The cluster's lead item stands for it; if the lead is missing, the newest member in
@@ -106,7 +112,7 @@ export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
     if (topic !== 'all' && !TAB_ONLY_TOPICS.has(topic) && c.topic !== topic) continue;  // a news tab shows only the stories that belong to it: one story, one tab
     const here = members.get(c.id) ?? [];
     const item = here.find((i) => i.id === c.lead) ?? [...here].sort((a, b) => b.published.localeCompare(a.published))[0];
-    if (item) out.push({ item, cluster: c, sources: c.sources });
+    if (item) out.push({ item, cluster: c, sources: c.sources, outlets: outletsOf(item, here) });
   }
   for (const [id, here] of members) {  // a cluster id the feed does not describe: still show the story
     const item = [...here].sort((a, b) => b.published.localeCompare(a.published))[0];

@@ -66,9 +66,13 @@ function StoryRow({ s, now }: { s: Story; now: Date }) {
   return (
     <StoryAnchor story={s} class={hasImg ? 'row has-img' : 'row'}>
       <div class="t">
-        <Source name={s.item.source} when={timeAgo(s.item.published, now)}
-          extra={[topicLabel(s.item.topic), s.sources > 1 ? `${s.sources} sources` : ''].filter(Boolean).join(' · ')} />
+        {s.sources > 1 && s.outlets && s.outlets.length > 1
+          ? <Outlets outlets={s.outlets} total={s.sources} />
+          : <Source name={s.item.source} when={s.sources > 1 ? '' : timeAgo(s.item.published, now)} extra={topicLabel(s.item.topic)} />}
         <h3>{s.item.title}</h3>
+        {s.sources > 1 && (
+          <div class="cl"><span class="pill">{s.sources} outlets</span><span>{[timeAgo(s.item.published, now), topicLabel(s.item.topic)].join(' · ')}</span></div>
+        )}
       </div>
       <Pic item={s.item} class="thumb" onFail={() => setBroken(imageSrc(s.item))} />
     </StoryAnchor>
@@ -871,6 +875,20 @@ function Briefing({ stories: list, read, onOpen, now }: { stories: Story[]; read
       ))}
       <div class="bp"><i><u style={{ width: `${(done / list.length) * 100}%` }} /></i><span>{done} of {list.length} read</span></div>
     </section>
+  );
+}
+
+/** A story covered by several outlets: their overlapping badges and the first names, then how many more. */
+function Outlets({ outlets, total }: { outlets: string[]; total: number }) {
+  const names = outlets.slice(0, 3);
+  const more = total - names.length;
+  return (
+    <div class="src">
+      <span class="stack" aria-hidden="true">
+        {names.map((n) => <span key={n} class="fav" style={{ background: badgeColor(n) }}>{initial(n)}</span>)}
+      </span>
+      {names.join(', ')}{more > 0 ? ` +${more}` : ''}
+    </div>
   );
 }
 
