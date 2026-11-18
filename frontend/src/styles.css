@@ -47,6 +47,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sec b { font-size: 19px; font-weight: 600; }
 
 .src { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+.stack { display: inline-flex; }
+.stack .fav { border: 2px solid var(--card); box-sizing: content-box; }
+.stack .fav + .fav { margin-left: -6px; }
+.cl { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); margin-top: 2px; }
+.pill { padding: 2px 9px; border-radius: 999px; background: #1e3a5f; color: #d2e3fc; font-size: 13px; font-weight: 600; }
 .fav { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; flex: none; }
 
 .topcard { display: block; margin: 0 16px 10px; padding: 18px 16px; background: linear-gradient(160deg, #26364d, var(--card)); border-radius: 14px; }

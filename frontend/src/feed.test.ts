@@ -420,3 +420,32 @@ describe('World News corner', () => {
     expect(subtopicRoute('world', 'world')).toBe('#/discovery/world');
   });
 });
+
+describe('story outlets', () => {
+  it('lists the distinct sources of a clustered story, the lead first', () => {
+    const feed: Feed = {
+      generated: '2026-11-17T12:00:00+00:00',
+      items: [
+        item('a', { source: 'NPR', cluster: 'k', topic: 'us' }),
+        item('b', { source: 'BBC', cluster: 'k', topic: 'us' }),
+        item('c', { source: 'BBC', cluster: 'k', topic: 'us' }),
+      ],
+      clusters: [{ id: 'k', title: 't', topic: 'us', lead: 'b', published: '', sources: 2, items: ['a', 'b', 'c'] }],
+    };
+    expect(stories(feed, 'us')[0]?.outlets).toEqual(['BBC', 'NPR']);
+  });
+
+  it('lists only the members present in the tab, while the count stays cluster-wide', () => {
+    const feed: Feed = {
+      generated: '2026-11-17T12:00:00+00:00',
+      items: [
+        item('a', { source: 'NPR', cluster: 'k', topic: 'us' }),
+        item('b', { source: 'BBC', cluster: 'k', topic: 'world' }),
+      ],
+      clusters: [{ id: 'k', title: 't', topic: 'us', lead: 'a', published: '', sources: 5, items: ['a', 'b', 'x', 'y', 'z'] }],
+    };
+    const story = stories(feed, 'us')[0];
+    expect(story?.sources).toBe(5);
+    expect(story?.outlets).toEqual(['NPR']);
+  });
+});
