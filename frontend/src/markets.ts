@@ -224,3 +224,42 @@ export function upcoming(earnings: Earnings | undefined, shown: string[], now: D
     .filter((e) => keep.has(e.symbol) && e.date >= first && e.date <= last)
     .sort((a, b) => a.date.localeCompare(b.date) || a.symbol.localeCompare(b.symbol));
 }
+
+/** "open", "pre-open" (a weekday before 9:30 AM US Eastern) or "closed". `open` on a quote is frozen at build time, so a
+ *  stale document is never "open". */
+export function marketPhase(markets: Markets, now: Date): 'open' | 'pre-open' | 'closed' {
+  const us = markets.tickers.filter((q) => q.currency === 'USD');  // a watchlist can hold stocks from other exchanges
+  if (isFresh(markets.generated, now) && (us.length > 0 ? us : markets.tickers).some((q) => q.open)) return 'open';
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const minutes = Number(get('hour')) * 60 + Number(get('minute'));
+  const weekday = !['Sat', 'Sun'].includes(get('weekday'));
+  return weekday && minutes >= 4 * 60 && minutes < 9 * 60 + 30 ? 'pre-open' : 'closed';  // pre-market trading starts at 4:00 AM Eastern
+}
+
+export interface StripMove {
+  symbol: string;
+  text: string;
+  dir: 'up' | 'down' | 'flat';
+}
+
+/** The watchlist's moves for the home strip: the biggest movers first (ties by symbol), at most `max`, and how many more there are.
+ *  A move that rounds to 0.0% shows as flat, with no sign and no color. */
+export function stripMoves(tickers: Quote[], max = 4): { moves: StripMove[]; more: number } {
+  const moved = tickers
+    .filter((q) => q.changePct !== null)
+    .sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0) || a.symbol.localeCompare(b.symbol));
+  const moves = moved.slice(0, max).map((q): StripMove => {
+    const pct = q.changePct ?? 0;
+    const shown = Math.abs(pct).toFixed(1);
+    if (Number(shown) === 0) return { symbol: q.symbol, text: '0.0%', dir: 'flat' };
+    return pct > 0 ? { symbol: q.symbol, text: `+${shown}%`, dir: 'up' } : { symbol: q.symbol, text: `−${shown}%`, dir: 'down' };
+  });
+  return { moves, more: Math.max(moved.length - max, 0) };
+}
+
+/** "NVDA after the close" lines for the symbols that report today. */
+export function earningsToday(earnings: Earnings | undefined, shown: string[], now: Date): string[] {
+  const when = { pre: 'before the open', post: 'after the close', tbd: '' };
+  return upcoming(earnings, shown, now, 0).map((e) => [e.symbol, when[e.time]].filter(Boolean).join(' '));
+}
