@@ -10,6 +10,8 @@ import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhe
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
+import { PUSH_NOTES, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
+import { disable as disablePush, enable as enablePush, readEnv } from './pushClient';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
@@ -837,6 +839,81 @@ function TeamsEditor({ teams, suggestions, onChange }: { teams: string[]; sugges
   );
 }
 
+/** Notifications: turn them on for this device, choose what to be told about, and copy the registration that goes into SSM
+ *  (docs/PUSH.md). There is no server to send it to: the subscription never leaves the phone except by this copy. */
+function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: PushPrefs) => void }) {
+  const [info, setInfo] = useState<{ env: PushEnv; sub: Subscription | undefined } | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [manual, setManual] = useState('');  // the registration shown for hand copying when the clipboard is not available
+  useEffect(() => { void readEnv().then(setInfo); }, []);
+  if (!info) return null;
+  const state = pushState(info.env);
+  const sub = info.sub;
+  const topicChange = (id: PushTopic, on: boolean) => onChange({ ...prefs, topics: PUSH_TOPICS.map((t) => t.id).filter((x) => (x === id ? on : prefs.topics.includes(x))) });
+  const timeChange = (key: 'quietStart' | 'quietEnd', value: string) => { if (validTime(value)) onChange({ ...prefs, [key]: value }); };
+  const run = async (job: () => Promise<void>, failed: string) => {
+    setBusy(true);
+    setMsg('');
+    try {
+      await job();
+    } catch {
+      setMsg(failed);
+    }
+    setInfo(await readEnv());
+    setBusy(false);
+  };
+  const copy = () => {
+    if (!sub) return;
+    const text = registration(sub, prefs, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    setManual('');
+    navigator.clipboard.writeText(text).then(
+      () => setMsg('Copied. Paste it into the SSM parameter /news/push/registration (see docs/PUSH.md).'),
+      () => { setMsg('Could not copy automatically: select the text below and copy it.'); setManual(text); },
+    );
+  };
+  return (
+    <>
+      <div class="grp">Notifications</div>
+      <p class="note" role="status">{PUSH_NOTES[state]}</p>
+      {(state === 'off' || state === 'no-key') && (
+        <div class="btns">
+          <button type="button" class="btn" disabled={state === 'no-key' || busy} onClick={() => void run(async () => { await enablePush(); }, 'Could not turn notifications on.')}>Turn on notifications</button>
+        </div>
+      )}
+      {(state === 'off' || state === 'no-key' || state === 'enabled') && (
+        <>
+          <ul class="set">
+            {PUSH_TOPICS.map((t) => (
+              <li key={t.id}><label>{t.label} stories
+                <input type="checkbox" checked={prefs.topics.includes(t.id)} onChange={(e) => topicChange(t.id, e.currentTarget.checked)} />
+              </label></li>
+            ))}
+            <li><label>Weather alerts
+              <input type="checkbox" checked={prefs.weather} onChange={(e) => onChange({ ...prefs, weather: e.currentTarget.checked })} />
+            </label></li>
+            <li><label>Quiet from
+              <input type="time" value={prefs.quietStart} onChange={(e) => timeChange('quietStart', e.currentTarget.value)} />
+            </label></li>
+            <li><label>Quiet until
+              <input type="time" value={prefs.quietEnd} onChange={(e) => timeChange('quietEnd', e.currentTarget.value)} />
+            </label></li>
+          </ul>
+        </>
+      )}
+      {state === 'enabled' && (
+        <div class="btns">
+          <button type="button" class="btn" disabled={busy} onClick={copy}>Copy registration</button>
+          <button type="button" class="btn g" disabled={busy} onClick={() => void run(disablePush, 'Could not turn notifications off.')}>Turn off</button>
+        </div>
+      )}
+      {state === 'enabled' && <p class="fine">After changing what you want to hear about, copy the registration again and paste it into SSM.</p>}
+      {msg && <p class="note" role="status">{msg}</p>}
+      {manual && <label class="fld" style={{ margin: '8px 16px' }}>Registration<textarea readOnly rows={5} value={manual} onFocus={(e) => e.currentTarget.select()} /></label>}
+    </>
+  );
+}
+
 function SettingsScreen({ settings, update, sources, suggestions, markets, marketsLoaded, onSaved, canGoBack }: {
   settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; suggestions: string[]; markets: Markets | undefined; marketsLoaded: boolean;
   onSaved: (key: string) => void; canGoBack: boolean;
@@ -888,6 +965,7 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
           </ul>
         </details>
       )}
+      <PushSection prefs={settings.push} onChange={(push) => update({ push })} />
       <p class="fine">Saved on this device only. Hiding a source or symbol does not delete it. The symbol list itself is kept privately on the server.</p>
     </div>
   );

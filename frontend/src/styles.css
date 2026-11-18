@@ -202,6 +202,7 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .set li:first-child { border-top: 0; }
 .set label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; font-size: 15px; }
 .set input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.set input[type=time] { font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .seg { display: flex; gap: 8px; padding: 12px 14px; }
 .seg button { flex: 1; padding: 9px 0; border: 1px solid var(--line); border-radius: 8px; background: none; font-size: 14px; }
 .seg button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
