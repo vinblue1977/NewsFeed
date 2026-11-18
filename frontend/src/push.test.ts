@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_PUSH, keyBytes, parsePushPrefs, pushState, readSubscription, registration, sameKey, validTime, vapidReady, VAPID_PUBLIC_KEY, type PushEnv } from './push';
+import { DEFAULT_PUSH, httpsOrigin, keyBytes, parsePushPrefs, pushState, readSubscription, registration, sameKey, validTime, vapidReady, VAPID_PUBLIC_KEY, type PushEnv } from './push';
 
 const env = (over: Partial<PushEnv> = {}): PushEnv => ({
   hasServiceWorker: true, hasPushManager: true, hasNotification: true, permission: 'default', standalone: true, ios: true, subscribed: false, keyReady: true, ...over,
@@ -67,13 +67,22 @@ describe('preferences', () => {
 describe('registration', () => {
   const sub = { endpoint: 'https://push.example/abc', keys: { p256dh: 'P', auth: 'A' } };
   it('builds exactly the agreed blob', () => {
-    expect(JSON.parse(registration(sub, { topics: ['us', 'sports'], weather: true, quietStart: '22:00', quietEnd: '07:00' }, 'America/Chicago')))
-      .toEqual({ v: 1, subscription: sub, prefs: { topics: ['us', 'sports'], weather: true, quiet: { start: '22:00', end: '07:00' }, tz: 'America/Chicago' } });
+    expect(JSON.parse(registration(sub, { topics: ['us', 'sports'], weather: true, quietStart: '22:00', quietEnd: '07:00' }, 'America/Chicago', 'https://news.example')))
+      .toEqual({ v: 1, site: 'https://news.example', subscription: sub, prefs: { topics: ['us', 'sports'], weather: true, quiet: { start: '22:00', end: '07:00' }, tz: 'America/Chicago' } });
   });
   it('reads a subscription and rejects incomplete or non-https ones', () => {
     expect(readSubscription({ endpoint: 'https://push.example/abc', keys: { p256dh: 'P', auth: 'A' }, expirationTime: null })).toEqual(sub);
     expect(readSubscription({ endpoint: 'http://push.example/abc', keys: { p256dh: 'P', auth: 'A' } })).toBeUndefined();
     expect(readSubscription({ endpoint: 'https://push.example/abc', keys: { p256dh: 'P' } })).toBeUndefined();
     expect(readSubscription(null)).toBeUndefined();
+  });
+});
+
+describe('httpsOrigin', () => {
+  it('keeps an https origin and drops everything else', () => {
+    expect(httpsOrigin('https://news.example')).toBe('https://news.example');
+    expect(httpsOrigin('http://localhost:5173')).toBe('');
+    expect(httpsOrigin('https://news.example/path')).toBe('');
+    expect(httpsOrigin('')).toBe('');
   });
 });

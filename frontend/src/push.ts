@@ -105,10 +105,17 @@ export function readSubscription(json: unknown): Subscription | undefined {
   return { endpoint, keys: { p256dh, auth } };
 }
 
-/** The registration the user pastes into SSM. `tz` is the device's time zone, so quiet hours mean the user's own night. */
-export function registration(sub: Subscription, prefs: PushPrefs, tz: string): string {
+/** The app's own https origin, or '' on a local or plain-http address (Apple's push service rejects those as an identity). */
+export function httpsOrigin(origin: string): string {
+  return /^https:\/\/[^/\s]+$/.test(origin) ? origin : '';
+}
+
+/** The registration the user pastes into SSM. `tz` is the device's time zone, so quiet hours mean the user's own night;
+ *  `site` is the app's own https origin, which the sender uses as the VAPID identity (Apple's push service requires one). */
+export function registration(sub: Subscription, prefs: PushPrefs, tz: string, site: string): string {
   return JSON.stringify({
     v: 1,
+    site,
     subscription: sub,
     prefs: { topics: prefs.topics, weather: prefs.weather, quiet: { start: prefs.quietStart, end: prefs.quietEnd }, tz },
   });
