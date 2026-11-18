@@ -835,3 +835,10 @@ def test_handler_without_push_configuration_is_unchanged(monkeypatch: pytest.Mon
         monkeypatch.delenv(name, raising=False)
     result = handler_module.handler({}, object())
     assert result["push"] == "off" and [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
+
+
+def test_push_test_event_runs_only_the_test_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ingest.push.send_test", lambda: "sent")
+    assert handler_module.handler({"only": "push-test"}, object()) == {"status": "ok", "push": "sent"}
+    monkeypatch.setattr("ingest.push.send_test", lambda: 1 / 0)
+    assert handler_module.handler({"only": "push-test"}, object()) == {"status": "failed", "push": "failed"}

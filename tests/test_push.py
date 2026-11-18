@@ -505,3 +505,17 @@ def test_not_set_up_is_rechecked_within_a_minute_but_a_good_config_is_kept(
     assert loaded is not None
     clock["now"] += 61
     assert push.load_config(FakeSsm({})) is loaded  # a good value is kept for ten minutes
+
+
+def test_send_test_ignores_quiet_hours_caps_and_state() -> None:
+    sender = Recorder()
+    assert push.send_test(config=config(quiet={"start": "00:00", "end": "23:59"}), sender=sender) == "sent"
+    assert len(sender.calls) == 1
+    assert sender.calls[0]["title"] == "Test notification" and sender.calls[0]["tag"].startswith("push-test-")
+
+
+def test_send_test_statuses(caplog: pytest.LogCaptureFixture) -> None:
+    assert push.send_test(config=None, sender=Recorder()) == "off"
+    assert push.send_test(config=config(), sender=Recorder(webpush.Expired("gone"))) == "expired"
+    assert push.send_test(config=config(), sender=Recorder(RuntimeError("boom"))) == "failed"
+    assert "boom" not in caplog.text
