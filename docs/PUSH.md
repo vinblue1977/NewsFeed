@@ -67,3 +67,7 @@ If you ever generate a new key pair, first tap Turn off in Settings, then Turn o
 ## What a notification looks like
 
 The sender sends `{"title", "body", "url", "tag"}`. Tapping it opens the app on the story: `/#/story/<cluster id>` (a story with several outlets) or `/#/read/<item id>` (a single article). The `tag` replaces an older notification about the same story instead of stacking a second one.
+
+## Sending a test notification
+
+To check the whole path (even in quiet hours), invoke the ingest Lambda by hand with the event `{"only": "push-test"}`. It sends one "Test notification" and ignores quiet hours, the caps and the dedupe state. The response says `"push": "sent"`, `"off"` (no valid registration), `"expired"` or `"failed"` (see the Lambda log).

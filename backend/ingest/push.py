@@ -325,3 +325,28 @@ def run_push(
         except Exception:  # noqa: BLE001
             logger.exception("could not save the push state; the same stories may be pushed again next run")
     return status
+
+
+def send_test(
+    *,
+    config: Config | None = None,
+    sender: Callable[..., int] = webpush.send,
+) -> str:
+    """One fixed test message, for checking the whole path by hand (invoke the Lambda with {"only": "push-test"}). Ignores
+    quiet hours, the caps and the dedupe state on purpose, and records nothing. Returns off, sent, expired or failed."""
+    config = config or load_config()
+    if config is None:
+        return "off"
+    reg = config.registration
+    tag = f"push-test-{int(datetime.now(UTC).timestamp())}"  # unique, so a second test is not folded into the first
+    note = {"title": "Test notification", "body": "Push is working.", "url": "/", "tag": tag}
+    try:
+        sender(reg.subscription, note, config.key, reg.site)
+    except webpush.Expired:
+        logger.error("push subscription expired (the push service answered 404 or 410): register the phone again")
+        return "expired"
+    except Exception as exc:  # noqa: BLE001
+        reason = exc if isinstance(exc, webpush.PushError) else type(exc).__name__
+        logger.warning("push test failed (%s)", reason)
+        return "failed"
+    return "sent"

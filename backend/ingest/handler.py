@@ -190,11 +190,25 @@ def notify(s3: Any, feed: dict[str, Any], started: float) -> str:
         return "failed"
 
 
+def send_push_test() -> str:
+    """The one-off test message (see ingest.push.send_test). Never raises."""
+    try:
+        from ingest.push import send_test
+
+        return send_test()
+    except Exception:  # noqa: BLE001
+        logger.exception("push test failed")
+        return "failed"
+
+
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
     scores.json and the private watchlist quotes. Those are fetched alongside the feed and written even when the feed run
     is rejected, so none of them holds up another."""
     started = time.monotonic()
+    if event.get("only") == "push-test":  # by hand only: one test message, nothing else runs
+        result = send_push_test()
+        return {"status": "ok" if result == "sent" else "failed", "push": result}
     s3 = boto3.client("s3")
     location = cached_location()
     if event.get("only") == "markets":
