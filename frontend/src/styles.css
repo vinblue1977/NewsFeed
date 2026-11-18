@@ -314,3 +314,5 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .mkm .chg { font-size: 14px; }
 .mke { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: #c4c7cc; }
 .mke b { font-weight: 600; color: var(--text); }
+.fold > .note, .fold > .fine { margin-left: 0; margin-right: 0; }
+.fold > .fine { margin-bottom: 8px; }
