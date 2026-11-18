@@ -87,7 +87,7 @@ const at = (h: number) => new Date(2026, 10, 13, h, 20);  // local 13 Nov, h:20
 
 suite('parseWeather hourly', () => {
   it('reads the hours and skips broken ones', () => {
-    const w = parseWeather(doc({ hourly: [{ time: '2026-11-13T09:00', temp: 41, pop: 20, code: 3 }, { time: 5 }, null, { time: 'soon' }, { time: '2026-11-13T10:00', temp: 'x', pop: null }] }));
+    const w = parseWeather(doc({ hourly: [{ time: '2026-11-13T09:00', temp: 41, pop: 20, code: 3 }, { time: 5 }, null, { time: 'soon' }, { time: '2026-11-13T25:00' }, { time: '2026-11-13T10:00', temp: 'x', pop: null }] }));
     expect(w?.hourly).toEqual([
       { time: '2026-11-13T09:00', temp: 41, pop: 20, code: 3 },
       { time: '2026-11-13T10:00', temp: null, pop: null, code: null },
@@ -122,12 +122,16 @@ suite('headline', () => {
   });
   it('says when rain ends, and when it does not within 12 hours', () => {
     expect(headline(weather([hour(9, 80), hour(10, 60), hour(11, 20), hour(12, 70)]), at(9))).toBe('Rain ends around 11 AM');
-    expect(headline(weather([hour(9, 80), hour(10, 60)]), at(9))).toBe('Rain likely for the next 2 hours');
+    expect(headline(weather([hour(9, 80), hour(10, 60)]), at(9))).toBe('Rain likely to continue');
   });
   it('says dry by day and tonight, and only past hours are ignored', () => {
     expect(headline(weather(dryDay), at(9))).toBe('Dry all day');
     expect(headline(weather([hour(19, 0), hour(20, 10)]), at(19))).toBe('Dry tonight');
+    expect(headline(weather([hour(2, 0), hour(3, 10)]), at(2))).toBe('Dry tonight');
     expect(headline(weather([hour(8, 90), hour(10, 10)]), at(10))).toBe('Dry all day');
+  });
+  it('does not call a later hour "now" when the forecast starts late', () => {
+    expect(headline(weather([hour(14, 80), hour(15, 20)]), at(11))).toBe('Rain starts around 2 PM');
   });
   it('treats exactly 50 as wet and 49 as dry', () => {
     expect(headline(weather([hour(9, 0), hour(10, 50)]), at(9))).toBe('Rain starts around 10 AM');
@@ -142,6 +146,9 @@ suite('headline', () => {
 suite('tip', () => {
   it('suggests a jacket when it is cold now', () => {
     expect(tip(weather([hour(9, 0)], { temp: 41 }), at(9))).toBe('Bring a jacket');
+  });
+  it('combines the jacket and the umbrella when it is cold and rain is coming', () => {
+    expect(tip(weather([hour(9, 0), hour(11, 80)], { temp: 40 }), at(9))).toBe('Jacket and umbrella');
   });
   it('suggests an umbrella for rain on a mild day, not for snow', () => {
     expect(tip(weather([hour(9, 0), hour(14, 70)], { temp: 55 }), at(9))).toBe('Umbrella');
@@ -161,6 +168,7 @@ suite('hourBars', () => {
     expect(bars).toHaveLength(7);
     expect(bars[0]).toMatchObject({ label: 'Now', pop: 10, first: false });
     expect(bars[1]?.pop).toBe(0);
+    expect(hourBars([hour(14, 10), hour(15, 10)], at(11))[0]?.label).toBe('2 PM');  // a forecast that starts late has no Now
     expect(bars[3]).toMatchObject({ label: '12 PM', pop: 100, first: true });
     expect(bars[4]?.first).toBe(false);
     expect(hourBars([], at(9))).toEqual([]);

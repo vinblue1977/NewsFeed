@@ -46,16 +46,16 @@ function WeatherStrip({ weather, stale, now }: { weather: Weather; stale: boolea
   const detail = (alert ? [outlook, `${degrees(weather.temp)} now`, range] : [range, tip(weather, now)]).filter(Boolean).join(' · ');
   const top = (
     <>
-      <div class="wx-l">
-        <div class="wx-k">{alert ? 'WEATHER ALERT · NATIONAL WEATHER SERVICE' : 'LOCAL WEATHER'}</div>
-        <div class="wx-h">{title}</div>
-        {detail && <div class="wx-d">{detail}</div>}
-        {!weather.alertsOk && <div class="wx-sub">Weather alerts unavailable</div>}
-      </div>
-      <div class="wx-r">
+      <span class="wx-l">
+        <span class="wx-k">{alert ? 'WEATHER ALERT · NATIONAL WEATHER SERVICE' : 'LOCAL WEATHER'}</span>
+        <span class="wx-h">{title}</span>
+        {detail && <span class="wx-d">{detail}</span>}
+        {!weather.alertsOk && <span class="wx-sub">Weather alerts unavailable</span>}
+      </span>
+      <span class="wx-r">
         <b>{degrees(weather.temp)}</b>
-        {canOpen && <span>{open ? 'Hide hours' : 'Tap for hours'}</span>}
-      </div>
+        {canOpen && <span aria-hidden="true">{open ? 'Hide hours' : 'Tap for hours'}</span>}
+      </span>
     </>
   );
   return (

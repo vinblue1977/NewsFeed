@@ -45,7 +45,7 @@ export function parseWeather(value: unknown): Weather | undefined {
   };
 }
 
-const HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}/;
+const HOUR = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3])/;
 
 function parseHours(value: unknown): Hour[] {
   if (!Array.isArray(value)) return [];
@@ -98,6 +98,8 @@ function hourKey(now: Date): string {
   return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}T${p(now.getHours())}`;
 }
 
+const isCurrent = (h: Hour, now: Date): boolean => h.time.slice(0, 13) === hourKey(now);
+
 /** The next `count` forecast hours, starting with the current one. */
 export function nextHours(hourly: Hour[], now: Date, count: number): Hour[] {
   const key = hourKey(now);
@@ -108,7 +110,6 @@ export function nextHours(hourly: Hour[], now: Date, count: number): Hour[] {
 export function hourLabel(time: string): string {
   if (!HOUR.test(time)) return '';
   const h = Number(time.slice(11, 13));
-  if (h > 23) return '';
   return `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
@@ -118,22 +119,22 @@ const OUTLOOK_HOURS = 12;
 export function headline(w: Weather, now: Date): string {
   const hours = nextHours(w.hourly, now, OUTLOOK_HOURS);
   const first = hours[0];
-  if (first && wet(first)) {
+  if (first && isCurrent(first, now) && wet(first)) {  // only the present hour counts as "now": a stale forecast may start later
     const noun = isSnow(first.code) ? 'Snow' : 'Rain';
     const end = hours.find((h) => dry(h));
-    return end ? `${noun} ends around ${hourLabel(end.time)}` : `${noun} likely for the next ${hours.length} hours`;
+    return end ? `${noun} ends around ${hourLabel(end.time)}` : `${noun} likely to continue`;
   }
   const start = hours.find((h) => wet(h));
   if (start) return `${isSnow(start.code) ? 'Snow' : 'Rain'} starts around ${hourLabel(start.time)}`;
-  if (hours.some((h) => dry(h))) return now.getHours() >= 18 ? 'Dry tonight' : 'Dry all day';
+  if (hours.some((h) => dry(h))) return now.getHours() >= 17 || now.getHours() < 6 ? 'Dry tonight' : 'Dry all day';
   return describe(w.code, w.isDay).label;  // no precipitation data: do not claim a dry day
 }
 
 /** A short suggestion, or '' when there is nothing useful to say. */
 export function tip(w: Weather, now: Date): string {
-  if (w.temp < 45) return 'Bring a jacket';
-  const hours = nextHours(w.hourly, now, OUTLOOK_HOURS);
-  if (hours.some((h) => wet(h) && !isSnow(h.code))) return 'Umbrella';
+  const rain = nextHours(w.hourly, now, OUTLOOK_HOURS).some((h) => wet(h) && !isSnow(h.code));
+  if (w.temp < 45) return rain ? 'Jacket and umbrella' : 'Bring a jacket';
+  if (rain) return 'Umbrella';
   if (w.low !== null && w.low < 32) return 'Cold night ahead';
   return '';
 }
@@ -150,7 +151,7 @@ export function hourBars(hourly: Hour[], now: Date, count = 7): HourBar[] {
   const hours = nextHours(hourly, now, count);
   const firstWet = hours.findIndex((h) => wet(h));
   return hours.map((h, i) => ({
-    label: i === 0 ? 'Now' : hourLabel(h.time),
+    label: isCurrent(h, now) ? 'Now' : hourLabel(h.time),
     temp: h.temp,
     pop: Math.max(0, Math.min(100, h.pop ?? 0)),
     first: i === firstWet,
