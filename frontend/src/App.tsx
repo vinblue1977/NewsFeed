@@ -13,7 +13,7 @@ import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type S
 import type { Feed, Item, Topic } from './types';
 import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
 import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores, teamCards, teamMatcher, teamSuggestions } from './scores';
-import { degrees, describe, isFresh, type Weather } from './weather';
+import { degrees, headline, hourBars, isFresh, tip, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
 const screenKeyOf = (r: Route): string =>
@@ -28,7 +28,8 @@ const COVERAGE_SHOWN = 8;
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer' } as const;
 type Load = { state: 'loading' } | { state: 'error' } | { state: 'ready'; feed: Feed };
 
-function WeatherStrip({ weather, stale }: { weather: Weather; stale: boolean }) {
+function WeatherStrip({ weather, stale, now }: { weather: Weather; stale: boolean; now: Date }) {
+  const [open, setOpen] = useState(false);  // the hourly strip; not remembered between visits
   if (stale) {  // never present an old forecast or its alerts as current
     return (
       <section class="wx" aria-label="Local weather">
@@ -36,18 +37,46 @@ function WeatherStrip({ weather, stale }: { weather: Weather; stale: boolean }) 
       </section>
     );
   }
-  const { label, icon } = describe(weather.code, weather.isDay);
-  const range = weather.high !== null && weather.low !== null ? ` · H ${degrees(weather.high)} L ${degrees(weather.low)}` : '';
   const alert = weather.alerts[0];
+  const outlook = headline(weather, now);
+  const range = weather.high !== null && weather.low !== null ? `H ${degrees(weather.high)} L ${degrees(weather.low)}` : '';
+  const bars = hourBars(weather.hourly, now);
+  const canOpen = bars.length > 0;
+  const title = alert ? `${alert.event}${weather.alerts.length > 1 ? ` +${weather.alerts.length - 1}` : ''}` : outlook;
+  const detail = (alert ? [outlook, `${degrees(weather.temp)} now`, range] : [range, tip(weather, now)]).filter(Boolean).join(' · ');
+  const top = (
+    <>
+      <span class="wx-l">
+        <span class="wx-k">{alert ? 'WEATHER ALERT · NATIONAL WEATHER SERVICE' : 'LOCAL WEATHER'}</span>
+        <span class="wx-h">{title}</span>
+        {detail && <span class="wx-d">{detail}</span>}
+        {!weather.alertsOk && <span class="wx-sub">Weather alerts unavailable</span>}
+      </span>
+      <span class="wx-r">
+        <b>{degrees(weather.temp)}</b>
+        {canOpen && <span aria-hidden="true">{open ? 'Hide hours' : 'Tap for hours'}</span>}
+      </span>
+    </>
+  );
   return (
-    <section class="wx" aria-label="Local weather">
-      <div>
-        <div class="wx-k">LOCAL WEATHER</div>
-        <div>{icon} {label}{range}</div>
-        {alert && <div class="wx-alert">⚠ {alert.event}{weather.alerts.length > 1 ? ` +${weather.alerts.length - 1}` : ''} · National Weather Service</div>}
-        {!weather.alertsOk && <div class="wx-sub">Weather alerts unavailable</div>}
-      </div>
-      <b>{degrees(weather.temp)}</b>
+    <section class={alert ? 'wx alert' : 'wx'} aria-label="Local weather">
+      {canOpen
+        ? <button type="button" class="wx-top" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{top}</button>
+        : <div class="wx-top">{top}</div>}
+      {open && canOpen && (
+        <div class="wx-hours">
+          <ol>
+            {bars.map((h, n) => (
+              <li key={n} class={h.first ? 'first' : ''}>
+                <span class="hl">{h.label}</span>
+                <span class="bar" role="img" aria-label={`${Math.round(h.pop)}% chance of rain`}><i style={{ height: `${Math.max(3, Math.round(h.pop * 0.38))}px` }} /></span>
+                <b>{degrees(h.temp)}</b>
+              </li>
+            ))}
+          </ol>
+          <p>Bars show the chance of rain each hour</p>
+        </div>
+      )}
     </section>
   );
 }
@@ -628,7 +657,7 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   return (
     <div class="wrap">
       <header class="hdr"><div><div class="e">Near you</div><h1>Local</h1></div><SettingsLink /></header>
-      {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
+      {weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
       {!feed && !failed && !loaded && <p class="note">Loading local stories…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -1207,6 +1236,7 @@ export function App() {
         {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
+        {topic === 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && <MarketsStrip markets={markets} earnings={earnings} hidden={settings.hiddenTickers} now={now} />}
         {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} />}
 
@@ -1232,7 +1262,7 @@ export function App() {
           </>
         )}
 
-        {weather && <WeatherStrip weather={weather} stale={weatherStale} />}
+        {topic !== 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && grouped.map((g) => (
           <TopicSection key={g.topic} section={g} now={now} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
         ))}
