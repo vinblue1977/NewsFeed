@@ -37,6 +37,9 @@ SOURCES: tuple[Source, ...] = (
     _s("nbc", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/news", "us"),
     _s("thehill", "The Hill", "https://thehill.com/feed/", "us"),
     _s("bbc-us", "BBC News", "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml", "us"),
+    _s("abc-us", "ABC News", "https://abcnews.go.com/abcnews/usheadlines", "us"),
+    _s("nbc-us", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/us-news", "us"),
+    _s("washtimes", "The Washington Times", "https://www.washingtontimes.com/rss/headlines/news/", "us"),
     # US politics
     _s("politico", "Politico", "https://rss.politico.com/politics-news.xml", "us"),
     _s("npr-politics", "NPR", "https://feeds.npr.org/1014/rss.xml", "us"),
