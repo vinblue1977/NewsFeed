@@ -27,7 +27,7 @@ The app can send you notifications (breaking stories, weather alerts). There is 
      --value "$(python3 -c 'import json;print(json.load(open("vapid.json"))["privateKey"])')" --overwrite
    ```
 
-3. **Put the public key in the app.** Open `frontend/src/push.ts` and replace the placeholder value of `VAPID_PUBLIC_KEY` with the `publicKey` from `vapid.json` (URL-safe base64, 87 characters). Commit that change in a PR. The Turn on button stays disabled while the placeholder is still there.
+3. **Put the public key in the app.** The public key is not a secret and is the `VAPID_PUBLIC_KEY` constant in `frontend/src/push.ts` (URL-safe base64, 87 characters). It is already set for the current key pair. If you ever make a new pair, replace the constant with the new `publicKey` from `vapid.json` and commit that in a PR; the Turn on button is disabled while the value is not a valid key.
 
 4. **Install the app on your iPhone** (iOS 16.4 or later): open the site in Safari, Share, Add to Home Screen, then open it from the new icon. Notifications only work for an app opened from the Home Screen.
 
@@ -50,6 +50,8 @@ VAPID claims use the site's own address as the subject, not an email address.
 ## Changing preferences
 
 Change topics, weather alerts or quiet hours in Settings, then do steps 6 and 7 again. The server reads the parameter, so there is nothing to deploy.
+
+The registration you copy replaces the one stored in SSM, including the preferences. Preferences are kept on the phone, so if the app's stored data is ever cleared they return to the defaults: check the toggles before copying again.
 
 If you ever generate a new key pair, first tap Turn off in Settings, then Turn on again (an old subscription is tied to the old key), and redo steps 6 and 7.
 

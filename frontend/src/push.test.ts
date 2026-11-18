@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_PUSH, keyBytes, parsePushPrefs, pushState, readSubscription, registration, validTime, vapidReady, type PushEnv } from './push';
+import { DEFAULT_PUSH, keyBytes, parsePushPrefs, pushState, readSubscription, registration, sameKey, validTime, vapidReady, VAPID_PUBLIC_KEY, type PushEnv } from './push';
 
 const env = (over: Partial<PushEnv> = {}): PushEnv => ({
   hasServiceWorker: true, hasPushManager: true, hasNotification: true, permission: 'default', standalone: true, ios: true, subscribed: false, keyReady: true, ...over,
@@ -22,10 +22,21 @@ describe('push state', () => {
 });
 
 describe('vapid key', () => {
-  it('rejects the placeholder and accepts a real-looking public key', () => {
-    expect(vapidReady()).toBe(false);
+  it('accepts the key the app ships with and rejects placeholders and malformed keys', () => {
+    expect(vapidReady()).toBe(true);
+    expect(keyBytes(VAPID_PUBLIC_KEY)).toHaveLength(65);
+    expect(vapidReady('REPLACE_WITH_VAPID_PUBLIC_KEY')).toBe(false);
     expect(vapidReady('x')).toBe(false);
+    expect(vapidReady('A'.repeat(87))).toBe(false);  // right length, but not an uncompressed point (first byte 4)
     expect(vapidReady('B'.repeat(87))).toBe(true);
+  });
+  it('tells a subscription made with this key from one made with another', () => {
+    const mine = keyBytes(VAPID_PUBLIC_KEY).buffer;
+    const other = keyBytes('B'.repeat(87)).buffer;
+    expect(sameKey(mine)).toBe(true);
+    expect(sameKey(other)).toBe(false);
+    expect(sameKey(null)).toBe(false);
+    expect(sameKey(mine, 'not a key')).toBe(false);
   });
   it('turns a URL-safe base64 key into bytes', () => {
     expect([...keyBytes('AQID')]).toEqual([1, 2, 3]);

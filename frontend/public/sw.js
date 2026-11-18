@@ -84,7 +84,7 @@ self.addEventListener('fetch', (event) => {
 
 /* Web Push. The sender (the ingest Lambda) sends {title, body, url, tag}. A notification is ALWAYS shown for a push: iOS
  * revokes the permission of a site that receives pushes without showing one. */
-const APP_URL = /^\/#\/(story|read)\/[A-Za-z0-9_-]{1,64}$/;  // the only places a notification may open: a story screen
+const APP_URL = /^\/(#\/((story|read)\/[A-Za-z0-9_-]{1,64}|local|markets|sports))?$/;  // a story screen or a tab of the app, never anywhere else
 
 function text(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
@@ -117,7 +117,8 @@ self.addEventListener('notificationclick', (event) => {
   const target = event.notification.data && typeof event.notification.data.url === 'string' ? event.notification.data.url : '/';
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const w of windows) {
+    const seen = (w) => (w.focused ? 2 : 0) + (w.visibilityState === 'visible' ? 1 : 0);
+    for (const w of [...windows].sort((a, b) => seen(b) - seen(a))) {  // the window the user is looking at first
       try {
         await w.focus();
         await w.navigate(target);

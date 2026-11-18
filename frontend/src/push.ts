@@ -1,8 +1,8 @@
 /** Web Push: the pieces that need no browser. The phone's subscription and these preferences are copied by hand into AWS SSM
  *  (see docs/PUSH.md): there is no public endpoint, so nothing here is sent anywhere. */
 
-/** The VAPID PUBLIC key (not a secret). Replace the placeholder with the real value from docs/PUSH.md before building. */
-export const VAPID_PUBLIC_KEY = 'REPLACE_WITH_VAPID_PUBLIC_KEY';
+/** The VAPID PUBLIC key (not a secret; the private half is only in SSM, see docs/PUSH.md). A new key pair means a new value here. */
+export const VAPID_PUBLIC_KEY = 'BGM25Kuslhx3XjZ9hm5Gc2Dp0odNpTmwXb3y4TCtZIE2AupggVcoRn7Iz53c4GEJzZeRNYq8rUaWNR7atv3Eabw';
 
 export const PUSH_TOPICS = [
   { id: 'us', label: 'US' },
@@ -40,16 +40,32 @@ export function parsePushPrefs(v: unknown): PushPrefs {
   };
 }
 
-/** True once the placeholder has been replaced with something that looks like a VAPID public key (65 bytes, URL-safe base64). */
-export const vapidReady = (key: string = VAPID_PUBLIC_KEY): boolean => /^[A-Za-z0-9_-]{86,88}$/.test(key);
-
-/** The key in the form `pushManager.subscribe` wants. */
+/** The key in the form `pushManager.subscribe` wants. Throws on text that is not base64. */
 export function keyBytes(key: string): Uint8Array<ArrayBuffer> {
   const pad = '='.repeat((4 - (key.length % 4)) % 4);
   const raw = atob((key + pad).replace(/-/g, '+').replace(/_/g, '/'));
   const out = new Uint8Array(raw.length);
   for (let n = 0; n < raw.length; n += 1) out[n] = raw.charCodeAt(n);
   return out;
+}
+
+/** True once the placeholder has been replaced with a real VAPID public key: 65 bytes, an uncompressed P-256 point (first byte 4). */
+export function vapidReady(key: string = VAPID_PUBLIC_KEY): boolean {
+  if (!/^[A-Za-z0-9_-]{86,88}$/.test(key)) return false;
+  try {
+    const bytes = keyBytes(key);
+    return bytes.length === 65 && bytes[0] === 4;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a subscription (made with `applicationServerKey`) belongs to this key: an old one after a key change does not. */
+export function sameKey(applicationServerKey: ArrayBuffer | null | undefined, key: string = VAPID_PUBLIC_KEY): boolean {
+  if (!applicationServerKey || !vapidReady(key)) return false;
+  const have = new Uint8Array(applicationServerKey);
+  const want = keyBytes(key);
+  return have.length === want.length && have.every((b, n) => b === want[n]);
 }
 
 export interface PushEnv {

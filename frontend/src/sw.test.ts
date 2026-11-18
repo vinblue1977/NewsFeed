@@ -104,7 +104,7 @@ describe('push notifications', () => {
   });
 
   it('only opens story screens inside the app', async () => {
-    for (const url of ['https://evil.example/', '//evil.example', '/#/settings', '/#/story/a b', `${'java'}script:alert(1)`, 7]) {
+    for (const url of ['https://evil.example/', '//evil.example', '/#/settings', '/#/story/a b', '/#/local/x', `${'java'}script:alert(1)`, 7]) {
       const t = load();
       await t.push({ title: 't', url }).mock.calls[0]?.[0];
       expect(t.showNotification).toHaveBeenCalledWith('t', expect.objectContaining({ data: { url: '/' } }));
@@ -112,6 +112,23 @@ describe('push notifications', () => {
     const t = load();
     await t.push({ title: 't', url: '/#/read/xyz_1-2' }).mock.calls[0]?.[0];
     expect(t.showNotification).toHaveBeenCalledWith('t', expect.objectContaining({ data: { url: '/#/read/xyz_1-2' } }));
+  });
+
+  it('also opens the root and the Local, Markets and Sports tabs', async () => {
+    for (const url of ['/', '/#/local', '/#/markets', '/#/sports']) {
+      const t = load();
+      await t.push({ title: 't', url }).mock.calls[0]?.[0];
+      expect(t.showNotification).toHaveBeenCalledWith('t', expect.objectContaining({ data: { url } }));
+    }
+  });
+
+  it('drives the window the user is looking at first', async () => {
+    const t = load();
+    const hidden = { focused: false, visibilityState: 'hidden', focus: vi.fn(() => Promise.resolve()), navigate: vi.fn(() => Promise.resolve()) };
+    const front = { focused: true, visibilityState: 'visible', focus: vi.fn(() => Promise.resolve()), navigate: vi.fn(() => Promise.resolve()) };
+    await t.click('/#/story/abc', [hidden, front]);
+    expect(front.navigate).toHaveBeenCalledWith('/#/story/abc');
+    expect(hidden.navigate).not.toHaveBeenCalled();
   });
 
   it('limits long text and leaves the tag out when it is not a string', async () => {

@@ -846,31 +846,39 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [manual, setManual] = useState('');  // the registration shown for hand copying when the clipboard is not available
-  useEffect(() => { void readEnv().then(setInfo); }, []);
+  useEffect(() => {
+    const reread = () => { if (document.visibilityState === 'visible') void readEnv().then(setInfo); };  // back from iOS Settings: pick up a changed permission
+    reread();
+    document.addEventListener('visibilitychange', reread);
+    return () => document.removeEventListener('visibilitychange', reread);
+  }, []);
   if (!info) return null;
   const state = pushState(info.env);
   const sub = info.sub;
   const topicChange = (id: PushTopic, on: boolean) => onChange({ ...prefs, topics: PUSH_TOPICS.map((t) => t.id).filter((x) => (x === id ? on : prefs.topics.includes(x))) });
   const timeChange = (key: 'quietStart' | 'quietEnd', value: string) => { if (validTime(value)) onChange({ ...prefs, [key]: value }); };
-  const run = async (job: () => Promise<void>, failed: string) => {
+  const run = async (job: () => Promise<string | undefined>, failed: string) => {
     setBusy(true);
     setMsg('');
     try {
-      await job();
+      const note = await job();
+      if (note) setMsg(note);
     } catch {
       setMsg(failed);
+    } finally {
+      setInfo(await readEnv());  // never throws
+      setBusy(false);
     }
-    setInfo(await readEnv());
-    setBusy(false);
   };
+  const turnOn = async () => (await enablePush()) ? undefined : 'Notifications were not turned on. If you dismissed the iOS prompt, allow them in iOS Settings and try again.';
+  const turnOff = async () => { await disablePush(); return undefined; };
   const copy = () => {
     if (!sub) return;
     const text = registration(sub, prefs, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const manually = () => { setMsg('Could not copy automatically: select the text below and copy it.'); setManual(text); };
     setManual('');
-    navigator.clipboard.writeText(text).then(
-      () => setMsg('Copied. Paste it into the SSM parameter /news/push/registration (see docs/PUSH.md).'),
-      () => { setMsg('Could not copy automatically: select the text below and copy it.'); setManual(text); },
-    );
+    if (!navigator.clipboard) { manually(); return; }  // not a secure page, or a restricted browser view
+    navigator.clipboard.writeText(text).then(() => setMsg('Copied. Paste it into the SSM parameter /news/push/registration (see docs/PUSH.md).'), manually);
   };
   return (
     <>
@@ -878,7 +886,7 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
       <p class="note" role="status">{PUSH_NOTES[state]}</p>
       {(state === 'off' || state === 'no-key') && (
         <div class="btns">
-          <button type="button" class="btn" disabled={state === 'no-key' || busy} onClick={() => void run(async () => { await enablePush(); }, 'Could not turn notifications on.')}>Turn on notifications</button>
+          <button type="button" class="btn" disabled={state === 'no-key' || busy} onClick={() => void run(turnOn, 'Could not turn notifications on. Reload the app and try again.')}>Turn on notifications</button>
         </div>
       )}
       {(state === 'off' || state === 'no-key' || state === 'enabled') && (
@@ -899,12 +907,13 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
               <input type="time" value={prefs.quietEnd} onChange={(e) => timeChange('quietEnd', e.currentTarget.value)} />
             </label></li>
           </ul>
+          {prefs.topics.length === 0 && <p class="note">No news topics are chosen, so only {prefs.weather ? 'weather alerts' : 'nothing'} will be sent.</p>}
         </>
       )}
       {state === 'enabled' && (
         <div class="btns">
           <button type="button" class="btn" disabled={busy} onClick={copy}>Copy registration</button>
-          <button type="button" class="btn g" disabled={busy} onClick={() => void run(disablePush, 'Could not turn notifications off.')}>Turn off</button>
+          <button type="button" class="btn g" disabled={busy} onClick={() => void run(turnOff, 'Could not turn notifications off.')}>Turn off</button>
         </div>
       )}
       {state === 'enabled' && <p class="fine">After changing what you want to hear about, copy the registration again and paste it into SSM.</p>}
