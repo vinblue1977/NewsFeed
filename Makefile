@@ -37,7 +37,7 @@ privacy:            ## Fail on emails, AWS account IDs or data exports in tracke
 	scripts/check_personal_data.sh
 
 lock:               ## Regenerate the hashed lockfiles from the .in files
-	for d in requirements requirements-dev; do $(PYTHON) -m piptools compile --quiet --generate-hashes --allow-unsafe \
+	for d in requirements requirements-lambda requirements-dev; do $(PYTHON) -m piptools compile --quiet --generate-hashes --allow-unsafe \
 		--strip-extras --no-emit-index-url --output-file=$$d.txt $$d.in; done
 
 synth:              ## Synthesize CloudFormation and run cdk-nag security checks

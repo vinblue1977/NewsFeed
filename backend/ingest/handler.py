@@ -30,6 +30,7 @@ from ingest.weather import build_weather
 
 logger = logging.getLogger()
 PICTURE_CUTOFF_SECONDS = 50  # past this, no new pictures are fetched (the Lambda timeout is 90 s)
+PUSH_CUTOFF_SECONDS = 70  # past this, no notifications are sent (a push may take 5 s per message)
 
 
 def previous_state(s3: Any) -> tuple[dict[str, str], dict[str, str]]:
@@ -175,6 +176,20 @@ def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     return "ok"
 
 
+def notify(s3: Any, feed: dict[str, Any], started: float) -> str:
+    """Breaking-story pushes, after the feed is safely written. Never raises: a missing `cryptography`, a bad parameter or a
+    push service outage must not fail the run (the module is imported here so even a failed import is caught)."""
+    if time.monotonic() - started > PUSH_CUTOFF_SECONDS:
+        return "late"
+    try:
+        from ingest.push import run_push
+
+        return run_push(s3, feed)
+    except Exception:  # noqa: BLE001
+        logger.exception("push step failed")
+        return "failed"
+
+
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
     scores.json and the private watchlist quotes. Those are fetched alongside the feed and written even when the feed run
@@ -249,10 +264,12 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             statuses["markets"] = "superseded" if edited else write_doc(s3, watch_name(watch_key), watch)
         statuses.setdefault("schedule", "fresh")  # not rebuilt this run
         pool.shutdown(wait=False)
+    push_status = notify(s3, feed, started)  # only reached when the feed was written
     return {
         "status": "ok",
         "articles": articles_status,
         **statuses,
+        "push": push_status,
         "items": len(feed["items"]),
         "clusters": len(feed["clusters"]),
         "sources": len(feed["sources"]),
