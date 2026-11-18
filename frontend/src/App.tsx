@@ -1,4 +1,4 @@
-import type { ComponentChildren } from 'preact';
+import { Fragment, type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
@@ -6,6 +6,7 @@ import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
+import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -109,8 +110,9 @@ function StoryRow({ s, now }: { s: Story; now: Date }) {
   );
 }
 
-function TopicSection({ section, now, onAll }: { section: Pick<Section, 'label' | 'color' | 'lead' | 'more' | 'total'>; now: Date; onAll?: () => void }) {
+function TopicSection({ section, now, onAll, since }: { section: Pick<Section, 'label' | 'color' | 'lead' | 'more' | 'total'>; now: Date; onAll?: () => void; since?: number }) {
   const { lead } = section;
+  const split = since === undefined ? -1 : dividerAt([lead, ...section.more], since);  // 1 or more: the lead and some rows are new, the rest are not
   return (
     <section aria-label={section.label}>
       <div class="grp sech"><i style={{ background: section.color }} />{section.label}
@@ -120,7 +122,12 @@ function TopicSection({ section, now, onAll }: { section: Pick<Section, 'label' 
         <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
         <h2>{lead.item.title}</h2>
       </StoryAnchor>
-      {section.more.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+      {section.more.map((s, n) => (
+        <Fragment key={s.item.id}>
+          {n + 1 === split && since !== undefined && <NewDivider fresh={split} since={since} short />}
+          <StoryRow s={s} now={now} />
+        </Fragment>
+      ))}
     </section>
   );
 }
@@ -944,6 +951,11 @@ function Outlets({ outlets, total }: { outlets: string[]; total: number }) {
   );
 }
 
+/** A thin line with "N new since you last looked · time" in the middle. */
+function NewDivider({ fresh, since, short }: { fresh: number; since: number; short?: boolean }) {
+  return <div class="newdiv" role="separator"><span>{dividerLabel(fresh, since, undefined, short)}</span></div>;
+}
+
 function Source({ name, when, extra }: { name: string; when: string; extra?: string }) {
   return (
     <div class="src">
@@ -1092,9 +1104,27 @@ export function App() {
   const today = dayKey(now);
   const [readState, setReadState] = useState(() => ({ day: today, ids: loadRead(today) }));
   const readIds = readState.day === today ? readState.ids : loadRead(today);  // a new day starts with nothing read
+  const [since, setSince] = useState(() => sinceWhen(loadLastVisit(), Date.now()));  // where "new" starts; kept for the whole sitting
+  useEffect(() => {
+    saveVisit(Date.now());
+    let hiddenAt: number | undefined;
+    const onChange = () => {
+      const t = Date.now();
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = t;
+        saveVisit(t);
+        return;
+      }
+      if (hiddenAt !== undefined && t - hiddenAt >= MIN_GAP_MS) setSince(sinceWhen(hiddenAt, t));  // a short absence is the same sitting: keep the divider where it was
+      saveVisit(t);
+    };
+    document.addEventListener('visibilitychange', onChange);
+    return () => { document.removeEventListener('visibilitychange', onChange); };
+  }, []);
   const brief = useMemo(() => (topic === 'all' ? briefing(list.filter((s) => s.item.id !== lead?.item.id), now) : []), [list, lead, now, topic]);
   const rest = list.filter((s) => s.item.id !== lead?.item.id);
   const grouped = useMemo(() => (topic === 'all' ? sections(list, lead) : []), [list, lead, topic]);
+  const dividerAtShown = since === undefined ? -1 : dividerAt(rest.slice(0, shown), since);  // flat list of a topic tab, newest first
   const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has neither local nor sports stories:
   const hasSports = feed?.items.some((i) => i.topic === 'sports') ?? false;  // point to their tabs when that is all there is
   const weatherStale = weather ? !isFresh(weather.generated, now) : false;
@@ -1264,9 +1294,14 @@ export function App() {
 
         {topic !== 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && grouped.map((g) => (
-          <TopicSection key={g.topic} section={g} now={now} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
+          <TopicSection key={g.topic} section={g} now={now} since={since} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
         ))}
-        {topic !== 'all' && rest.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        {topic !== 'all' && rest.slice(0, shown).map((s, n) => (
+          <Fragment key={s.item.id}>
+            {n === dividerAtShown && since !== undefined && <NewDivider fresh={n} since={since} />}
+            <StoryRow s={s} now={now} />
+          </Fragment>
+        ))}
         {topic !== 'all' && rest.length > shown && (
           <div class="more"><button type="button" class="btn g" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>
         )}
