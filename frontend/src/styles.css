@@ -283,3 +283,5 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .bp { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 .bp i { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .bp u { display: block; height: 100%; background: var(--accent); }
+.newdiv { display: flex; align-items: center; gap: 10px; margin: 6px 16px 10px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.newdiv::before, .newdiv::after { content: ''; flex: 1; height: 1px; background: var(--line); }
