@@ -264,3 +264,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sched .gm.bye { background: rgba(224, 165, 63, .14); color: #e0a53f; }
 .sched .gm.bye .d span, .sched .gm.bye .w, .sched .gm.bye .o { color: #e0a53f; }
 .sched .more-sched { display: block; width: 100%; background: none; border: 0; border-top: 1px solid var(--line); padding: 11px 14px; font-size: 13px; color: var(--accent); min-height: 44px; }
+
+.brief { margin: 6px 16px 10px; padding: 14px 16px 12px; background: linear-gradient(160deg, #26364d, var(--card)); border: 1px solid var(--line); border-radius: 14px; }
+.bh { display: flex; justify-content: space-between; align-items: baseline; }
+.bh b { font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); }
+.bh span { font-size: 13px; color: var(--muted); }
+.bi { display: flex; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.bi:last-of-type { border-bottom: 0; }
+.bn { width: 14px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.bt b { display: block; font-size: 17px; font-weight: 500; line-height: 1.25; overflow-wrap: anywhere; }
+.bt small { display: block; margin-top: 3px; font-size: 13px; color: var(--muted); }
+.bi.seen .bt b, .bi.seen .bn { color: var(--muted); }
+.bp { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.bp i { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bp u { display: block; height: 100%; background: var(--accent); }

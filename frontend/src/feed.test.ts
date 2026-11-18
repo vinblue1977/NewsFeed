@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
+import type { Story } from './feed';
 
 const NOW = new Date('2026-11-13T12:00:00Z');
 const item = (id: string, over: Partial<Item> = {}): Item => ({
@@ -418,5 +419,23 @@ describe('World News corner', () => {
     expect(world?.lead.item.id).toBe('w2');
     expect(corners.some((c) => c.id === 'gadgets')).toBe(true);
     expect(subtopicRoute('world', 'world')).toBe('#/discovery/world');
+  });
+});
+
+describe('briefing', () => {
+  const now = new Date('2026-11-17T12:00:00+00:00');
+  const at = (id: string, topic: Item['topic'], sources: number, hoursAgo = 2): Story => ({
+    item: item(id, { topic, published: new Date(now.getTime() - hoursAgo * 3_600_000).toISOString() }),
+    cluster: undefined,
+    sources,
+  });
+  it('takes the best of each topic first, then the best of the rest', () => {
+    const list = [at('u1', 'us', 9), at('u2', 'us', 8), at('u3', 'us', 7), at('w', 'world', 2), at('b', 'business', 1)];
+    expect(briefing(list, now, 3).map((s) => s.item.id)).toEqual(['u1', 'w', 'b']);
+    expect(briefing(list, now, 5).map((s) => s.item.id)).toEqual(['u1', 'u2', 'u3', 'w', 'b']);
+  });
+  it('skips stories older than a day and handles a short list', () => {
+    expect(briefing([at('old', 'us', 9, 30), at('new', 'us', 1)], now).map((s) => s.item.id)).toEqual(['new']);
+    expect(briefing([], now)).toEqual([]);
   });
 });

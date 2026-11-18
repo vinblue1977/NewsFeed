@@ -201,6 +201,19 @@ export function topStory(list: Story[], now: Date): Story | undefined {
   return [...recentOnly(list, now)].sort((a, b) => b.sources - a.sources || b.item.published.localeCompare(a.item.published))[0];
 }
 
+/** The daily briefing: up to `size` stories from the last day. The best covered story of each topic is chosen first (so it is
+ *  not all one topic), then the best of what is left; the result is listed best covered first (most sources, ties newest). */
+export function briefing(list: Story[], now: Date, size = 5): Story[] {
+  const best = (a: Story, b: Story) => b.sources - a.sources || b.item.published.localeCompare(a.item.published);
+  const ranked = [...recentOnly(list, now)].sort(best);
+  const firsts = new Map<Topic, Story>();
+  for (const s of ranked) if (!firsts.has(s.item.topic)) firsts.set(s.item.topic, s);
+  const picked = [...firsts.values()].sort(best).slice(0, size);
+  const taken = new Set(picked);
+  const rest = ranked.filter((s) => !taken.has(s));
+  return [...picked, ...rest].slice(0, size).sort(best);
+}
+
 /** The other articles in the lead story's cluster ("Full coverage"), best three, one per source. */
 export function coverage(feed: Feed, story: Story, limit = 3): Item[] {
   if (!story.cluster) return [];

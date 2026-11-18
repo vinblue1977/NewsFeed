@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BREAKING_STEP_MS, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { dayKey, loadRead, markRead } from './briefing';
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
@@ -851,6 +852,28 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
   );
 }
 
+/** Today's briefing: the day's best-covered stories and how many are read; the heading says "You're caught up" once all are. */
+function Briefing({ stories: list, read, onOpen, now }: { stories: Story[]; read: string[]; onOpen: (id: string) => void; now: Date }) {
+  if (list.length === 0) return null;
+  const done = list.filter((s) => read.includes(s.item.id)).length;
+  const caught = done === list.length;
+  return (
+    <section class="brief" aria-label="Your briefing">
+      <div class="bh"><b>{caught ? "You're caught up" : 'Your briefing'}</b><span>{list.length} stories</span></div>
+      {list.map((s, n) => (
+        <a key={s.item.id} class={read.includes(s.item.id) ? 'bi seen' : 'bi'} href={storyLink(s)} onClick={() => onOpen(s.item.id)}>
+          <span class="bn">{n + 1}</span>
+          <div class="bt">
+            <b>{s.item.title}</b>
+            <small>{[topicLabel(s.item.topic), s.sources > 1 ? `${s.sources} outlets` : s.item.source, timeAgo(s.item.published, now)].join(' · ')}</small>
+          </div>
+        </a>
+      ))}
+      <div class="bp"><i><u style={{ width: `${(done / list.length) * 100}%` }} /></i><span>{done} of {list.length} read</span></div>
+    </section>
+  );
+}
+
 function Source({ name, when, extra }: { name: string; when: string; extra?: string }) {
   return (
     <div class="src">
@@ -988,6 +1011,10 @@ export function App() {
   const list = useMemo(() => (feed ? stories(feed, topic) : []), [feed, topic]);
   const lead = useMemo(() => (feed ? topStory(list, now) : undefined), [feed, list, now]);
   const full = useMemo(() => (feed && lead ? coverage(feed, lead) : []), [feed, lead]);
+  const today = dayKey(now);
+  const [readState, setReadState] = useState(() => ({ day: today, ids: loadRead(today) }));
+  const readIds = readState.day === today ? readState.ids : loadRead(today);  // a new day starts with nothing read
+  const brief = useMemo(() => (topic === 'all' ? briefing(list.filter((s) => s.item.id !== lead?.item.id), now) : []), [list, lead, now, topic]);
   const rest = list.filter((s) => s.item.id !== lead?.item.id);
   const grouped = useMemo(() => (topic === 'all' ? sections(list, lead) : []), [list, lead, topic]);
   const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has neither local nor sports stories:
@@ -1127,6 +1154,8 @@ export function App() {
         {raw && feed && raw.items.length > 0 && feed.items.length === 0 && <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>}
         {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
+
+        {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} />}
 
         {lead && (
           <>
