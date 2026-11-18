@@ -122,6 +122,16 @@ export function registration(sub: Subscription, prefs: PushPrefs, tz: string, si
 }
 
 /** The message for each state. */
+/** A few words after "Notifications" in Settings, so a closed section still says why they are not working. */
+export const PUSH_SUMMARY: Record<PushState, string> = {
+  unsupported: 'not supported',
+  'needs-install': 'add to Home Screen first',
+  'no-key': 'not set up',
+  blocked: 'blocked',
+  off: '',
+  enabled: 'on',
+};
+
 export const PUSH_NOTES: Record<PushState, string> = {
   unsupported: 'This browser cannot receive notifications.',
   'needs-install': 'On iPhone, add the app to the Home Screen (Share, then Add to Home Screen) and open it from there to turn notifications on.',
