@@ -3,6 +3,7 @@
  * - Pages and /data/*.json: the network first (up to 4 s, so a weak signal does not hang), then the last copy kept.
  * - /assets/* (content-hashed, never change) and story pictures: the kept copy first.
  * - /api/*, the private watch-/earn- files and anything that is not a same-origin GET: never touched.
+ * - push and notificationclick: Web Push notifications that open the story (see the end of this file).
  * Bump VERSION to drop every kept copy. */
 const VERSION = 'v1';
 const PAGES = `news-pages-${VERSION}`;
@@ -79,4 +80,53 @@ self.addEventListener('fetch', (event) => {
   else if (path.startsWith('/data/img/')) event.respondWith(cacheFirst(event, IMAGES, MAX_IMAGES));
   else if (path.startsWith('/data/')) event.respondWith(networkFirst(event, DATA));
   else if (request.mode === 'navigate') event.respondWith(networkFirst(event, PAGES, '/index.html'));
+});
+
+/* Web Push. The sender (the ingest Lambda) sends {title, body, url, tag}. A notification is ALWAYS shown for a push: iOS
+ * revokes the permission of a site that receives pushes without showing one. */
+const APP_URL = /^\/(#\/((story|read)\/[A-Za-z0-9_-]{1,64}|local|markets|sports))?$/;  // a story screen or a tab of the app, never anywhere else
+
+function text(value, max) {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+/** The notification's content from whatever arrived; a missing or malformed payload still gives a generic notification. */
+function notice(event) {
+  let data;
+  try {
+    data = event.data ? event.data.json() : undefined;
+  } catch {
+    data = undefined;
+  }
+  if (data === null || typeof data !== 'object') data = {};
+  const url = typeof data.url === 'string' && APP_URL.test(data.url) ? data.url : '/';
+  const tag = text(data.tag, 100);
+  return {
+    title: text(data.title, 120) || 'New story',
+    options: { body: text(data.body, 300), icon: '/icon-192.png', data: { url }, ...(tag ? { tag } : {}) },
+  };
+}
+
+self.addEventListener('push', (event) => {
+  const { title, options } = notice(event);
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = event.notification.data && typeof event.notification.data.url === 'string' ? event.notification.data.url : '/';
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const seen = (w) => (w.focused ? 2 : 0) + (w.visibilityState === 'visible' ? 1 : 0);
+    for (const w of [...windows].sort((a, b) => seen(b) - seen(a))) {  // the window the user is looking at first
+      try {
+        await w.focus();
+        await w.navigate(target);
+        return;
+      } catch {
+        /* this window cannot be driven: try the next, then open a new one */
+      }
+    }
+    await self.clients.openWindow(target);
+  })());
 });
