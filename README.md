@@ -31,3 +31,14 @@ Deploys run from CI on every push to `main`, through GitHub OIDC (no stored keys
    ```
 
 3. **Tell CI about it.** Set the repository variable `AWS_ROLE_ARN` to the role ARN from the stack output. Until it is set the deploy job is skipped.
+
+## Push notifications (backend)
+
+After each ingest run the Lambda can push a breaking story to your phone (Web Push through Apple's push service: free). It is off until two SecureString parameters exist (region us-east-2); with either missing, the step does nothing and logs one line.
+
+- `/news/push/vapid-private-key`: the VAPID private key as a PEM. The accepted format is the SEC1 PEM that `openssl ecparam -name prime256v1 -genkey -noout` prints (`-----BEGIN EC PRIVATE KEY-----`); PKCS#8 or a 32-byte URL-safe base64 scalar also work. Store it from a file (`--value file://key.pem`), never in the repo or on a command line you share.
+- `/news/push/registration`: written once the app can subscribe your phone (the app shows the JSON to copy). Shape: `{"v": 1, "site": "https://<the app's origin>", "subscription": {"endpoint": "...", "keys": {"p256dh": "...", "auth": "..."}}, "prefs": {"topics": ["us", "world", "india", "sports", "local"], "weather": true, "quiet": {"start": "22:00", "end": "07:00"}, "tz": "America/Chicago"}}`. `site` is the VAPID `sub` claim (a URL, never an email); it is a field of the registration because the stack cannot reference the site's domain from the Lambda without a circular dependency.
+
+What qualifies: a story covered by 6 or more outlets in the last 2 hours, or a BREAKING / Developing / LIVE headline from a trusted outlet, in a topic you switched on. At most 2 pushes per run and 5 per local day, nothing during quiet hours, each story once (the sent ids are in a private, hashed-name file under `data/`, pruned after 3 days). If the push service answers 404 or 410 the subscription is gone: the Lambda logs it and stops, and you register the phone again. Weather-alert pushes are a later change.
+
+The Lambda bundles `cryptography` at deploy time (`requirements-lambda.in`, locked with `make lock`; `infra/bundle.py` installs the Linux ARM64 wheels from the hashed lockfile, no Docker).

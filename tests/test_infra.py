@@ -208,7 +208,7 @@ def test_a_failed_ingest_is_not_retried_by_lambda() -> None:
     template.has_resource_properties("AWS::Lambda::EventInvokeConfig", {"MaximumRetryAttempts": 0})
 
 
-def test_ingest_can_read_back_only_the_feed_the_watchlist_and_the_private_earnings_file() -> None:
+def test_ingest_can_read_back_only_the_feed_the_watchlist_and_the_private_files() -> None:
     template = _synthesized(ACCOUNT)[1]
     statements = [
         stmt
@@ -216,10 +216,15 @@ def test_ingest_can_read_back_only_the_feed_the_watchlist_and_the_private_earnin
         for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
         if stmt["Action"] == "s3:GetObject"
     ]
-    assert len(statements) == 1
-    keys = sorted(r["Fn::Join"][1][-1] for r in statements[0]["Resource"])
-    # bucket ARN + exact keys; the one wildcard is the earnings file, whose name is a hash of a secret unknown at deploy time
-    assert keys == ["/data/earn-*", "/data/feed.json", "/data/schedule.json", "/private/watchlist.json"]
+    assert len(statements) == 1 or len({json.dumps(x, sort_keys=True) for x in statements}) == len(statements)
+    keys = sorted(
+        r["Fn::Join"][1][-1]
+        for stmt in statements
+        for r in (stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]])
+    )
+    # bucket ARN + exact keys; the wildcards are the private earnings and push-state files, whose names are hashes of a secret
+    # unknown at deploy time
+    assert keys == ["/data/earn-*", "/data/feed.json", "/data/push-*", "/data/schedule.json", "/private/watchlist.json"]
 
 
 def test_ingest_can_read_exactly_the_location_and_the_finnhub_parameters() -> None:
@@ -235,6 +240,38 @@ def test_ingest_can_read_exactly_the_location_and_the_finnhub_parameters() -> No
     template.has_resource_properties(
         "AWS::Lambda::Function",
         {"Environment": {"Variables": Match.object_like({"FINNHUB_PARAM": "/portfolio-tracker/finnhub-api-key"})}},
+    )
+
+
+def test_ingest_can_read_exactly_the_two_push_parameters_with_no_wildcard() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    resources = sorted(
+        arn.split(":parameter")[1]
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        if stmt["Action"] == "ssm:GetParameter"
+        for arn in (stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]])
+        if isinstance(arn, str)
+    )
+    # statements are merged by CDK, so this is every parameter any function can read: location (both), the two push ones, Finnhub
+    assert resources == sorted(
+        [
+            "/news/location",
+            "/news/location",
+            "/news/push/registration",
+            "/news/push/vapid-private-key",
+            "/portfolio-tracker/finnhub-api-key",
+        ]
+    )
+    template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {
+            "Environment": {
+                "Variables": Match.object_like(
+                    {"PUSH_KEY_PARAM": "/news/push/vapid-private-key", "PUSH_REG_PARAM": "/news/push/registration"}
+                )
+            }
+        },
     )
 
 

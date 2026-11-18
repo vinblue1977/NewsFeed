@@ -19,11 +19,15 @@ from aws_cdk import aws_s3_deployment as s3deploy
 from cdk_nag import NagPackSuppression, NagSuppressions, RegexAppliesTo
 from constructs import Construct
 
+from infra.bundle import ingest_code
+
 MANIFEST = "manifest.webmanifest"
 DATA_PREFIX = "data"  # CloudFront serves the data bucket at /data/*
 IMAGE_DAYS = 3  # story pictures (data/img/*) are deleted after this; the stories they belong to are gone by then
 WATCHLIST_KEY = "private/watchlist.json"  # outside data/, so CloudFront never serves it
 FINNHUB_PARAM = "/portfolio-tracker/finnhub-api-key"  # shared with the portfolio tracker: read-only, one parameter
+PUSH_KEY_PARAM = "/news/push/vapid-private-key"  # created by hand: the VAPID private key (a PEM)
+PUSH_REG_PARAM = "/news/push/registration"  # created by hand after the app is installed: the phone's push subscription
 LOCATION_PARAM = "/news/location"  # created by hand (see README); holds the home town, so it stays out of the repo
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
@@ -179,11 +183,16 @@ class NewsStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_14,
             architecture=lambda_.Architecture.ARM_64,
             handler="ingest.handler.handler",
-            code=lambda_.Code.from_asset("backend", exclude=["**/__pycache__"]),
+            code=ingest_code(),  # backend/ plus the packages of requirements-lambda.txt (infra/bundle.py)
             memory_size=256,
             retry_attempts=0,  # the schedule is the retry; a failed run must not triple the outbound fetches
             timeout=Duration.seconds(90),  # feeds (40 s budget), then pictures (12 s), then the writes
-            environment={**env, "DATA_PREFIX": DATA_PREFIX},
+            environment={
+                **env,
+                "DATA_PREFIX": DATA_PREFIX,
+                "PUSH_KEY_PARAM": PUSH_KEY_PARAM,
+                "PUSH_REG_PARAM": PUSH_REG_PARAM,
+            },
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )
         fn.add_to_role_policy(  # write only: no ACL, retention or legal-hold actions that `grant_put` would add
@@ -212,6 +221,18 @@ class NewsStack(Stack):
                 actions=["ssm:GetParameter"],
                 resources=[self.format_arn(service="ssm", resource="parameter", resource_name=FINNHUB_PARAM.lstrip("/"))],
             )
+        )
+        fn.add_to_role_policy(  # push: the VAPID key and the phone's subscription (read only, exactly these two parameters)
+            iam.PolicyStatement(
+                actions=["ssm:GetParameter"],
+                resources=[
+                    self.format_arn(service="ssm", resource="parameter", resource_name=name.lstrip("/"))
+                    for name in (PUSH_KEY_PARAM, PUSH_REG_PARAM)
+                ],
+            )
+        )
+        fn.add_to_role_policy(  # the private push state (sent story ids; named from a hash of a secret: only the prefix is known)
+            iam.PolicyStatement(actions=["s3:GetObject"], resources=[data_bucket.arn_for_objects(f"{DATA_PREFIX}/push-*")])
         )
         events.Rule(
             self,
@@ -296,9 +317,9 @@ class NewsStack(Stack):
                 reason("AwsSolutions-IAM4", "Basic execution role only writes this function's logs", [LOGS_POLICY]),
                 reason(
                     "AwsSolutions-IAM5",
-                    "Write access is limited to the data/ prefix of one bucket; reads of the private earnings "
-                    "file are limited to data/earn-* (its name is a hash of a secret, unknown at deploy time)",
-                    [RegexAppliesTo(regex=r"/^Resource::.*/data/(earn-)?\*$/g")],
+                    "Write access is limited to the data/ prefix of one bucket; reads of the private earnings and push-state "
+                    "files are limited to data/earn-* and data/push-* (names are hashes of a secret, unknown at deploy time)",
+                    [RegexAppliesTo(regex=r"/^Resource::.*/data/(earn-|push-)?\*$/g")],
                 ),
             ],
             apply_to_children=True,

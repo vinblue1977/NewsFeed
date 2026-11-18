@@ -1,0 +1,3 @@
+# Python packages bundled into the ingest Lambda at deploy time (infra/bundle.py), and used by the tests. Hashed lockfile: `make lock`.
+# cryptography: Web Push encryption and VAPID signing (backend/ingest/webpush.py). Everything else the Lambda needs ships with the runtime.
+cryptography>=46
