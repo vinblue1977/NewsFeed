@@ -10,7 +10,7 @@ import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhe
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
-import { PUSH_NOTES, PUSH_SUMMARY, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
+import { httpsOrigin, PUSH_NOTES, PUSH_SUMMARY, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
 import { disable as disablePush, enable as enablePush, readEnv } from './pushClient';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
@@ -874,7 +874,9 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
   const turnOff = async () => { await disablePush(); return undefined; };
   const copy = () => {
     if (!sub) return;
-    const text = registration(sub, prefs, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const site = httpsOrigin(location.origin);
+    if (!site) { setMsg('Open the installed app (its https address, not a local one) to copy the registration.'); return; }
+    const text = registration(sub, prefs, Intl.DateTimeFormat().resolvedOptions().timeZone, site);
     const manually = () => { setMsg('Could not copy automatically: select the text below and copy it.'); setManual(text); };
     setManual('');
     if (!navigator.clipboard) { manually(); return; }  // not a secure page, or a restricted browser view

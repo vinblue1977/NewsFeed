@@ -41,7 +41,7 @@ The app can send you notifications (breaking stories, weather alerts). There is 
    aws ssm put-parameter --name /news/push/registration --type SecureString --overwrite --value '<paste here>'
    ```
 
-   The registration is JSON: `{"v":1,"subscription":{...},"prefs":{"topics":[...],"weather":true,"quiet":{"start":"22:00","end":"07:00"},"tz":"America/Chicago"}}`.
+   The registration is JSON: `{"v":1,"site":"https://<the app's address>","subscription":{...},"prefs":{"topics":[...],"weather":true,"quiet":{"start":"22:00","end":"07:00"},"tz":"America/Chicago"}}`.
 
 8. **Delete `vapid.json`** from the folder it was created in.
 
