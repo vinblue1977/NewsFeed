@@ -7,6 +7,15 @@ export interface Weather {
   low: number | null;
   alerts: { event: string }[];
   alertsOk: boolean;
+  hourly: Hour[];
+}
+
+/** One forecast hour. `time` is local to the place, as Open-Meteo returns it ("2026-11-13T16:00"), never converted. */
+export interface Hour {
+  time: string;
+  temp: number | null;
+  pop: number | null;  // chance of precipitation, percent
+  code: number | null;
 }
 
 const MAX_AGE_MS = 3 * 60 * 60 * 1000;
@@ -32,7 +41,20 @@ export function parseWeather(value: unknown): Weather | undefined {
     low: num(day?.low),
     alerts: alerts.map((a: Record<string, unknown> | null) => ({ event: text(a?.event) })).filter((a) => a.event !== ''),
     alertsOk: v.alerts_ok === true,
+    hourly: parseHours(v.hourly),
   };
+}
+
+const HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}/;
+
+function parseHours(value: unknown): Hour[] {
+  if (!Array.isArray(value)) return [];
+  const out: Hour[] = [];
+  for (const h of value as (Record<string, unknown> | null)[]) {
+    if (typeof h?.time !== 'string' || !HOUR.test(h.time)) continue;
+    out.push({ time: h.time, temp: num(h.temp), pop: num(h.pop), code: num(h.code) });
+  }
+  return out;
 }
 
 /** A forecast older than this is hidden rather than shown as if it were current. */
@@ -62,3 +84,75 @@ export function describe(code: number | null, isDay: boolean | null): { label: s
 }
 
 export const degrees = (n: number | null): string => (n === null ? '–' : `${Math.round(n)}°`);
+
+/** The chance of precipitation (percent) from which an hour counts as wet. */
+export const WET = 50;
+
+const isSnow = (code: number | null): boolean => code !== null && ((code >= 71 && code <= 77) || code === 85 || code === 86);
+const wet = (h: Hour): boolean => h.pop !== null && h.pop >= WET;
+const dry = (h: Hour): boolean => h.pop !== null && h.pop < WET;
+
+/** "2026-11-13T16" for the device's clock, comparable as text with an hour's `time` (the forecast is for where the user is). */
+function hourKey(now: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}T${p(now.getHours())}`;
+}
+
+/** The next `count` forecast hours, starting with the current one. */
+export function nextHours(hourly: Hour[], now: Date, count: number): Hour[] {
+  const key = hourKey(now);
+  return hourly.filter((h) => h.time.slice(0, 13) >= key).slice(0, count);
+}
+
+/** "4 PM", "12 AM": read from the text, so no time zone can shift it. */
+export function hourLabel(time: string): string {
+  if (!HOUR.test(time)) return '';
+  const h = Number(time.slice(11, 13));
+  if (h > 23) return '';
+  return `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+const OUTLOOK_HOURS = 12;
+
+/** The one-line headline: when rain (or snow) starts or ends in the next 12 hours, else "Dry all day", else the current condition. */
+export function headline(w: Weather, now: Date): string {
+  const hours = nextHours(w.hourly, now, OUTLOOK_HOURS);
+  const first = hours[0];
+  if (first && wet(first)) {
+    const noun = isSnow(first.code) ? 'Snow' : 'Rain';
+    const end = hours.find((h) => dry(h));
+    return end ? `${noun} ends around ${hourLabel(end.time)}` : `${noun} likely for the next ${hours.length} hours`;
+  }
+  const start = hours.find((h) => wet(h));
+  if (start) return `${isSnow(start.code) ? 'Snow' : 'Rain'} starts around ${hourLabel(start.time)}`;
+  if (hours.some((h) => dry(h))) return now.getHours() >= 18 ? 'Dry tonight' : 'Dry all day';
+  return describe(w.code, w.isDay).label;  // no precipitation data: do not claim a dry day
+}
+
+/** A short suggestion, or '' when there is nothing useful to say. */
+export function tip(w: Weather, now: Date): string {
+  if (w.temp < 45) return 'Bring a jacket';
+  const hours = nextHours(w.hourly, now, OUTLOOK_HOURS);
+  if (hours.some((h) => wet(h) && !isSnow(h.code))) return 'Umbrella';
+  if (w.low !== null && w.low < 32) return 'Cold night ahead';
+  return '';
+}
+
+export interface HourBar {
+  label: string;
+  temp: number | null;
+  pop: number;  // 0-100, for the bar
+  first: boolean;  // the first wet hour of the strip
+}
+
+/** The expanded strip: the next 7 hours. */
+export function hourBars(hourly: Hour[], now: Date, count = 7): HourBar[] {
+  const hours = nextHours(hourly, now, count);
+  const firstWet = hours.findIndex((h) => wet(h));
+  return hours.map((h, i) => ({
+    label: i === 0 ? 'Now' : hourLabel(h.time),
+    temp: h.temp,
+    pop: Math.max(0, Math.min(100, h.pop ?? 0)),
+    first: i === firstWet,
+  }));
+}
