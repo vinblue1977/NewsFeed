@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_PUSH, keyBytes, parsePushPrefs, pushState, readSubscription, registration, sameKey, validTime, vapidReady, VAPID_PUBLIC_KEY, type PushEnv } from './push';
+import { DEFAULT_PUSH, PUSH_NOTES, PUSH_SUMMARY, keyBytes, parsePushPrefs, pushState, readSubscription, registration, sameKey, validTime, vapidReady, VAPID_PUBLIC_KEY, type PushEnv } from './push';
 
 const env = (over: Partial<PushEnv> = {}): PushEnv => ({
   hasServiceWorker: true, hasPushManager: true, hasNotification: true, permission: 'default', standalone: true, ios: true, subscribed: false, keyReady: true, ...over,
@@ -75,5 +75,14 @@ describe('registration', () => {
     expect(readSubscription({ endpoint: 'http://push.example/abc', keys: { p256dh: 'P', auth: 'A' } })).toBeUndefined();
     expect(readSubscription({ endpoint: 'https://push.example/abc', keys: { p256dh: 'P' } })).toBeUndefined();
     expect(readSubscription(null)).toBeUndefined();
+  });
+});
+
+describe('push summary', () => {
+  it('has a short label for every state, empty only when off', () => {
+    for (const state of Object.keys(PUSH_NOTES) as (keyof typeof PUSH_NOTES)[]) {
+      expect(state in PUSH_SUMMARY).toBe(true);
+      expect(PUSH_SUMMARY[state] === '').toBe(state === 'off');
+    }
   });
 });

@@ -10,7 +10,7 @@ import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhe
 import type { Route, Section, Story } from './feed';
 import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
-import { PUSH_NOTES, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
+import { PUSH_NOTES, PUSH_SUMMARY, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
 import { disable as disablePush, enable as enablePush, readEnv } from './pushClient';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
@@ -821,7 +821,7 @@ function TeamsEditor({ teams, suggestions, onChange }: { teams: string[]; sugges
   const add = (name: string) => { onChange(withTeam(teams, name)); setText(''); };
   const offered = suggestions.filter((n) => !teams.some((t) => t.toLowerCase() === n.toLowerCase())).slice(0, 12);
   return (
-    <div class="card fold teams">
+    <div class="teams">
       {teams.length > 0 && (
         <ul class="tchips">
           {teams.map((t) => <li key={t}><button type="button" aria-label={`Stop following ${t}`} onClick={() => onChange(teams.filter((x) => x !== t))}>{t} <span aria-hidden="true">×</span></button></li>)}
@@ -881,8 +881,8 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
     navigator.clipboard.writeText(text).then(() => setMsg('Copied. Paste it into the SSM parameter /news/push/registration (see docs/PUSH.md).'), manually);
   };
   return (
-    <>
-      <div class="grp">Notifications</div>
+    <details class="card fold">
+      <summary>Notifications{PUSH_SUMMARY[state] ? ` (${PUSH_SUMMARY[state]})` : ''}</summary>
       <p class="note" role="status">{PUSH_NOTES[state]}</p>
       {(state === 'off' || state === 'no-key') && (
         <div class="btns">
@@ -891,7 +891,7 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
       )}
       {(state === 'off' || state === 'no-key' || state === 'enabled') && (
         <>
-          <ul class="set">
+          <ul class="set inner">
             {PUSH_TOPICS.map((t) => (
               <li key={t.id}><label>{t.label} stories
                 <input type="checkbox" checked={prefs.topics.includes(t.id)} onChange={(e) => topicChange(t.id, e.currentTarget.checked)} />
@@ -918,8 +918,8 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
       )}
       {state === 'enabled' && <p class="fine">After changing what you want to hear about, copy the registration again and paste it into SSM.</p>}
       {msg && <p class="note" role="status">{msg}</p>}
-      {manual && <label class="fld" style={{ margin: '8px 16px' }}>Registration<textarea readOnly rows={5} value={manual} onFocus={(e) => e.currentTarget.select()} /></label>}
-    </>
+      {manual && <label class="fld" style={{ margin: '8px 0' }}>Registration<textarea readOnly rows={5} value={manual} onFocus={(e) => e.currentTarget.select()} /></label>}
+    </details>
   );
 }
 
@@ -956,8 +956,10 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
           </ul>
         </details>
       )}
-      <div class="grp">My teams</div>
-      <TeamsEditor teams={settings.myTeams} suggestions={suggestions} onChange={(myTeams) => update({ myTeams })} />
+      <details class="card fold">
+        <summary>My teams{settings.myTeams.length > 0 ? ` (${settings.myTeams.length} followed)` : ''}</summary>
+        <TeamsEditor teams={settings.myTeams} suggestions={suggestions} onChange={(myTeams) => update({ myTeams })} />
+      </details>
       <div class="grp">Markets watchlist</div>
       <WatchlistEditor watchKey={settings.watchKey} update={update} onSaved={onSaved} />
       {symbols.length === 0 && <p class="note">{!settings.watchKey ? 'Add your key above to see your watchlist.' : markets ? 'No symbols yet.' : marketsLoaded ? 'Watchlist unavailable right now.' : 'Loading the watchlist…'}</p>}
