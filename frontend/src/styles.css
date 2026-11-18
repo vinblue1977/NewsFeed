@@ -56,7 +56,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .topcard { display: block; margin: 0 16px 10px; padding: 18px 16px; background: linear-gradient(160deg, #26364d, var(--card)); border-radius: 14px; }
 .topcard .src { margin-top: 0; }
-.topcard h2 { font-size: 20px; line-height: 1.2; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.topcard h2 { font-size: 18px; line-height: 1.2; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 
 .full { margin: 14px 16px; border: 1px solid #33373d; border-radius: 14px; padding: 12px 14px; }
 .full .lab { font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: .3px; margin-bottom: 8px; }
@@ -70,7 +70,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .row { display: flex; gap: 12px; }
 .row .t { flex: 1; min-width: 0; }
 .row .src { margin-top: 0; }
-.row h3 { font-size: 20px; line-height: 1.2; margin: 0 0 4px; font-weight: 500; overflow-wrap: anywhere; }
+.row h3 { font-size: 18px; line-height: 1.2; margin: 0 0 4px; font-weight: 500; overflow-wrap: anywhere; }
 
 .more { padding: 14px 16px; text-align: center; }
 .btn { padding: 9px 18px; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 14px; }
@@ -190,7 +190,7 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .row.has-img .t { flex: 1; min-width: 0; }
 .lead { display: block; padding: 4px 16px 10px; }
 .lead .pic { margin-bottom: 8px; }
-.lead h2 { font-size: 19px; line-height: 1.25; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.lead h2 { font-size: 18px; line-height: 1.25; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .sech { justify-content: flex-start; }
 .sech .all { margin-left: auto; background: none; border: 0; padding: 0; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; }
 .art .pic { margin: 0 16px 14px; width: calc(100% - 32px); }
