@@ -7,7 +7,7 @@ import { useChrome } from './chrome';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import type { Route, Section, Story } from './feed';
-import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
+import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
@@ -20,7 +20,8 @@ const screenKeyOf = (r: Route): string =>
   r.kind === 'discovery' || r.kind === 'sports' ? `${r.kind}:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
 /** The Browse tab (was Discovery). Its route stays `#/discovery` and the code keeps the Discovery names so old links and bookmarks still work. */
 const BROWSE = 'Browse';
-const needsMarkets = (kind: string) => kind === 'markets' || kind === 'settings' || kind === 'quote';
+const HOME_MARKETS_MS = 5 * 60 * 1000;  // quotes move every 5 minutes: the strip on For you looks again no sooner than that
+const needsMarkets =(kind: string) => kind === 'home' || kind === 'markets' || kind === 'settings' || kind === 'quote';
 const PAGE = 30;
 const TICK_MS = 60_000;
 const COVERAGE_SHOWN = 8;
@@ -856,6 +857,28 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
   );
 }
 
+/** Home: the watchlist's biggest moves on one line and today's earnings. Hidden without a watchlist, quotes or fresh prices. */
+function MarketsStrip({ markets, earnings, hidden, now }: { markets: Markets | undefined; earnings: Earnings | undefined; hidden: string[]; now: Date }) {
+  if (!markets || !marketsFresh(markets.generated, now)) return null;
+  const shown = markets.tickers.filter((q) => !hidden.includes(q.symbol));
+  const { moves, more } = stripMoves(shown);
+  const reports = earningsToday(earnings, shown.map((q) => q.symbol), now);
+  if (moves.length === 0 && reports.length === 0) return null;
+  const phase = marketPhase(markets, now);
+  return (
+    <a class="mk" href="#/markets" aria-label="Markets watchlist">
+      <div class="mkh"><b>Markets · {phase}</b></div>
+      {moves.length > 0 && (
+        <div class="mkm">
+          {moves.map((m) => <div key={m.symbol}><b>{m.symbol}</b><span class={`chg ${m.dir}`}>{m.text}</span></div>)}
+          {more > 0 && <div><span class="chg">+{more} more</span></div>}
+        </div>
+      )}
+      {reports.length > 0 && <div class="mke">Earnings today: <b>{reports.join(', ')}</b></div>}
+    </a>
+  );
+}
+
 /** Today's briefing: the day's best-covered stories and how many are read; the heading says "You're caught up" once all are. */
 function Briefing({ stories: list, read, onOpen, now }: { stories: Story[]; read: string[]; onOpen: (id: string) => void; now: Date }) {
   if (list.length === 0) return null;
@@ -967,14 +990,22 @@ export function App() {
       setMarketsLoaded(true);
     });
   };
+  const homeMarketsAt = useRef(0);
+  const refreshMarketsFor = (kind: string) => {  // the home strip is not worth a request on every return to For you
+    if (kind === 'home') {
+      if (Date.now() - homeMarketsAt.current < HOME_MARKETS_MS) return;
+      homeMarketsAt.current = Date.now();
+    }
+    refreshMarkets();
+  };
   useEffect(() => {
     refresh();
-    if (needsMarkets(routeRef.current.kind)) refreshMarkets();
+    if (needsMarkets(routeRef.current.kind)) refreshMarketsFor(routeRef.current.kind);
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         setNow(new Date());
         refresh();
-        if (needsMarkets(routeRef.current.kind)) refreshMarkets();
+        if (needsMarkets(routeRef.current.kind)) refreshMarketsFor(routeRef.current.kind);
       }
     };
     document.addEventListener('visibilitychange', onVisible);
@@ -982,7 +1013,7 @@ export function App() {
       const next = parseRoute(location.hash);
       const prev = routeRef.current;
       if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery' || prev.kind === 'sports') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
-      if (needsMarkets(next.kind)) refreshMarkets();
+      if (needsMarkets(next.kind)) refreshMarketsFor(next.kind);
       if (next.kind === 'sports' && routeRef.current.kind !== 'sports') refreshScores();  // fresh scores on arrival, whatever their age
       routeRef.current = next;
       inAppNavs.current += 1;
@@ -990,7 +1021,7 @@ export function App() {
     };
     window.addEventListener('hashchange', onHash);
     const quotes = setInterval(() => {  // quotes move every 5 minutes in market hours
-      if (document.visibilityState === 'visible' && routeRef.current.kind === 'markets') refreshMarkets();
+      if (document.visibilityState === 'visible' && (routeRef.current.kind === 'markets' || routeRef.current.kind === 'home')) refreshMarketsFor(routeRef.current.kind);
     }, 5 * 60 * 1000);
     const live = setInterval(() => {  // the scores file is rewritten every few minutes
       if (document.visibilityState === 'visible' && routeRef.current.kind === 'sports') refreshScores();
@@ -1045,7 +1076,10 @@ export function App() {
   const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'discovery' || route.kind === 'sports' || route.kind === 'markets', () => {
     setNow(new Date());
     if (routeRef.current.kind === 'markets') refreshMarkets();
-    else refresh();
+    else {
+      refresh();
+      if (routeRef.current.kind === 'home') { homeMarketsAt.current = Date.now(); refreshMarkets(); }  // the strip on For you: a pull always asks
+    }
   });
   const chrome = useChrome(route.kind === 'story' || route.kind === 'read', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
@@ -1173,6 +1207,7 @@ export function App() {
         {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
+        {topic === 'all' && <MarketsStrip markets={markets} earnings={earnings} hidden={settings.hiddenTickers} now={now} />}
         {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} />}
 
         {lead && (
