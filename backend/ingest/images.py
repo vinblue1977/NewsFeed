@@ -124,13 +124,30 @@ def known_images(items: Iterable[Any]) -> dict[str, str]:
     return out
 
 
+def _fair_share(wanted: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Up to `limit` items, newest first within each group (topic and sub-topic), one from every group in turn.
+    A busy group (Hollywood, with several feeds posting every few minutes) cannot use up the run and leave South Cinema bare."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in wanted:  # `items` arrive newest first, and so does each group
+        groups.setdefault(f"{item.get('topic', '')}/{item.get('subtopic', '')}", []).append(
+            item
+        )  # a sub-topic id may equal a topic id
+    out: list[dict[str, Any]] = []
+    for rank in range(max((len(g) for g in groups.values()), default=0)):
+        out.extend(g[rank] for g in groups.values() if rank < len(g))
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
 def attach_images(
     s3: Any, bucket: str, prefix: str, items: list[dict[str, Any]], known: dict[str, str], *, fetch_new: bool = True
 ) -> int:
-    """Give each item its `img` file name: reuse last run's, or fetch and store new ones (newest first, at most MAX_PER_RUN).
+    """Give each item its `img` file name: reuse last run's, or fetch and store new ones.
+    At most MAX_PER_RUN are fetched, shared out fairly between sub-topics and topics, newest first in each.
     `fetch_new=False` (the run is already late) only reuses what exists. Removes the private `_image` URL from every item.
     Fail-soft: a story without a picture is simply shown without one."""
-    wanted = [i for i in items if i["id"] not in known and i.get("_image")][:MAX_PER_RUN] if fetch_new else []
+    wanted = _fair_share([i for i in items if i["id"] not in known and i.get("_image")], MAX_PER_RUN) if fetch_new else []
     pool = ThreadPoolExecutor(max_workers=WORKERS)
     futures = {i["id"]: pool.submit(fetch_image, i["_image"]) for i in wanted}
     wait(list(futures.values()), timeout=RUN_BUDGET_SECONDS)

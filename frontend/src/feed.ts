@@ -368,6 +368,15 @@ export function subtopicsOf(list: Story[]): string[] {
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
 }
 
+/** The Films tab's order: South Cinema first, then Bollywood, then Hollywood. */
+export const FILM_ORDER = ['south', 'bollywood', 'hollywood'];
+
+/** `subs` in `order` first, then any others in their given order. */
+export function inOrder(subs: string[], order: string[]): string[] {
+  const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
+  return [...subs].sort((a, b) => rank(a) - rank(b));
+}
+
 export interface SportSection {
   sub: string;
   label: string;
