@@ -268,19 +268,14 @@ describe('sports tab helpers', () => {
     expect(subtopicsOf([mk('a', 'nfl'), mk('b', 'soccer'), mk('c', 'soccer'), mk('d')])).toEqual(['soccer', 'nfl']);
     expect(subtopicsOf([])).toEqual([]);
   });
-  it('merges a sub-topic across both lists, keeps the newest as its lead, and keeps topics apart', () => {
+  it('merges a sub-topic, keeps the newest as its lead, and keeps topics apart', () => {
     const now = new Date('2026-11-15T12:00:00Z');
     const biz = { ...mk('b', 'markets'), item: { ...mk('b', 'markets').item, topic: 'business' as const, published: '2026-11-15T09:00:00Z' } };
     const newer = { ...mk('n', 'nfl'), item: { ...mk('n', 'nfl').item, published: '2026-11-15T11:00:00Z' } };
-    const corners = discovery([biz, mk('x', 'markets')], now, [mk('a', 'nfl'), newer]).corners;
+    const corners = discovery([biz, mk('x', 'markets'), mk('a', 'nfl'), newer], now).corners;
     expect(corners.map((c) => [c.topic, c.id, c.total, c.lead.item.id])).toEqual([['sports', 'nfl', 2, 'n'], ['sports', 'markets', 1, 'x'], ['business', 'markets', 1, 'b']]);
     expect(subtopicRoute('sports', 'nfl')).toBe('#/sports/nfl');
     expect(subtopicRoute('business', 'markets')).toBe('#/discovery/markets');
-  });
-  it('counts the extra list in the tiles; a sports tile still opens in the Sports tab', () => {
-    const now = new Date('2026-11-15T12:00:00Z');
-    const corners = discovery([], now, [mk('a', 'nfl'), mk('b', 'nfl')]).corners;
-    expect(corners.map((c) => [c.id, c.topic, c.total])).toEqual([['nfl', 'sports', 2]]);
   });
 });
 
@@ -416,12 +411,14 @@ describe('World News corner', () => {
     expect(topicLabel('entertainment')).toBe('Entertainment');
   });
 
-  it('keeps entertainment out of For you, and counts it in Browse tiles that open in Browse', () => {
+  it('keeps entertainment out of For you and out of Browse, and routes it to the Films tab', () => {
     const feed: Feed = { generated: '2026-11-16T11:00:00Z', items: [mk('u1', 'us').item, mk('e1', 'entertainment', 'hollywood').item, mk('e2', 'entertainment', 'south').item, mk('n1', 'sports', 'nfl').item], clusters: [] };
     expect(stories(feed, 'all').map((s) => s.item.id)).toEqual(['u1']);
-    const corners = discovery(stories(feed, 'all'), now, stories(feed, 'entertainment')).corners;
-    expect(corners.map((c) => c.id).sort()).toEqual(['hollywood', 'south']);
-    expect(subtopicRoute('entertainment', 'south')).toBe('#/discovery/south');
+    expect(discovery(stories(feed, 'all'), now).corners).toEqual([]);  // the Films tab has them, Browse has no film tiles
+    expect(subtopicRoute('entertainment', 'south')).toBe('#/films/south');
+    expect(parseRoute('#/films')).toEqual({ kind: 'films' });
+    expect(parseRoute('#/films/south')).toEqual({ kind: 'films', sub: 'south' });
+    expect(parseRoute('#/films/S!')).toEqual({ kind: 'home' });
   });
 
   it('adds a World News tile with the newest world story and the count', () => {

@@ -271,9 +271,9 @@ export function sections(list: Story[], top: Story | undefined): Section[] {
   });
 }
 
-export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'discovery'; sub?: string } | { kind: 'sports'; sub?: string } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
+export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'discovery'; sub?: string } | { kind: 'sports'; sub?: string } | { kind: 'films'; sub?: string } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/sports", "#/sports/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/sports", "#/sports/<sub-topic>", "#/films", "#/films/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
   if (hash === '#/local') return { kind: 'local' };
   if (hash === '#/discovery') return { kind: 'discovery' };
@@ -282,6 +282,9 @@ export function parseRoute(hash: string): Route {
   if (hash === '#/sports') return { kind: 'sports' };
   const sp = /^#\/sports\/([a-z0-9-]{1,30})$/.exec(hash);
   if (sp?.[1]) return { kind: 'sports', sub: sp[1] };
+  if (hash === '#/films') return { kind: 'films' };
+  const fl = /^#\/films\/([a-z0-9-]{1,30})$/.exec(hash);
+  if (fl?.[1]) return { kind: 'films', sub: fl[1] };
   if (hash === '#/markets') return { kind: 'markets' };
   if (hash === '#/settings') return { kind: 'settings' };
   const q = /^#\/quote\/(.{1,40})$/.exec(hash);
@@ -327,9 +330,9 @@ export const MAX_CORNERS = 8;
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
  * - corners: each sub-topic (gadgets, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story
- *   in the feed (any age, top story included; `extraList` adds the entertainment stories, which are not in `list`), so a tile's count
+ *   in the feed (any age, top story included), so a tile's count
  *   matches the list it opens. */
-export function discovery(list: Story[], now: Date, extraList: Story[] = []): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
+export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
   const rest = recentOnly(withoutTop(list, topStory(list, now)), now);
   const widely = rest
     .filter((s) => s.sources > 1)
@@ -338,7 +341,7 @@ export function discovery(list: Story[], now: Date, extraList: Story[] = []): { 
   const seen = new Set(widely);
   const justIn = rest.filter((s) => !seen.has(s)).slice(0, DISCOVERY_PER_SECTION);
   const byKey = new Map<string, Corner>();  // keyed by topic too: two topics may use one sub-topic id, and each tile opens one tab
-  for (const s of [...list, ...extraList]) {
+  for (const s of list) {
     const id = subtopicOf(s.item);
     if (!id) continue;
     const key = `${s.item.topic}/${id}`;
@@ -352,8 +355,9 @@ export function discovery(list: Story[], now: Date, extraList: Story[] = []): { 
   return { widely, justIn, corners: [...byKey.values()].sort((a, b) => b.lead.item.published.localeCompare(a.lead.item.published) || b.total - a.total).slice(0, MAX_CORNERS) };
 }
 
-/** Where a sub-topic's list lives: sports sub-topics in the Sports tab, the rest in Browse. */
+/** Where a sub-topic's list lives: sports sub-topics in the Sports tab, film ones in the Films tab, the rest in Browse. */
 export function subtopicRoute(topic: string, sub: string): string {
+  if (topic === 'entertainment') return `#/films/${sub}`;
   return topic === 'sports' ? `#/sports/${sub}` : `#/discovery/${sub}`;
 }
 
@@ -373,7 +377,7 @@ export interface SportSection {
   total: number;
 }
 
-const SPORT_COLORS = new Map<string, string>([['nfl', '#5b86c9'], ['cricket', '#3fb6a8'], ['tennis', '#e0a53f']]);
+const SPORT_COLORS = new Map<string, string>([['nfl', '#5b86c9'], ['cricket', '#3fb6a8'], ['tennis', '#e0a53f'], ['bollywood', '#e0743f'], ['south', '#d9788b'], ['hollywood', '#a98bd9']]);  // the Films tab reuses these sections
 
 /** The Sports tab's sections, one per sport: the story with a picture leads, then up to two more, most stories first. A story
  * without a sub-topic is left out. */
