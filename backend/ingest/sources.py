@@ -12,8 +12,8 @@ class Source:
     id: str
     name: str
     url: str
-    topic: str  # us | world | india | sports | tech | business | local
-    subtopic: str | None = None  # a Browse tile: sports, tech or business ids, e.g. nfl, f1, gadgets
+    topic: str  # us | world | india | sports | tech | business | entertainment | local
+    subtopic: str | None = None  # a Browse tile: sports, tech or business ids, e.g. nfl, gadgets, bollywood
     enabled: bool = True
     metered: bool = False
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
@@ -69,6 +69,55 @@ SOURCES: tuple[Source, ...] = (
     _s("espn-nfl", "ESPN", "https://www.espn.com/espn/rss/nfl/news", "sports", "nfl"),
     _s("cricinfo", "ESPNcricinfo", "https://www.espncricinfo.com/rss/content/story/feeds/0.xml", "sports", "cricket"),
     _s("guardian-tennis", "The Guardian", "https://www.theguardian.com/sport/tennis/rss", "sports", "tennis"),
+    # Entertainment (Browse tiles only: bollywood, south, hollywood)
+    _s("bollywoodhungama", "Bollywood Hungama", "https://www.bollywoodhungama.com/rss/news.xml", "entertainment", "bollywood"),
+    _s(
+        "ht-bollywood",
+        "Hindustan Times",
+        "https://www.hindustantimes.com/feeds/rss/entertainment/bollywood/rssfeed.xml",
+        "entertainment",
+        "bollywood",
+    ),
+    _s(
+        "ie-bollywood",
+        "The Indian Express",
+        "https://indianexpress.com/section/entertainment/bollywood/feed/",
+        "entertainment",
+        "bollywood",
+    ),
+    _s(
+        "toi-entertainment",
+        "Times of India",
+        "https://timesofindia.indiatimes.com/rssfeeds/1081479906.cms",
+        "entertainment",
+        "bollywood",
+    ),
+    _s(
+        "ie-telugu",
+        "The Indian Express",
+        "https://indianexpress.com/section/entertainment/telugu/feed/",
+        "entertainment",
+        "south",
+    ),
+    _s("ie-tamil", "The Indian Express", "https://indianexpress.com/section/entertainment/tamil/feed/", "entertainment", "south"),
+    _s(
+        "ht-tamil",
+        "Hindustan Times",
+        "https://www.hindustantimes.com/feeds/rss/entertainment/tamil-cinema/rssfeed.xml",
+        "entertainment",
+        "south",
+    ),
+    _s(
+        "ht-telugu",
+        "Hindustan Times",
+        "https://www.hindustantimes.com/feeds/rss/entertainment/telugu-cinema/rssfeed.xml",
+        "entertainment",
+        "south",
+    ),
+    _s("variety", "Variety", "https://variety.com/feed/", "entertainment", "hollywood", metered=True),
+    _s("thr", "The Hollywood Reporter", "https://www.hollywoodreporter.com/feed/", "entertainment", "hollywood", metered=True),
+    _s("deadline", "Deadline", "https://deadline.com/feed/", "entertainment", "hollywood"),
+    _s("guardian-film", "The Guardian", "https://www.theguardian.com/film/rss", "entertainment", "hollywood"),
     # Technology
     _s("ars-gadgets", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/gadgets", "tech", "gadgets"),
     _s("ars", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "tech"),
