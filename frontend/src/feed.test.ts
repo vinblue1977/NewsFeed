@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { FILM_ORDER, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 import type { Story } from './feed';
 
@@ -432,6 +432,14 @@ describe('World News corner', () => {
     expect(world?.lead.item.id).toBe('w2');
     expect(corners.some((c) => c.id === 'gadgets')).toBe(true);
     expect(subtopicRoute('world', 'world')).toBe('#/discovery/world');
+  });
+});
+
+describe('Films order', () => {
+  it('puts South Cinema first, then Bollywood, then Hollywood, and any other sub-topic last', () => {
+    expect(inOrder(['hollywood', 'bollywood', 'south'], FILM_ORDER)).toEqual(['south', 'bollywood', 'hollywood']);
+    expect(inOrder(['x', 'hollywood', 'south'], FILM_ORDER)).toEqual(['south', 'hollywood', 'x']);
+    expect(inOrder([], FILM_ORDER)).toEqual([]);
   });
 });
 

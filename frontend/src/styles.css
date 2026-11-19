@@ -87,9 +87,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: fixed; bottom: 0; left: 0; right: 0;
   background: var(--bg); border-top: 1px solid #33373d;
   display: flex; justify-content: space-around;
-  padding: 10px env(safe-area-inset-right) calc(10px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+  padding: 10px max(10px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
 }
-.tabbar button, .tabbar a { flex: 1; background: none; border: 0; padding: 4px 0; font-size: 13px; color: var(--muted); text-align: center; }
+.tabbar button, .tabbar a { flex: 1 1 0; min-width: 0; background: none; border: 0; padding: 4px 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); text-align: center; }
 .tabbar button.on, .tabbar a.on { color: var(--accent); font-weight: 600; }
 .tabbar button:disabled { opacity: .45; cursor: default; }
 

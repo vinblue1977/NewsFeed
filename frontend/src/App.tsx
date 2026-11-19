@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, imageSrc, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
@@ -426,18 +426,6 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
       {feed && !sub && found.widely.length + found.justIn.length + found.corners.length === 0 && (
         <div class="empty"><b>Nothing to discover yet</b><span>Check back after the next update.</span></div>
       )}
-      {!sub && found.widely.length > 0 && (
-        <>
-          <div class="grp">Widely covered</div>
-          {found.widely.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
-        </>
-      )}
-      {!sub && found.justIn.length > 0 && (
-        <>
-          <div class="grp">Just in</div>
-          {found.justIn.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
-        </>
-      )}
       {!sub && found.corners.length > 0 && (
         <>
           <div class="grp">Corners of the feed</div>
@@ -450,6 +438,18 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
               </a>
             ))}
           </div>
+        </>
+      )}
+      {!sub && found.widely.length > 0 && (
+        <>
+          <div class="grp">Widely covered</div>
+          {found.widely.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        </>
+      )}
+      {!sub && found.justIn.length > 0 && (
+        <>
+          <div class="grp">Just in</div>
+          {found.justIn.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
         </>
       )}
     </div>
@@ -668,9 +668,9 @@ function FilmsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, on
   const step = Math.floor(now.getTime() / BREAKING_STEP_MS);
   const rankNow = useMemo(() => new Date(step * BREAKING_STEP_MS), [step]);
   const all = useMemo(() => (feed ? mixSources(byBreaking(stories(feed, 'entertainment'), rankNow)) : []), [feed, rankNow]);
-  const subs = useMemo(() => subtopicsOf(all), [all]);
+  const subs = useMemo(() => inOrder(subtopicsOf(all), FILM_ORDER), [all]);
   const list = useMemo(() => (sub ? mixSources(all.filter((s) => s.item.subtopic === sub)) : all), [all, sub]);
-  const groups = useMemo(() => sportSections(all), [all]);  // the sections are generic: one per sub-topic
+  const groups = useMemo(() => subs.flatMap((id) => sportSections(all.filter((s) => s.item.subtopic === id))), [all, subs]);  // one section per sub-topic, in the tab's order
   const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/films/${next}` : '#/films'; };
   const page = list.slice(0, shown);
   const lead = page.find((s) => imageSrc(s.item) !== undefined);
