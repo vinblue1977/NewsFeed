@@ -9,9 +9,9 @@ export const TOPICS: { id: Topic | 'all'; label: string }[] = [
   { id: 'business', label: 'Business' },
 ];
 
-/** Topics with a tab of their own (Local, Sports, Entertainment): `stories(feed, 'all')` (For You) leaves them out. */
-const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local', 'sports', 'entertainment']);
-const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local'], ['sports', 'Sports'], ['entertainment', 'Entertainment']]);
+/** Topics with a tab of their own (Local, Sports, Entertainment, Science): `stories(feed, 'all')` (For You) leaves them out. */
+const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local', 'sports', 'entertainment', 'science']);
+const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local'], ['sports', 'Sports'], ['entertainment', 'Entertainment'], ['science', 'Science']]);
 const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -94,7 +94,7 @@ function outletsOf(lead: Item, members: Item[]): string[] {
 /** One story per cluster, newest first. The cluster's lead item stands for it; if the lead is missing, the newest member in
  * this topic does. A news tab (not `all`, not local or sports) lists only the clusters that belong to its topic, so a story is
  * in one tab only. Unclustered items stand alone.
- * `all` is every topic except the tab-only ones (local, sports, entertainment), which only their own topic returns. */
+ * `all` is every topic except the tab-only ones (local, sports, entertainment, science), which only their own topic returns. */
 export function stories(feed: Feed, topic: Topic | 'all'): Story[] {
   const wanted = (i: Item) => (topic === 'all' ? !TAB_ONLY_TOPICS.has(i.topic) : i.topic === topic);
   const members = new Map<string, Item[]>();
@@ -302,7 +302,7 @@ export function parseRoute(hash: string): Route {
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
 }
 
-const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', world: 'World News', gadgets: 'Technology', bollywood: 'Bollywood', south: 'South Cinema', hollywood: 'Hollywood' };
+const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', world: 'World News', gadgets: 'Technology', science: 'Science and Space', bollywood: 'Bollywood', south: 'South Cinema', hollywood: 'Hollywood' };
 
 /** A sub-topic id ("cricket") as a title ("Cricket"). */
 export function subtopicLabel(id: string): string {
@@ -330,9 +330,9 @@ export const MAX_CORNERS = 8;
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
  * - corners: each sub-topic (gadgets, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story
- *   in the feed (any age, top story included), so a tile's count
+ *   in the feed (any age, top story included; `extraList` adds the Browse-only science stories, which are not in `list`), so a tile's count
  *   matches the list it opens. */
-export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
+export function discovery(list: Story[], now: Date, extraList: Story[] = []): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
   const rest = recentOnly(withoutTop(list, topStory(list, now)), now);
   const widely = rest
     .filter((s) => s.sources > 1)
@@ -341,7 +341,7 @@ export function discovery(list: Story[], now: Date): { widely: Story[]; justIn: 
   const seen = new Set(widely);
   const justIn = rest.filter((s) => !seen.has(s)).slice(0, DISCOVERY_PER_SECTION);
   const byKey = new Map<string, Corner>();  // keyed by topic too: two topics may use one sub-topic id, and each tile opens one tab
-  for (const s of list) {
+  for (const s of [...list, ...extraList]) {
     const id = subtopicOf(s.item);
     if (!id) continue;
     const key = `${s.item.topic}/${id}`;

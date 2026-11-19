@@ -12,8 +12,8 @@ class Source:
     id: str
     name: str
     url: str
-    topic: str  # us | world | india | sports | tech | business | entertainment | local
-    subtopic: str | None = None  # a Browse tile: sports, tech or business ids, e.g. nfl, gadgets, bollywood
+    topic: str  # us | world | india | sports | tech | business | entertainment | science | local
+    subtopic: str | None = None  # a Browse tile: sports, tech or business ids, e.g. nfl, gadgets, science, bollywood
     enabled: bool = True
     metered: bool = False
     headline_only: bool = False  # Google News `site:` feeds: title, source and link, no summary
@@ -159,6 +159,12 @@ SOURCES: tuple[Source, ...] = (
     _s("thr", "The Hollywood Reporter", "https://www.hollywoodreporter.com/feed/", "entertainment", "hollywood", metered=True),
     _s("deadline", "Deadline", "https://deadline.com/feed/", "entertainment", "hollywood"),
     _s("guardian-film", "The Guardian", "https://www.theguardian.com/film/rss", "entertainment", "hollywood"),
+    # Science (Browse tile only; listed before Technology so a story both feeds carry is filed as science)
+    _s("nasa", "NASA", "https://www.nasa.gov/feed/", "science", "science"),
+    _s("ars-science", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/science", "science", "science"),
+    _s("bbc-science", "BBC News", "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml", "science", "science"),
+    _s("guardian-science", "The Guardian", "https://www.theguardian.com/science/rss", "science", "science"),
+    _s("npr-science", "NPR", "https://www.npr.org/rss/rss.php?id=1007", "science", "science"),
     # Technology
     _s("ars-gadgets", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/gadgets", "tech", "gadgets"),
     _s("ars", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "tech"),

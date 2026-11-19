@@ -407,7 +407,7 @@ describe('World News corner', () => {
   });
 
   it('labels the Technology and entertainment tiles', () => {
-    expect(['gadgets', 'bollywood', 'south', 'hollywood'].map(subtopicLabel)).toEqual(['Technology', 'Bollywood', 'South Cinema', 'Hollywood']);
+    expect(['gadgets', 'science', 'bollywood', 'south', 'hollywood'].map(subtopicLabel)).toEqual(['Technology', 'Science and Space', 'Bollywood', 'South Cinema', 'Hollywood']);
     expect(topicLabel('entertainment')).toBe('Entertainment');
   });
 
@@ -415,6 +415,9 @@ describe('World News corner', () => {
     const feed: Feed = { generated: '2026-11-16T11:00:00Z', items: [mk('u1', 'us').item, mk('e1', 'entertainment', 'hollywood').item, mk('e2', 'entertainment', 'south').item, mk('n1', 'sports', 'nfl').item], clusters: [] };
     expect(stories(feed, 'all').map((s) => s.item.id)).toEqual(['u1']);
     expect(discovery(stories(feed, 'all'), now).corners).toEqual([]);  // the Films tab has them, Browse has no film tiles
+    const sci: Feed = { generated: '2026-11-16T11:00:00Z', items: [mk('u1', 'us').item, mk('s1', 'science', 'science').item], clusters: [] };
+    expect(stories(sci, 'all').map((s) => s.item.id)).toEqual(['u1']);  // Science is Browse-only
+    expect(discovery(stories(sci, 'all'), now, stories(sci, 'science')).corners.map((c) => [c.id, c.total, subtopicRoute(c.topic, c.id)])).toEqual([['science', 1, '#/discovery/science']]);
     expect(subtopicRoute('entertainment', 'south')).toBe('#/films/south');
     expect(parseRoute('#/films')).toEqual({ kind: 'films' });
     expect(parseRoute('#/films/south')).toEqual({ kind: 'films', sub: 'south' });

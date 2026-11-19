@@ -197,7 +197,7 @@ def test_source_list_is_sane() -> None:
     ids = [s.id for s in SOURCES]
     assert len(ids) == len(set(ids))
     assert all(s.url.startswith("https://") for s in SOURCES)
-    assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business", "entertainment"}
+    assert {s.topic for s in SOURCES} == {"us", "world", "india", "sports", "tech", "business", "entertainment", "science"}
     assert {s.subtopic for s in SOURCES if s.topic == "entertainment"} == {"bollywood", "south", "hollywood"}
     headline_only = {s.id for s in SOURCES if s.headline_only}
     assert headline_only == {"nfl-com"}  # a sitemap, no summaries: kept on purpose, no other headline-only source is wanted
