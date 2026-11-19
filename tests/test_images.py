@@ -199,3 +199,33 @@ def test_tiny_pictures_are_not_taken() -> None:
         )
         == "https://i.example/q.jpg"
     )
+
+
+def test_fetch_page_head_checks_the_url_and_returns_only_the_head(monkeypatch) -> None:
+    import io
+
+    import pytest
+
+    monkeypatch.setattr(images, "_is_public", lambda host: host != "intranet.example")
+    with pytest.raises(images.ImageError):
+        images.fetch_page_head("https://intranet.example/x", 1, 10)
+    with pytest.raises(images.ImageError):
+        images.fetch_page_head("http://paper.example/x", 1, 10)
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(images._OPENER, "open", lambda req, timeout: Resp(b"<html>" + b"x" * 100))
+    assert images.fetch_page_head("https://paper.example/x", 1, 10) == b"<html>xxxx"
+    assert images.check_public_https("https://paper.example/x") is None
+
+    def boom(req, timeout):
+        raise OSError("down")
+
+    monkeypatch.setattr(images._OPENER, "open", boom)
+    with pytest.raises(images.ImageError):
+        images.fetch_page_head("https://paper.example/x", 1, 10)
