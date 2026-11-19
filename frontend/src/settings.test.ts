@@ -22,7 +22,7 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '', push: DEFAULTS.push });
+    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '', push: DEFAULTS.push });
     expect(parseSettings(JSON.stringify({ push: { topics: ['us', 'x'], weather: false, quietStart: '23:00' } })).push)
       .toEqual({ topics: ['us'], weather: false, quietStart: '23:00', quietEnd: '07:00' });
     expect(parseSettings(JSON.stringify({ push: 'junk' })).push).toEqual(DEFAULTS.push);
@@ -30,6 +30,8 @@ describe('settings', () => {
     expect(parseSettings(JSON.stringify({ watchCollapsed: 'yes' })).watchCollapsed).toBe(false);
     expect(parseSettings(JSON.stringify({ earningsCollapsed: true })).earningsCollapsed).toBe(true);
     expect(parseSettings(JSON.stringify({ earningsCollapsed: 1 })).earningsCollapsed).toBe(false);
+    expect(parseSettings(JSON.stringify({ cornersCollapsed: true })).cornersCollapsed).toBe(true);
+    expect(parseSettings(JSON.stringify({ cornersCollapsed: 1 })).cornersCollapsed).toBe(false);
     expect(parseSettings(JSON.stringify({ scheduleCollapsed: true })).scheduleCollapsed).toBe(true);
     expect(parseSettings(JSON.stringify({ scheduleCollapsed: 'yes' })).scheduleCollapsed).toBe(false);
     expect(parseSettings(JSON.stringify({ scoresCollapsed: ['nfl', 'bogus', 5, 'nfl', 'cricket'] })).scoresCollapsed).toEqual(['nfl', 'cricket']);

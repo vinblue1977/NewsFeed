@@ -391,7 +391,8 @@ function QuoteScreen({ markets, earnings, loaded, symbol, now, canGoBack }: { ma
 }
 
 /** The Browse screen (route and name kept as Discovery). Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
-function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onOpenSports, onRetry, canGoBack }: {
+function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onOpenSports, onRetry, canGoBack, cornersCollapsed, onToggleCorners }: {
+  cornersCollapsed: boolean; onToggleCorners: () => void;
   feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void; onOpenSports: () => void;
   onRetry: () => void; canGoBack: boolean;
 }) {
@@ -428,16 +429,21 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
       )}
       {!sub && found.corners.length > 0 && (
         <>
-          <div class="grp">Corners of the feed</div>
-          <div class="tiles">
-            {found.corners.map((c) => (
-              <a key={`${c.topic}/${c.id}`} class="tile" href={subtopicRoute(c.topic, c.id)} onClick={c.topic === 'sports' ? onOpenSports : onOpenSub}>
-                <b>{c.label}</b>
-                <span class="tl">{c.lead.item.title}</span>
-                <span class="tn">{c.total} {c.total === 1 ? 'story' : 'stories'} · {timeAgo(c.lead.item.published, now)} ›</span>
-              </a>
-            ))}
-          </div>
+          <button type="button" class="grp fold-h" aria-expanded={!cornersCollapsed} onClick={onToggleCorners}>
+            <span>Corners of the feed{cornersCollapsed ? ` (${found.corners.length})` : ''}</span>
+            <span class={'chev' + (cornersCollapsed ? '' : ' open')} aria-hidden="true">›</span>
+          </button>
+          {!cornersCollapsed && (
+            <div class="tiles">
+              {found.corners.map((c) => (
+                <a key={subtopicRoute(c.topic, c.id)} class="tile" href={subtopicRoute(c.topic, c.id)} onClick={c.topic === 'sports' ? onOpenSports : onOpenSub}>
+                  <b>{c.label}</b>
+                  <span class="tl">{c.lead.item.title}</span>
+                  <span class="tn">{c.total} {c.total === 1 ? 'story' : 'stories'} · {timeAgo(c.lead.item.published, now)} ›</span>
+                </a>
+              ))}
+            </div>
+          )}
         </>
       )}
       {!sub && found.widely.length > 0 && (
@@ -1236,6 +1242,7 @@ export function App() {
   };
   const toggleWatchlist = () => change((prev) => ({ ...prev, watchCollapsed: !prev.watchCollapsed }));
   const toggleEarnings = () => change((prev) => ({ ...prev, earningsCollapsed: !prev.earningsCollapsed }));
+  const toggleCorners = () => change((prev) => ({ ...prev, cornersCollapsed: !prev.cornersCollapsed }));
   const toggleSchedule = () => change((prev) => ({ ...prev, scheduleCollapsed: !prev.scheduleCollapsed }));
   const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
   const update = (next: Partial<Settings>) => change((prev) => ({ ...prev, ...next }));
@@ -1293,7 +1300,7 @@ export function App() {
         <PullIndicator {...pull} />
         <DiscoveryScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
           shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)} onOpenSports={() => setSportsShown(PAGE)}
-          canGoBack={inAppNavs.current > 0} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
+          canGoBack={inAppNavs.current > 0} cornersCollapsed={settings.cornersCollapsed} onToggleCorners={toggleCorners} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="discovery" />
       </>
     );

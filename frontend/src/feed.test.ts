@@ -435,6 +435,23 @@ describe('World News corner', () => {
   });
 });
 
+describe('one tile per list', () => {
+  const now = new Date('2026-11-16T12:00:00Z');
+  const mk = (id: string, topic: string, published: string) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic: topic as 'world', subtopic: 'science' }, cluster: undefined, sources: 1 });
+  it('joins a science copy of a World or Business story to the one Science tile', () => {
+    const list = [mk('a', 'science', '2026-11-16T10:00:00Z'), mk('b', 'world', '2026-11-16T11:00:00Z'), mk('c', 'business', '2026-11-16T09:00:00Z')];
+    const corners = discovery(list, now).corners;
+    expect(corners).toHaveLength(1);
+    expect(corners[0]).toMatchObject({ id: 'science', total: 3 });
+    expect(corners[0]?.lead.item.id).toBe('b');
+    expect(corners[0]?.topic).toBe('world');  // follows the lead
+  });
+  it('keeps a Sports tile and a Browse tile with the same sub-topic id apart', () => {
+    const corners = discovery([mk('w', 'world', '2026-11-16T10:00:00Z'), mk('s', 'sports', '2026-11-16T09:00:00Z')], now).corners;
+    expect(corners.map((c) => subtopicRoute(c.topic, c.id)).sort()).toEqual(['#/discovery/science', '#/sports/science']);
+  });
+});
+
 describe('Films order', () => {
   it('puts South Cinema first, then Bollywood, then Hollywood, and any other sub-topic last', () => {
     expect(inOrder(['hollywood', 'bollywood', 'south'], FILM_ORDER)).toEqual(['south', 'bollywood', 'hollywood']);
