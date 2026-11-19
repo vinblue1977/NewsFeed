@@ -22,10 +22,42 @@ class Source:
         False  # a Google News search already scoped to the places (not one limited to a publisher): skip the place filter
     )
     sitemap: bool = False  # the URL is a Google News sitemap (title, link, time), not RSS or Atom
+    only_matching: str | None = (
+        None  # regex: keep an item only when its title or summary matches (a mixed feed narrowed to one theme)
+    )
 
 
-def _s(id: str, name: str, url: str, topic: str, subtopic: str | None = None, *, metered: bool = False) -> Source:  # noqa: A002
-    return Source(id, name, url, topic, subtopic, metered=metered)
+# Words that mark a South Indian film story: the industries and languages, the big studios and the best-known stars and
+# directors. The Hindu's movie feed mixes Hindi, Hollywood and South news, so it is narrowed to what matches. Rough by
+# design: a South story that names none of these is missed, which beats showing Bond news under South Cinema.
+SOUTH_CINEMA = (
+    r"(?<!\w)("
+    r"tamil|telugu|kannada|malayalam|kollywood|tollywood|mollywood|sandalwood|south indian"
+    r"|south film|pan-indian"
+    r"|kerala|chennai|thiruvananthapuram|iffk|hombale|mythri"
+    r"|sun pictures"
+    r"|rajinikanth|kamal haasan|thalapathy|vijay sethupathi|ajith|suriya|dhanush|sivakarthikeyan|simbu"
+    r"|jayam ravi|lokesh kanagaraj|mani ratnam"
+    r"|allu arjun|prabhas|mahesh babu|ram charan|jr\.? ntr|chiranjeevi|nagarjuna|pawan kalyan"
+    r"|ss rajamouli|rajamouli|vijay deverakonda"
+    r"|mohanlal|mammootty|dulquer|fahadh|prithviraj|tovino|nivin pauly|jeethu joseph|amal neerad"
+    r"|rishab shetty|shivarajkumar|kichcha sudeep|rashmika|nayanthara|samantha ruth prabhu"
+    r"|sai pallavi|keerthy suresh|trisha krishnan|sreeleela|devi sri prasad"
+    r")(?!\w)"
+)
+
+
+def _s(
+    id: str,  # noqa: A002
+    name: str,
+    url: str,
+    topic: str,
+    subtopic: str | None = None,
+    *,
+    metered: bool = False,
+    only_matching: str | None = None,
+) -> Source:
+    return Source(id, name, url, topic, subtopic, metered=metered, only_matching=only_matching)
 
 
 SOURCES: tuple[Source, ...] = (
@@ -113,6 +145,15 @@ SOURCES: tuple[Source, ...] = (
         "https://www.hindustantimes.com/feeds/rss/entertainment/telugu-cinema/rssfeed.xml",
         "entertainment",
         "south",
+    ),
+    _s(
+        "thehindu-movies",
+        "The Hindu",
+        "https://www.thehindu.com/entertainment/movies/feeder/default.rss",
+        "entertainment",
+        "south",
+        metered=True,
+        only_matching=SOUTH_CINEMA,
     ),
     _s("variety", "Variety", "https://variety.com/feed/", "entertainment", "hollywood", metered=True),
     _s("thr", "The Hollywood Reporter", "https://www.hollywoodreporter.com/feed/", "entertainment", "hollywood", metered=True),

@@ -1,5 +1,5 @@
-import io
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -319,6 +319,42 @@ def test_a_duplicate_with_a_sub_topic_tags_the_story_whichever_feed_came_first()
     for order in ([general, tagged], [tagged, general]):
         items, _ = collect(order, now=NOW, fetcher=docs.__getitem__)
         assert len(items) == 1 and items[0]["subtopic"] == "gadgets"
+
+
+def test_a_mixed_feed_keeps_only_the_items_matching_its_filter() -> None:
+    from ingest.sources import SOUTH_CINEMA
+
+    when = "Fri, 13 Nov 2026 11:00:00 GMT"
+    docs = {
+        "https://a.example/f": rss(
+            ("Dhanush thanks fans for the opening", "https://a.example/1", "", when),
+            ("Jr NTR announces his next film", "https://a.example/2", "", when),
+            ("Robert Pattinson named the new Bond", "https://a.example/3", "", when),
+            ("Review", "https://a.example/4", "A Malayalam thriller that works", when),
+            ("Ayushmann Khurrana in a family drama", "https://a.example/5", "", when),
+        )
+    }
+    mixed = Source("mix", "Site", "https://a.example/f", "entertainment", "south", only_matching=SOUTH_CINEMA)
+    items, status = collect([mixed], now=NOW, fetcher=docs.__getitem__)
+    assert sorted(i["url"] for i in items) == ["https://a.example/1", "https://a.example/2", "https://a.example/4"]
+    assert (
+        status["mix"]["filtered"] == 2 and status["mix"]["items"] == 3
+    )  # a dropped story is counted, so a too-narrow filter shows
+
+
+def test_the_south_cinema_filter_ignores_look_alike_names() -> None:
+    from ingest.sources import SOUTH_CINEMA
+
+    pattern = re.compile(SOUTH_CINEMA, re.IGNORECASE)
+    for text in (
+        "Samantha Morton joins the Bond cast",
+        "Trisha Yearwood to headline gala",
+        "Shot in Hyderabad: a Hindi drama",
+        "Vikramaditya returns",
+    ):
+        assert not pattern.search(text), text
+    for text in ("TELUGU star praised", "Samantha Ruth Prabhu returns", "Kollywood box office"):
+        assert pattern.search(text), text
 
 
 def test_only_google_news_local_feeds_are_trusted() -> None:
