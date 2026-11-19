@@ -58,6 +58,30 @@ class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_CheckedRedirects)
 
 
+def check_public_https(url: str) -> None:
+    """Raises ImageError unless the URL is plain https on a public host."""
+    _check_url(url)
+
+
+def fetch_page_head(url: str, deadline_seconds: float, head_bytes: int) -> bytes:
+    """The first `head_bytes` of an untrusted page. Same URL checks as pictures, on every redirect hop too. Raises ImageError."""
+    _check_url(url)
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})  # noqa: S310  (https checked above)
+    deadline = time.monotonic() + deadline_seconds
+    body = bytearray()
+    try:
+        with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
+            while chunk := response.read(8192):
+                body += chunk
+                if len(body) >= head_bytes:
+                    return bytes(body[:head_bytes])
+                if time.monotonic() > deadline:
+                    raise ImageError("page is too slow")
+    except (OSError, http.client.HTTPException) as exc:
+        raise ImageError(f"fetch failed: {type(exc).__name__}") from exc
+    return bytes(body)
+
+
 def sniff(body: bytes) -> str | None:
     """The file extension for a JPEG, PNG or WebP (judged by the bytes, never by what the server says), else None."""
     if body.startswith(b"\xff\xd8\xff"):

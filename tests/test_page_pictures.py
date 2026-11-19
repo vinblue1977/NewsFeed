@@ -151,3 +151,62 @@ def test_add_page_pictures_skips_old_stories_and_gives_up_on_a_stalled_page(monk
     fresh = {"id": "n", "source_id": "nfl-com", "url": "https://www.nfl.com/news/n", "published": FRESH}
     assert add_page_pictures([fresh], None, slow, NOW) == 0
     assert "_image" not in fresh
+
+
+def local(item_id: str, url: str, topic: str = "local") -> dict:
+    return {"id": item_id, "source_id": "local-0", "topic": topic, "url": url, "published": FRESH}
+
+
+def test_og_image_any_host_accepts_a_local_publishers_https_picture_only() -> None:
+    assert og_image(page("https://cdn.paper.example/a.jpg"), any_host=True) == "https://cdn.paper.example/a.jpg"
+    assert og_image(page("http://cdn.paper.example/a.jpg"), any_host=True) is None
+    assert og_image(page("https://cdn.paper.example/a.jpg")) is None  # NFL.com stories stay on their own host
+
+
+def test_add_page_pictures_reaches_local_stories_that_link_to_the_publisher(monkeypatch) -> None:
+    seen: list[str] = []
+
+    def get(url: str) -> bytes:
+        seen.append(url)
+        return page("https://cdn.paper.example/a.jpg")
+
+    rows = [
+        local("l1", "https://paper.example/story-1"),
+        local("l2", "https://news.google.com/rss/articles/CBM1"),  # a redirect, not the publisher's page
+        local("l3", "https://paper.example/story-3", topic="us"),  # not a local story
+        local("l4", "https://paper.example/story-4"),
+    ]
+    assert add_page_pictures(rows, {"l4": "l4.jpg"}, get, NOW) == 1
+    assert seen == ["https://paper.example/story-1"]
+    assert rows[0]["_image"] == "https://cdn.paper.example/a.jpg"
+    assert all("_image" not in r for r in rows[1:])
+
+
+def test_add_page_pictures_drops_a_picture_shared_by_several_local_stories_and_takes_newest_first() -> None:
+    logo = "https://cdn.paper.example/logo.png"
+    rows = [local(f"s{n}", f"https://paper.example/{n}") for n in range(3)]
+    rows[0]["published"] = "2026-11-15T10:00:00+00:00"  # oldest
+    rows[2]["published"] = "2026-11-15T11:30:00+00:00"
+    seen: list[str] = []
+
+    def get(url: str) -> bytes:
+        seen.append(url)
+        return page(logo if not url.endswith("/2") else "https://cdn.paper.example/own.jpg")
+
+    assert add_page_pictures(rows, None, get, NOW) == 1  # s0 and s1 share the logo: dropped
+    assert seen[0].endswith("/2") or "/2" in "".join(seen)
+    assert rows[2]["_image"].endswith("own.jpg")
+    assert "_image" not in rows[0]
+    assert "_image" not in rows[1]
+
+
+def test_nfl_story_is_never_fetched_twice_even_if_marked_local() -> None:
+    both = {**local("x", "https://www.nfl.com/news/x"), "source_id": "nfl-com"}
+    calls: list[str] = []
+
+    def get(url: str) -> bytes:
+        calls.append(url)
+        return page(IMG, "tn")
+
+    assert add_page_pictures([both], None, get, NOW) == 1
+    assert len(calls) == 1
