@@ -22,9 +22,9 @@ aws-cdk-cloud-assembly-schema==55.6.0 \
     --hash=sha256:bd57346a87cb346b2f3dfd3bd54541c6781aa0999134db6106c4cf29b01940cf \
     --hash=sha256:c7d544633a4e9d62d9671571721bcee6f620103853d74e5e145b895be72d3a77
     # via aws-cdk-lib
-aws-cdk-lib==2.275.0 \
-    --hash=sha256:0902d7368e4600588cad9eab9124ade10d7d9d463ccf86ae18272e4369b1936b \
-    --hash=sha256:223e5b8c67bee9802d714493b380251a2e8ce55c8c477e5d44ca2c85f3b322ee
+aws-cdk-lib==2.276.0 \
+    --hash=sha256:536b2a3455d31bab0a5b5d5d206d912a4db3260de5c047743a844e07f539cd40 \
+    --hash=sha256:c70b4e7a95aca58c3b19dc2c9b7ad19774eaf7f2120804f4d5cce2f8ad107f92
     # via
     #   -r requirements.in
     #   cdk-nag
