@@ -398,8 +398,12 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
   const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
   const sportsAll = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
   const filmAll = useMemo(() => (feed ? stories(feed, 'entertainment') : []), [feed]);  // only to send an old film tile link to the Films tab
-  const found = useMemo(() => discovery(all, now), [all, now]);
-  const inSub = useMemo(() => (sub ? all.filter((s) => subtopicOf(s.item) === sub) : []), [all, sub]);
+  const scienceAll = useMemo(() => (feed ? stories(feed, 'science') : []), [feed]);  // Browse-only: not in For you
+  const found = useMemo(() => discovery(all, now, scienceAll), [all, scienceAll, now]);
+  const inSub = useMemo(() => {
+    if (!sub) return [];
+    return [...all, ...scienceAll].filter((s) => subtopicOf(s.item) === sub).sort((a, b) => b.item.published.localeCompare(a.item.published));  // newest first, as stories() does
+  }, [all, scienceAll, sub]);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/discovery'; };
   useEffect(() => {  // an old link to a sports sub-topic (#/discovery/cricket) now lives in the Sports tab
     if (sub && feed && inSub.length === 0 && sportsAll.some((s) => s.item.subtopic === sub)) location.replace(subtopicRoute('sports', sub));
