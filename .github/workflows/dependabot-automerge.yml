@@ -40,8 +40,8 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
 
   # Any merge into main (Dependabot's or ours) leaves open Dependabot PRs behind it, and branch protection wants
-  # them up to date. Dependabot rebases its own PRs, which also starts their checks; `gh pr update-branch`
-  # would make it refuse to.
+  # them up to date. Dependabot rebases its own PRs, which also starts their checks; `gh pr update-branch` would make it
+  # refuse to. A PR still UNKNOWN a minute after the merge is not rebased and the run fails, so it shows.
   rebase-others:
     if: >-
       github.event.action == 'closed' && github.event.pull_request.merged
@@ -53,10 +53,23 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: |
-          # Only the ones GitHub says are behind main. UNKNOWN (right after a merge) is skipped to avoid rebase loops.
-          for pr in $(gh pr list --repo "$REPO" --author 'app/dependabot' --state open --json number,mergeStateStatus --jq '.[]|select(.mergeStateStatus=="BEHIND")|.number'); do
+          # Right after a merge GitHub reports the other PRs as UNKNOWN while it recomputes them. Wait (up to a minute) until
+          # none is, then rebase only the ones it says are BEHIND main. An UNKNOWN one is never rebased (that could loop): if
+          # one is still UNKNOWN after the wait, the step warns and fails so the run is red instead of silently doing nothing.
+          prs() { gh pr list --repo "$REPO" --author 'app/dependabot' --state open --json number,mergeStateStatus; }
+          for _ in 1 2 3 4 5 6; do
+            all=$(prs) || { echo "::error::could not list the Dependabot PRs"; exit 1; }
+            [ -z "$(jq -r '.[]|select(.mergeStateStatus=="UNKNOWN")|.number' <<<"$all")" ] && break
+            sleep 10
+          done
+          for pr in $(jq -r '.[]|select(.mergeStateStatus=="BEHIND")|.number' <<<"$all"); do
             gh pr comment "$pr" --repo "$REPO" --body '@dependabot rebase'
           done
+          unknown=$(jq -r '.[]|select(.mergeStateStatus=="UNKNOWN")|.number' <<<"$all")
+          if [ -n "$unknown" ]; then
+            echo "::warning::still UNKNOWN after the wait, not rebased: $unknown"
+            exit 1
+          fi
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           REPO: ${{ github.repository }}
