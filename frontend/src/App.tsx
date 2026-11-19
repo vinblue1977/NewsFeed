@@ -20,7 +20,7 @@ import { degrees, headline, hourBars, isFresh, tip, type Weather } from './weath
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
 const screenKeyOf = (r: Route): string =>
-  r.kind === 'discovery' || r.kind === 'sports' ? `${r.kind}:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
+  r.kind === 'discovery' || r.kind === 'sports' || r.kind === 'films' ? `${r.kind}:${r.sub ?? ''}` : r.kind === 'home' || r.kind === 'local' || r.kind === 'markets' || r.kind === 'settings' ? r.kind : `${r.kind}:${r.id}`;
 /** The Browse tab (was Discovery). Its route stays `#/discovery` and the code keeps the Discovery names so old links and bookmarks still work. */
 const BROWSE = 'Browse';
 const HOME_MARKETS_MS = 5 * 60 * 1000;  // quotes move every 5 minutes: the strip on For you looks again no sooner than that
@@ -272,7 +272,7 @@ function PullIndicator({ distance, spinning }: { distance: number; spinning: boo
   );
 }
 
-type Tab = 'home' | 'discovery' | 'local' | 'sports' | 'markets';
+type Tab = 'home' | 'discovery' | 'local' | 'sports' | 'films' | 'markets';
 
 /** `current` is null on screens that are not a tab (Settings). */
 function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; current?: Tab | null }) {
@@ -283,6 +283,7 @@ function TabBar({ hidden = false, current = 'home' }: { hidden?: boolean; curren
       {link('home', '#', 'For you')}
       {link('local', '#/local', 'Local')}
       {link('sports', '#/sports', 'Sports')}
+      {link('films', '#/films', 'Films')}
       {link('markets', '#/markets', 'Markets')}
       {link('discovery', '#/discovery', BROWSE)}
     </nav>
@@ -396,16 +397,14 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
 }) {
   const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
   const sportsAll = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
-  const filmAll = useMemo(() => (feed ? stories(feed, 'entertainment') : []), [feed]);
-  const found = useMemo(() => discovery(all, now, filmAll), [all, filmAll, now]);
-  const inSub = useMemo(() => {
-    if (!sub) return [];
-    return [...all, ...filmAll].filter((s) => subtopicOf(s.item) === sub).sort((a, b) => b.item.published.localeCompare(a.item.published));  // same newest-first rule as stories()
-  }, [all, filmAll, sub]);
+  const filmAll = useMemo(() => (feed ? stories(feed, 'entertainment') : []), [feed]);  // only to send an old film tile link to the Films tab
+  const found = useMemo(() => discovery(all, now), [all, now]);
+  const inSub = useMemo(() => (sub ? all.filter((s) => subtopicOf(s.item) === sub) : []), [all, sub]);
   const goBack = () => { if (canGoBack) history.back(); else location.hash = '#/discovery'; };
   useEffect(() => {  // an old link to a sports sub-topic (#/discovery/cricket) now lives in the Sports tab
     if (sub && feed && inSub.length === 0 && sportsAll.some((s) => s.item.subtopic === sub)) location.replace(subtopicRoute('sports', sub));
-  }, [sub, feed, inSub, sportsAll]);
+    else if (sub && feed && inSub.length === 0 && filmAll.some((s) => s.item.subtopic === sub)) location.replace(subtopicRoute('entertainment', sub));
+  }, [sub, feed, inSub, sportsAll, filmAll]);
   const waiting = !feed && !failed && !loaded;
   return (
     <div class="wrap">
@@ -645,6 +644,51 @@ function SportsScreen({ feed, scores, schedule, scheduleCollapsed, onToggleSched
       {!sub && mineStories[0] && <TopicSection section={{ label: 'My teams', color: '#c97aa8', lead: mineStories[0], more: mineStories.slice(1), total: mineStories.length }} now={now} />}
       {!sub && sportGroups.map((g) => <TopicSection key={g.sub} section={g} now={now} onAll={() => pick(g.sub)} />)}
       {sub && list.length > 0 && hasScores(scoreView) && <div class="grp">Top stories</div>}
+      {sub && lead && (
+        <StoryAnchor story={lead} class="lead">
+          <Pic item={lead.item} class="pic" />
+          <Source name={lead.item.source} when={timeAgo(lead.item.published, now)} />
+          <h2>{lead.item.title}</h2>
+        </StoryAnchor>
+      )}
+      {sub && rest.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+      {sub && list.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
+    </div>
+  );
+}
+
+/** The Films tab: Bollywood, South Cinema and Hollywood stories, a section per sub-topic (a picture lead, then two more) with a chip each; a chip or "All" opens one list. */
+function FilmsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
+}) {
+  const step = Math.floor(now.getTime() / BREAKING_STEP_MS);
+  const rankNow = useMemo(() => new Date(step * BREAKING_STEP_MS), [step]);
+  const all = useMemo(() => (feed ? mixSources(byBreaking(stories(feed, 'entertainment'), rankNow)) : []), [feed, rankNow]);
+  const subs = useMemo(() => subtopicsOf(all), [all]);
+  const list = useMemo(() => (sub ? mixSources(all.filter((s) => s.item.subtopic === sub)) : all), [all, sub]);
+  const groups = useMemo(() => sportSections(all), [all]);  // the sections are generic: one per sub-topic
+  const pick = (next: string | undefined) => { onPick(); location.hash = next ? `#/films/${next}` : '#/films'; };
+  const page = list.slice(0, shown);
+  const lead = page.find((s) => imageSrc(s.item) !== undefined);
+  const rest = lead ? page.filter((s) => s !== lead) : page;
+  return (
+    <div class="wrap">
+      <header class="hdr"><div><div class="e">Movies and celebrities</div><h1>Entertainment</h1></div><SettingsLink /></header>
+      <nav class="chips" aria-label="Entertainment">
+        <button type="button" class={!sub ? 'on' : ''} aria-pressed={!sub} onClick={() => pick(undefined)}>All</button>
+        {subs.map((id) => (
+          <button key={id} type="button" class={id === sub ? 'on' : ''} aria-pressed={id === sub} onClick={() => pick(id)}>{subtopicLabel(id)}</button>
+        ))}
+        {sub && !subs.includes(sub) && <button type="button" class="on" aria-pressed="true">{subtopicLabel(sub)}</button>}
+      </nav>
+      {!feed && !failed && !loaded && <p class="note">Loading…</p>}
+      {failed && !feed && (
+        <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
+          <button type="button" class="btn" onClick={onRetry}>Try again</button></div>
+      )}
+      {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
+      {feed && list.length === 0 && <div class="empty"><b>No stories yet</b><span>{sub ? 'Nothing here right now.' : 'Film stories appear here.'}</span></div>}
+      {!sub && groups.map((g) => <TopicSection key={g.sub} section={g} now={now} onAll={() => pick(g.sub)} />)}
       {sub && lead && (
         <StoryAnchor story={lead} class="lead">
           <Pic item={lead.item} class="pic" />
@@ -1066,6 +1110,7 @@ export function App() {
   const [shown, setShown] = useState(PAGE);
   const [subShown, setSubShown] = useState(PAGE);  // rows shown in a Browse sub-topic list
   const [sportsShown, setSportsShown] = useState(PAGE);
+  const [filmsShown, setFilmsShown] = useState(PAGE);
   const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
@@ -1148,7 +1193,7 @@ export function App() {
     const onHash = () => {
       const next = parseRoute(location.hash);
       const prev = routeRef.current;
-      if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery' || prev.kind === 'sports') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
+      if ((prev.kind === 'home' || prev.kind === 'local' || prev.kind === 'discovery' || prev.kind === 'sports' || prev.kind === 'films') && screenKeyOf(next) !== screenKeyOf(prev)) scrolls.current[screenKeyOf(prev)] = window.scrollY;  // come back to the same place
       if (needsMarkets(next.kind)) refreshMarketsFor(next.kind);
       if (next.kind === 'sports' && routeRef.current.kind !== 'sports') refreshScores();  // fresh scores on arrival, whatever their age
       routeRef.current = next;
@@ -1227,7 +1272,7 @@ export function App() {
   useEffect(() => {
     window.scrollTo(0, scrolls.current[screenKey] ?? 0);
   }, [screenKey]);
-  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'discovery' || route.kind === 'sports' || route.kind === 'markets', () => {
+  const pull = usePullToRefresh(route.kind === 'home' || route.kind === 'local' || route.kind === 'discovery' || route.kind === 'sports' || route.kind === 'films' || route.kind === 'markets', () => {
     setNow(new Date());
     if (routeRef.current.kind === 'markets') refreshMarkets();
     else {
@@ -1258,6 +1303,18 @@ export function App() {
           shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)}
           onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="sports" />
+      </>
+    );
+  }
+
+  if (route.kind === 'films') {
+    return (
+      <>
+        <PullIndicator {...pull} />
+        <FilmsScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
+          shown={filmsShown} onMore={() => setFilmsShown((n) => n + PAGE)} onPick={() => setFilmsShown(PAGE)}
+          onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
+        <TabBar current="films" />
       </>
     );
   }
