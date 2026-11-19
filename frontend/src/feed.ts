@@ -340,16 +340,19 @@ export function discovery(list: Story[], now: Date, extraList: Story[] = []): { 
     .slice(0, DISCOVERY_PER_SECTION);
   const seen = new Set(widely);
   const justIn = rest.filter((s) => !seen.has(s)).slice(0, DISCOVERY_PER_SECTION);
-  const byKey = new Map<string, Corner>();  // keyed by topic too: two topics may use one sub-topic id, and each tile opens one tab
+  const byKey = new Map<string, Corner>();  // keyed by the list the tile opens: Sports and Browse may use one sub-topic id, and each opens its own tab
   for (const s of [...list, ...extraList]) {
     const id = subtopicOf(s.item);
     if (!id) continue;
-    const key = `${s.item.topic}/${id}`;
+    const key = subtopicRoute(s.item.topic, id);  // one tile per list it opens: a science copy of a World or Business story joins the Science tile, not a tile of its own
     const have = byKey.get(key);
     if (!have) byKey.set(key, { id, label: subtopicLabel(id), topic: s.item.topic, lead: s, total: 1 });
     else {
       have.total += 1;
-      if (s.item.published > have.lead.item.published) have.lead = s;
+      if (s.item.published > have.lead.item.published) {
+        have.lead = s;
+        have.topic = s.item.topic;  // the tile's topic follows its lead
+      }
     }
   }
   return { widely, justIn, corners: [...byKey.values()].sort((a, b) => b.lead.item.published.localeCompare(a.lead.item.published) || b.total - a.total).slice(0, MAX_CORNERS) };
