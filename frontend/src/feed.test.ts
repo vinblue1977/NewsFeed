@@ -277,7 +277,7 @@ describe('sports tab helpers', () => {
     expect(subtopicRoute('sports', 'nfl')).toBe('#/sports/nfl');
     expect(subtopicRoute('business', 'markets')).toBe('#/discovery/markets');
   });
-  it('lets Browse count sports tiles and send them to the Sports tab', () => {
+  it('counts the extra list in the tiles; a sports tile still opens in the Sports tab', () => {
     const now = new Date('2026-11-15T12:00:00Z');
     const corners = discovery([], now, [mk('a', 'nfl'), mk('b', 'nfl')]).corners;
     expect(corners.map((c) => [c.id, c.topic, c.total])).toEqual([['nfl', 'sports', 2]]);
@@ -409,6 +409,19 @@ describe('World News corner', () => {
     expect(subtopicOf(mk('b', 'tech', 'gadgets').item)).toBe('gadgets');
     expect(subtopicOf(mk('c', 'us').item)).toBeUndefined();
     expect(subtopicLabel('world')).toBe('World News');
+  });
+
+  it('labels the Technology and entertainment tiles', () => {
+    expect(['gadgets', 'bollywood', 'south', 'hollywood'].map(subtopicLabel)).toEqual(['Technology', 'Bollywood', 'South Cinema', 'Hollywood']);
+    expect(topicLabel('entertainment')).toBe('Entertainment');
+  });
+
+  it('keeps entertainment out of For you, and counts it in Browse tiles that open in Browse', () => {
+    const feed: Feed = { generated: '2026-11-16T11:00:00Z', items: [mk('u1', 'us').item, mk('e1', 'entertainment', 'hollywood').item, mk('e2', 'entertainment', 'south').item, mk('n1', 'sports', 'nfl').item], clusters: [] };
+    expect(stories(feed, 'all').map((s) => s.item.id)).toEqual(['u1']);
+    const corners = discovery(stories(feed, 'all'), now, stories(feed, 'entertainment')).corners;
+    expect(corners.map((c) => c.id).sort()).toEqual(['hollywood', 'south']);
+    expect(subtopicRoute('entertainment', 'south')).toBe('#/discovery/south');
   });
 
   it('adds a World News tile with the newest world story and the count', () => {
