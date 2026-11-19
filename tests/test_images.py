@@ -229,3 +229,13 @@ def test_fetch_page_head_checks_the_url_and_returns_only_the_head(monkeypatch) -
     monkeypatch.setattr(images._OPENER, "open", boom)
     with pytest.raises(images.ImageError):
         images.fetch_page_head("https://paper.example/x", 1, 10)
+
+
+def test_a_busy_group_cannot_use_up_the_pictures_of_a_run() -> None:
+    from ingest.images import _fair_share
+
+    busy = [{"id": f"h{n}", "subtopic": "hollywood"} for n in range(10)]
+    quiet = [{"id": "s1", "subtopic": "south"}, {"id": "s2", "subtopic": "south"}, {"id": "t1", "topic": "us"}]
+    chosen = [i["id"] for i in _fair_share(busy + quiet, 6)]
+    assert chosen[:3] == ["h0", "s1", "t1"] and {"s1", "s2", "t1"} <= set(chosen) and len(chosen) == 6
+    assert _fair_share([], 5) == []
