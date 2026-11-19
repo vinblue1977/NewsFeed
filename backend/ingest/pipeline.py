@@ -107,6 +107,8 @@ def collect(
     for source, parsed, error in results:
         kept = 0
         blocked = 0
+        filtered = 0
+        only = re.compile(source.only_matching, re.IGNORECASE) if source.only_matching else None
         for item in sorted(parsed, key=lambda i: i["published"], reverse=True):
             if kept >= MAX_PER_SOURCE:  # the cap counts stories that survive the filters, not raw entries
                 break
@@ -122,6 +124,9 @@ def collect(
                 continue
             if source.topic == "local" and not source.trusted and not (place_re and _mentions(item, place_re)):
                 continue
+            if only and not only.search(f"{item['title']} {item['summary']}"):
+                filtered += 1
+                continue
             key = _dedupe_key(item["url"])
             same_headline = (item["source"].lower(), item["title"].lower())  # a direct feed and Google News carry one story
             seen = items.get(key) or by_headline.get(same_headline)
@@ -136,6 +141,7 @@ def collect(
             "ok": error is None,
             "items": kept,
             **({"blocked": blocked} if blocked else {}),
+            **({"filtered": filtered} if filtered else {}),
             **({"error": error} if error else {}),
         }
     return sorted(items.values(), key=lambda i: i["published"], reverse=True), status
