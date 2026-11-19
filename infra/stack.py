@@ -331,6 +331,17 @@ class NewsStack(Stack):
             ],
             apply_to_children=True,
         )
+        for runtime_fn in (fn, api_fn):
+            NagSuppressions.add_resource_suppressions(
+                runtime_fn,
+                [
+                    reason(
+                        "AwsSolutions-L1",
+                        "Python 3.14 is the newest generally available Lambda runtime; 3.15 is a public preview with no SLA "
+                        "and not for production. Remove this when 3.15 is generally available and we move to it",
+                    )
+                ],
+            )
         # CDK's own helper Lambdas (bucket deployment, auto-delete, log retention) are the "Custom::*" and
         # "LogRetention*" children of the stack. Suppress only on those, so the Ingest function and everything of ours
         # stays checked. A CDK upgrade that adds a helper with another prefix fails cdk-nag in CI (fails closed);
