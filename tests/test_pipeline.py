@@ -672,7 +672,12 @@ def test_full_run_writes_the_quotes_to_the_private_file_only(monkeypatch: pytest
     assert (result["weather"], result["markets"], result["scores"]) == ("ok", "ok", "ok")
     assert asked == [["AAA"]]
     written = {p["Key"]: json.loads(p["Body"]) for p in s3.puts}
-    assert written[f"data/{watch_name(KEY)}.json"] == {"generated": "m", "indexes": [], "tickers": [{"symbol": "AAA"}]}
+    assert written[f"data/{watch_name(KEY)}.json"] == {
+        "generated": "m",
+        "indexes": [],
+        "tickers": [{"symbol": "AAA"}],
+        "premarket": None,
+    }
     assert "data/markets.json" not in written  # there is no public quotes file any more
     assert set(written) == {
         "data/articles.json",
@@ -708,6 +713,14 @@ def test_markets_run_with_every_market_closed_writes_nothing(monkeypatch: pytest
     _watch_setup(monkeypatch, s3, CLOSED)
     assert handler_module.handler({"only": "markets"}, object())["markets"] == "closed"
     assert s3.puts == []
+
+
+def test_a_markets_run_before_the_open_writes_the_premarket_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = WatchS3(["AAA"])
+    read = {"state": "bull", "futures": [], "vix": None, "yield10": None}
+    _watch_setup(monkeypatch, s3, {**CLOSED, "premarket": read})  # no market is open, but there is a read to publish
+    assert handler_module.handler({"only": "markets"}, object())["markets"] == "ok"
+    assert json.loads(s3.puts[0]["Body"])["premarket"] == read
 
 
 def test_a_forced_markets_run_writes_even_when_closed_or_empty(monkeypatch: pytest.MonkeyPatch) -> None:

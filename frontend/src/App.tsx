@@ -12,7 +12,7 @@ import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
-import { dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
+import { activePreMarket, dayRange, earningDate, earningDay, EARNINGS_DAYS, type Earning, type Earnings, earningTime, epsLabel, etClock, formatMove, historyChange, isFresh as marketsFresh, isMarketNews, marketPhase, earningsToday, preMarketLabel, type PreMarket, signedPercent, stripMoves, type Markets, priceLabel, type Quote, sparkline, upcoming, watchTerms } from './markets';
 import { usePullToRefresh } from './pull';
 import { httpsOrigin, PUSH_NOTES, PUSH_SUMMARY, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
 import { disable as disablePush, enable as enablePush, readEnv } from './pushClient';
@@ -787,6 +787,7 @@ function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collaps
   const soon = useMemo(() => upcoming(earnings, tickers.map((q) => q.symbol), now, EARNINGS_DAYS), [earnings, tickers, now]);
   const nextBy = useMemo(() => new Map(soon.map((e) => [e.symbol, e] as const)), [soon]);
   const stale = markets ? !marketsFresh(markets.generated, now) : false;
+  const pre = activePreMarket(markets, now);
   const open = markets && !stale ? tickers.some((q) => q.open) : false;  // `open` is frozen at build time
   const traded = tickers.find((q) => q.lastTrade)?.lastTrade;
   const news = useMemo(() => {
@@ -809,6 +810,7 @@ function MarketsScreen({ markets, earnings, hasKey, loaded, now, hidden, collaps
       {hasKey && !markets && !loaded && <p class="note">Loading quotes…</p>}
       {hasKey && !markets && loaded && <p class="note">No watchlist quotes yet. Add symbols in Settings; they appear within a few minutes.</p>}
       {markets && stale && <p class="note warn">Updated {timeAgo(markets.generated, now)}; prices may be out of date.</p>}
+      {markets && pre && <PreMarketCard pre={pre} generated={markets.generated} />}
       {soon.length > 0 && (
         <>
           <button type="button" class="grp fold-h" aria-expanded={!earnCollapsed} onClick={onToggleEarn}>
@@ -1139,17 +1141,51 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
   );
 }
 
+const VOTE_NOTE = { vix: { 1: 'calmer', [-1]: 'nervous', 0: 'steady' }, yield: { 1: 'easing', [-1]: 'rising', 0: 'steady' } } as const;
+const voteDir = (v: number) => (v > 0 ? 'up' : v < 0 ? 'down' : 'flat');
+
+/** Markets tab, before the open: the lean, the three index futures, and the VIX and 10-year yield that confirm or soften it. */
+function PreMarketCard({ pre, generated }: { pre: PreMarket; generated: string }) {
+  const lean = preMarketLabel(pre.state);
+  const bp = pre.yield10 && (pre.yield10.changeBp === 0 ? '0 bp' : `${pre.yield10.changeBp > 0 ? '+' : '−'}${Math.abs(pre.yield10.changeBp)} bp`);
+  return (
+    <section class="pm" aria-label="Pre-market read">
+      <div class="pmh">Pre-market · {etClock(generated)}</div>
+      <div class={`pml ${lean.dir}`}><span aria-hidden="true">{lean.arrow}</span> {lean.text}</div>
+      <div class="pmf">
+        {pre.futures.map((f) => {
+          const m = signedPercent(f.changePct);
+          return <div key={f.symbol}><b>{f.name}</b><span class={`chg ${m.dir}`}>{m.text}</span></div>;
+        })}
+      </div>
+      {(pre.vix || pre.yield10) && (
+        <div class="pmc">
+          {pre.vix && (
+            <div><span>VIX</span><span class="v"><b>{pre.vix.price.toFixed(1)}</b> <span class={`chg ${voteDir(pre.vix.vote)}`}>{signedPercent(pre.vix.changePct).text}</span> · {VOTE_NOTE.vix[pre.vix.vote as 1 | 0 | -1]}</span></div>
+          )}
+          {pre.yield10 && (
+            <div><span>10-year yield</span><span class="v"><b>{pre.yield10.price.toFixed(2)}%</b> <span class={`chg ${voteDir(pre.yield10.vote)}`}>{bp}</span> · {VOTE_NOTE.yield[pre.yield10.vote as 1 | 0 | -1]}</span></div>
+          )}
+        </div>
+      )}
+      <p class="pmn">Futures set the direction; the VIX and the 10-year confirm it. A signal, not a forecast.</p>
+    </section>
+  );
+}
+
 /** Home: the watchlist's biggest moves on one line and today's earnings. Hidden without a watchlist, quotes or fresh prices. */
 function MarketsStrip({ markets, earnings, hidden, now }: { markets: Markets | undefined; earnings: Earnings | undefined; hidden: string[]; now: Date }) {
   if (!markets || !marketsFresh(markets.generated, now)) return null;
   const shown = markets.tickers.filter((q) => !hidden.includes(q.symbol));
   const { moves, more } = stripMoves(shown);
   const reports = earningsToday(earnings, shown.map((q) => q.symbol), now);
-  if (moves.length === 0 && reports.length === 0) return null;
+  const pre = activePreMarket(markets, now);
+  if (moves.length === 0 && reports.length === 0 && !pre) return null;
   const phase = marketPhase(markets, now);
+  const lean = pre && preMarketLabel(pre.state);
   return (
     <a class="mk" href="#/markets" aria-label="Markets watchlist">
-      <div class="mkh"><b>Markets · {phase}</b></div>
+      <div class="mkh"><b>Markets · {phase}{lean && <span class={`mkp ${lean.dir}`}> · {lean.arrow} {lean.text}</span>}</b></div>
       {moves.length > 0 && (
         <div class="mkm">
           {moves.map((m) => <div key={m.symbol}><b>{m.symbol}</b><span class={`chg ${m.dir}`}>{m.text}</span></div>)}
