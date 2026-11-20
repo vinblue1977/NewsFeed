@@ -4,6 +4,7 @@ import { type Articles, parseArticles } from './article';
 import { type Earnings, type Markets, parseEarnings, parseMarkets } from './markets';
 import { WATCH_KEY } from './settings';
 import { type Kernel, parseKernel } from './kernel';
+import { type OnThisDay, parseOnThisDay } from './onthisday';
 import { parseSchedule, type Schedule } from './schedule';
 import { parseScores, type Scores } from './scores';
 import { parseWeather, type Weather } from './weather';
@@ -25,6 +26,18 @@ export async function loadWeather(): Promise<Weather | undefined> {
   try {
     const response = await fetch(WEATHER_URL, { cache: 'no-cache' });
     return response.ok ? parseWeather(await response.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const ONTHISDAY_URL = '/data/onthisday.json';
+
+/** Today's "on this day" fact, or undefined for any problem: the line is optional and must never break the page. */
+export async function loadOnThisDay(): Promise<OnThisDay | undefined> {
+  try {
+    const response = await fetch(ONTHISDAY_URL, { cache: 'no-cache' });
+    return response.ok ? parseOnThisDay(await response.json()) : undefined;
   } catch {
     return undefined;
   }

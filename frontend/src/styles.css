@@ -334,3 +334,6 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .ktable tbody th { font-weight: 500; }
 .ktable td:nth-child(2) { font-variant-numeric: tabular-nums; font-weight: 600; }
 .ktable td:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.otd { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.4; color: var(--muted); }
+.otd b { display: block; margin-bottom: 2px; font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); }
