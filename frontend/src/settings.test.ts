@@ -22,7 +22,7 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '', push: DEFAULTS.push });
+    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], myTeams: [], watchKey: '', push: DEFAULTS.push });
     expect(parseSettings(JSON.stringify({ push: { topics: ['us', 'x'], weather: false, quietStart: '23:00' } })).push)
       .toEqual({ topics: ['us'], weather: false, quietStart: '23:00', quietEnd: '07:00' });
     expect(parseSettings(JSON.stringify({ push: 'junk' })).push).toEqual(DEFAULTS.push);
@@ -82,5 +82,10 @@ describe('my teams settings', () => {
     expect(withTeam(['Bears'], 'x'.repeat(41))).toEqual(['Bears']);
     const full = Array.from({ length: 20 }, (_, i) => `T${i}`);
     expect(withTeam(full, 'More')).toEqual(full);
+  });
+
+  it('keeps only readable follows, once each', () => {
+    expect(parseSettings(JSON.stringify({ following: ['topic:gadgets', 'topic:gadgets', 'kw:US election,midterms', 'kw:', 'topic:', 'junk', 5] })).following).toEqual(['topic:gadgets', 'kw:US election,midterms']);
+    expect(parseSettings(JSON.stringify({ following: 'topic:gadgets' })).following).toEqual([]);
   });
 });

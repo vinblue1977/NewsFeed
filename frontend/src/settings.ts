@@ -1,4 +1,5 @@
 import { DEFAULT_PUSH, parsePushPrefs, type PushPrefs } from './push';
+import { cleanFollows } from './follow';
 import type { Feed } from './types';
 
 /** On-device preferences. Nothing here leaves the phone. */
@@ -12,6 +13,7 @@ export interface Settings {
   scheduleCollapsed: boolean;  // the Sports tab's My schedule card is folded away
   earningsCollapsed: boolean;  // the Markets upcoming earnings card is folded away
   cornersCollapsed: boolean;  // Browse's Corners of the feed tiles are folded away
+  following: string[];  // followed sub-topics and keywords (see follow.ts); shown as the Following section under For you's top story
   myTeams: string[];  // teams, countries or players to follow on the Sports tab, matched by name
   scoresCollapsed: string[];  // sports (nfl, tennis, cricket) whose scores are folded away under All on the Sports tab
   watchKey: string;  // names the private watchlist file; empty when not set
@@ -20,7 +22,7 @@ export interface Settings {
 
 export const SETTINGS_KEY = 'news.settings';
 export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
-export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], myTeams: [], watchKey: '', push: DEFAULT_PUSH };
+export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], myTeams: [], watchKey: '', push: DEFAULT_PUSH };
 export const SCORE_SPORTS = ['nfl', 'tennis', 'cricket'] as const;
 export const TEXT_SIZES: { id: TextSize; label: string; px: number }[] = [
   { id: 'small', label: 'Small', px: 16 },
@@ -42,7 +44,7 @@ export function parseSettings(raw: string | null): Settings {
     if (!v || typeof v !== 'object') return DEFAULTS;
     const size = TEXT_SIZES.find((t) => t.id === v.textSize)?.id ?? DEFAULTS.textSize;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
+    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
   } catch {
     return DEFAULTS;
   }
