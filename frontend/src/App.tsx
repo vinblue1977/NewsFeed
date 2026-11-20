@@ -1,9 +1,10 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
+import { loadArticles, loadEarnings, loadFeed, loadKernel, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
+import { type Kernel, kernelFresh } from './kernel';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
@@ -31,6 +32,18 @@ const TICK_MS = 60_000;
 const COVERAGE_SHOWN = 8;
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer' } as const;
 type Load = { state: 'loading' } | { state: 'error' } | { state: 'ready'; feed: Feed };
+
+/** The Technology list's header: the kernel's current releases, three rows. */
+function KernelTable({ kernel }: { kernel: Kernel }) {
+  return (
+    <table class="ktable" aria-label="Linux kernel releases">
+      <thead><tr><th scope="col">Linux kernel</th><th scope="col">Version</th><th scope="col">Released</th></tr></thead>
+      <tbody>
+        {kernel.rows.map((r) => <tr key={r.branch}><th scope="row">{r.branch}</th><td>{r.version}</td><td>{r.released}</td></tr>)}
+      </tbody>
+    </table>
+  );
+}
 
 function WeatherStrip({ weather, stale, now }: { weather: Weather; stale: boolean; now: Date }) {
   const [open, setOpen] = useState(false);  // the hourly strip; not remembered between visits
@@ -1189,6 +1202,7 @@ export function App() {
   const [localShown, setLocalShown] = useState(PAGE);  // kept here so coming back from a story finds the same rows and scroll place
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
+  const [kernel, setKernel] = useState<Kernel | undefined>();
   const [scores, setScores] = useState<Scores | undefined>();
   const [schedule, setSchedule] = useState<Schedule | undefined>();
   const scheduleAt = useRef(0);  // when the schedule was last asked for
@@ -1254,6 +1268,9 @@ export function App() {
     }
     refreshMarkets();
   };
+  useEffect(() => {  // a few hundred bytes, asked for only when the Technology list is opened
+    if (topic === 'tech') void loadKernel().then((k) => { if (k) setKernel(k); });
+  }, [topic]);
   useEffect(() => {
     refresh();
     if (needsMarkets(routeRef.current.kind)) refreshMarketsFor(routeRef.current.kind);
@@ -1500,6 +1517,7 @@ export function App() {
         {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
+        {topic === 'tech' && kernel && kernelFresh(kernel.generated, now) && <KernelTable kernel={kernel} />}
         {topic === 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && <MarketsStrip markets={markets} earnings={earnings} hidden={settings.hiddenTickers} now={now} />}
         {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} />}

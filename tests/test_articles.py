@@ -446,7 +446,7 @@ def setup(monkeypatch: pytest.MonkeyPatch) -> None:
     def down(*args: Any) -> dict[str, Any]:
         raise RuntimeError("down")
 
-    for name in ("build_weather", "build_markets", "build_scores"):
+    for name in ("build_weather", "build_markets", "build_scores", "build_kernel"):
         monkeypatch.setattr(handler_module, name, down)
 
 

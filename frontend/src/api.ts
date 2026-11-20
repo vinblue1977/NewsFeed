@@ -3,6 +3,7 @@ import type { Feed } from './types';
 import { type Articles, parseArticles } from './article';
 import { type Earnings, type Markets, parseEarnings, parseMarkets } from './markets';
 import { WATCH_KEY } from './settings';
+import { type Kernel, parseKernel } from './kernel';
 import { parseSchedule, type Schedule } from './schedule';
 import { parseScores, type Scores } from './scores';
 import { parseWeather, type Weather } from './weather';
@@ -24,6 +25,18 @@ export async function loadWeather(): Promise<Weather | undefined> {
   try {
     const response = await fetch(WEATHER_URL, { cache: 'no-cache' });
     return response.ok ? parseWeather(await response.json()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const KERNEL_URL = '/data/kernel.json';
+
+/** The kernel releases, or undefined for any problem: the table is optional and must never break the page. */
+export async function loadKernel(): Promise<Kernel | undefined> {
+  try {
+    const response = await fetch(KERNEL_URL, { cache: 'no-cache' });
+    return response.ok ? parseKernel(await response.json()) : undefined;
   } catch {
     return undefined;
   }

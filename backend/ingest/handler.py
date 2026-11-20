@@ -18,6 +18,7 @@ from ingest.config import cached_location, earnings_name, finnhub_key, watch_nam
 from ingest.earnings import build_earnings, is_due
 from ingest.espn_pictures import add_pictures
 from ingest.images import attach_images, known_images
+from ingest.kernel import build_kernel
 from ingest.markets import build_markets
 from ingest.page_pictures import add_page_pictures
 from ingest.pipeline import collect, local_sources
@@ -76,7 +77,7 @@ def build_feed(
 
 
 def soft(name: str, build: Callable[[], dict[str, Any]]) -> dict[str, Any] | None:
-    """A side document (weather, markets, scores), or None. Fail-soft: trouble is logged, never raised; the feed is unaffected."""
+    """A side document (weather, markets, scores, kernel), or None. Fail-soft: trouble is logged, never raised."""
     try:
         return build()
     except Exception:  # noqa: BLE001  (a missing side document must not fail the ingest run; its old file stays)
@@ -203,8 +204,8 @@ def send_push_test() -> str:
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
-    scores.json and the private watchlist quotes. Those are fetched alongside the feed and written even when the feed run
-    is rejected, so none of them holds up another."""
+    scores.json, kernel.json and the private watchlist quotes. Those are fetched alongside the feed and written even when
+    the feed run is rejected, so none of them holds up another."""
     started = time.monotonic()
     if event.get("only") == "push-test":  # by hand only: one test message, nothing else runs
         result = send_push_test()
@@ -215,10 +216,11 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         return run_markets(s3, location, force=event.get("force") is True)
     watch_key = location.get("watch_key")
     symbols = saved_symbols(s3, watch_key) or []
-    pool = ThreadPoolExecutor(max_workers=5)
+    pool = ThreadPoolExecutor(max_workers=6)
     side = {
         "weather": pool.submit(soft, "weather", lambda: build_weather(location["lat"], location["lon"])),
         "scores": pool.submit(soft, "scores", build_scores),
+        "kernel": pool.submit(soft, "kernel", build_kernel),
     }
     if watch_key and symbols:  # no watchlist, no quotes to fetch
         side["markets"] = pool.submit(soft, "markets", lambda: build_markets(symbols))
