@@ -35,3 +35,9 @@ export function kernelFresh(generated: string, now: Date): boolean {
   const age = now.getTime() - new Date(generated).getTime();
   return age > -CLOCK_SKEW_MS && age < MAX_AGE_MS;  // an unreadable date is not fresh
 }
+
+/** The table's header: "Linux kernel", plus the Stable version when asked (shown while the table is folded, so the key fact stays visible). */
+export function kernelTitle(kernel: Kernel, withStable: boolean): string {
+  const stable = kernel.rows.find((r) => r.branch === 'Stable');
+  return withStable && stable ? `Linux kernel · ${stable.version}` : 'Linux kernel';
+}

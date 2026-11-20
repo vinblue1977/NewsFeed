@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadKernel, loadOnThisDay, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
-import { type Kernel, kernelFresh } from './kernel';
+import { type Kernel, kernelFresh, kernelTitle } from './kernel';
 import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
@@ -35,15 +35,23 @@ const COVERAGE_SHOWN = 8;
 const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer' } as const;
 type Load = { state: 'loading' } | { state: 'error' } | { state: 'ready'; feed: Feed };
 
-/** The Technology list's header: the kernel's current releases, three rows. */
-function KernelTable({ kernel }: { kernel: Kernel }) {
+/** The Technology list's header: the kernel's current releases, three rows. Folds to its header (with the Stable version). */
+function KernelTable({ kernel, collapsed, onToggle }: { kernel: Kernel; collapsed: boolean; onToggle: () => void }) {
   return (
-    <table class="ktable" aria-label="Linux kernel releases">
-      <thead><tr><th scope="col">Linux kernel</th><th scope="col">Version</th><th scope="col">Released</th></tr></thead>
-      <tbody>
-        {kernel.rows.map((r) => <tr key={r.branch}><th scope="row">{r.branch}</th><td>{r.version}</td><td>{r.released}</td></tr>)}
-      </tbody>
-    </table>
+    <>
+      <button type="button" class="grp fold-h" aria-expanded={!collapsed} onClick={onToggle}>
+        <span>{kernelTitle(kernel, collapsed)}</span>
+        <span class={'chev' + (collapsed ? '' : ' open')} aria-hidden="true">›</span>
+      </button>
+      {!collapsed && (
+        <table class="ktable" aria-label="Linux kernel releases">
+          <thead><tr><th scope="col">Branch</th><th scope="col">Version</th><th scope="col">Released</th></tr></thead>
+          <tbody>
+            {kernel.rows.map((r) => <tr key={r.branch}><th scope="row">{r.branch}</th><td>{r.version}</td><td>{r.released}</td></tr>)}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 
@@ -1342,6 +1350,7 @@ export function App() {
   const toggleWatchlist = () => change((prev) => ({ ...prev, watchCollapsed: !prev.watchCollapsed }));
   const toggleEarnings = () => change((prev) => ({ ...prev, earningsCollapsed: !prev.earningsCollapsed }));
   const toggleFollowing = (key: string) => change((prev) => ({ ...prev, following: toggleFollow(prev.following, key) }));
+  const toggleKernel = () => change((prev) => ({ ...prev, kernelCollapsed: !prev.kernelCollapsed }));
   const toggleCorners = () => change((prev) => ({ ...prev, cornersCollapsed: !prev.cornersCollapsed }));
   const toggleSchedule = () => change((prev) => ({ ...prev, scheduleCollapsed: !prev.scheduleCollapsed }));
   const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
@@ -1549,7 +1558,7 @@ export function App() {
         {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
-        {topic === 'tech' && kernel && kernelFresh(kernel.generated, now) && <KernelTable kernel={kernel} />}
+        {topic === 'tech' && kernel && kernelFresh(kernel.generated, now) && <KernelTable kernel={kernel} collapsed={settings.kernelCollapsed} onToggle={toggleKernel} />}
         {topic === 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && <MarketsStrip markets={markets} earnings={earnings} hidden={settings.hiddenTickers} now={now} />}
         {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} fact={factFor(facts, today)} />}
