@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
+import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
@@ -1084,6 +1085,11 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
       <details class="card fold">
         <summary>My teams{settings.myTeams.length > 0 ? ` (${settings.myTeams.length} followed)` : ''}</summary>
         <TeamsEditor teams={settings.myTeams} suggestions={suggestions} onChange={(myTeams) => update({ myTeams })} />
+        <ul class="set inner">
+          <li><label>Team colours on Sports
+            <input type="checkbox" checked={settings.teamColors} onChange={() => update({ teamColors: !settings.teamColors })} />
+          </label></li>
+        </ul>
       </details>
       <div class="grp">Markets watchlist</div>
       <WatchlistEditor watchKey={settings.watchKey} update={update} onSaved={onSaved} />
@@ -1315,6 +1321,21 @@ export function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--read-size', `${readSize(settings.textSize)}px`);
   }, [settings.textSize]);
+  const firstTeam = settings.myTeams[0];  // the theme depends on this one name, so editing another team does not rebuild it
+  const theme = useMemo(() => (route.kind === 'sports' && settings.teamColors ? teamTheme(firstTeam ? [firstTeam] : []) : undefined), [route.kind, settings.teamColors, firstTeam]);
+  useEffect(() => {  // the Sports tab wears the first team's colours (and the phone's status bar follows); every other screen gets the normal theme back
+    const root = document.documentElement.style;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    const normal = meta?.getAttribute('content') ?? undefined;
+    if (theme) {
+      for (const [name, value] of Object.entries(themeVars(theme))) root.setProperty(name, value);
+      meta?.setAttribute('content', theme.bg);
+    }
+    return () => {
+      for (const name of THEME_VARS) root.removeProperty(name);
+      if (normal !== undefined) meta?.setAttribute('content', normal);
+    };
+  }, [theme]);
   const list = useMemo(() => (feed ? stories(feed, topic) : []), [feed, topic]);
   const lead = useMemo(() => (feed ? topStory(list, now) : undefined), [feed, list, now]);
   const full = useMemo(() => (feed && lead ? coverage(feed, lead) : []), [feed, lead]);
