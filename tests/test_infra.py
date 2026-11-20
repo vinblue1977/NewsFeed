@@ -257,6 +257,24 @@ def test_ingest_can_read_exactly_the_location_and_the_finnhub_parameters() -> No
     )
 
 
+def test_ingest_reads_the_local_feeds_parameter_named_by_an_env_var_and_only_that_one() -> None:
+    template = _synthesized(ACCOUNT)[1]
+    template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {"Environment": {"Variables": Match.object_like({"LOCAL_FEEDS_PARAM": "/news/local-feeds"})}},
+    )
+    arns = [
+        arn
+        for policy in template.find_resources("AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        if stmt["Action"] == "ssm:GetParameter"  # CDK merges statements, so only the one action and exact ARNs are checked
+        for arn in (stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]])
+        if isinstance(arn, str) and "local-feeds" in arn
+    ]
+    assert len(arns) == 1 and arns[0].endswith(":parameter/news/local-feeds")  # the exact name: no wildcard
+    assert '"ssm:*"' not in json.dumps(template.find_resources("AWS::IAM::Policy"))
+
+
 def test_ingest_can_read_exactly_the_two_push_parameters_with_no_wildcard() -> None:
     template = _synthesized(ACCOUNT)[1]
     resources = sorted(
@@ -267,9 +285,11 @@ def test_ingest_can_read_exactly_the_two_push_parameters_with_no_wildcard() -> N
         for arn in (stmt["Resource"] if isinstance(stmt["Resource"], list) else [stmt["Resource"]])
         if isinstance(arn, str)
     )
-    # statements are merged by CDK, so this is every parameter any function can read: location (both), the two push ones, Finnhub
+    # statements are merged by CDK, so this is every parameter any function can read: location (both), the optional local feeds
+    # (the ingest only), the two push ones, Finnhub
     assert resources == sorted(
         [
+            "/news/local-feeds",
             "/news/location",
             "/news/location",
             "/news/push/registration",

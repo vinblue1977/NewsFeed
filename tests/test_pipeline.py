@@ -125,6 +125,62 @@ def test_official_local_feeds_are_trusted_and_never_place_checked() -> None:
     ]
 
 
+def test_alert_feeds_are_trusted_official_sources_marked_for_push() -> None:
+    made = local_sources(["https://wgntv.example/feed"], ["https://village.example/rss"], ["https://village.example/alerts"])
+    assert [(s.id, s.trusted, s.alert) for s in made] == [
+        ("local-0", False, False),
+        ("local-official-0", True, False),
+        ("local-alert-0", True, True),
+    ]
+
+
+ALERT_DOCS = {"https://alerts.example/f": rss(("Water main break", "https://x.example/a1", "", "Fri, 13 Nov 2026 11:30:00 GMT"))}
+
+
+def test_collect_marks_alert_items_and_never_place_checks_them() -> None:
+    sources = [Source("local-alert-0", "alerts.example", "https://alerts.example/f", "local", trusted=True, alert=True)]
+    items, _ = collect(sources, ["Elsewhere"], now=NOW, fetcher=lambda url: ALERT_DOCS[url])
+    assert [(i["title"], i.get("_alert")) for i in items] == [("Water main break", True)]  # kept though it names no nearby place
+
+
+def test_an_alert_for_a_story_another_feed_carried_first_still_counts_as_an_alert() -> None:
+    docs = {**ALERT_DOCS, "https://other.example/f": ALERT_DOCS["https://alerts.example/f"]}  # one story, one link, two feeds
+    sources = [
+        Source("local-official-0", "other.example", "https://other.example/f", "local", trusted=True),  # listed first: it wins
+        Source("local-alert-0", "alerts.example", "https://alerts.example/f", "local", trusted=True, alert=True),
+    ]
+    items, _ = collect(sources, now=NOW, fetcher=lambda url: docs[url])
+    assert [(i["source"], i.get("_alert")) for i in items] == [("other.example", True)]  # kept once, and flagged for the push
+
+
+def test_build_feed_returns_the_alert_ids_and_keeps_the_flag_out_of_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(handler_module, "SOURCES", ())
+    monkeypatch.setattr(handler_module, "cached_local_feeds", lambda: {"official": [], "alerts": ["https://alerts.example/f"]})
+    monkeypatch.setattr("ingest.pipeline.fetch", lambda url: ALERT_DOCS[url])
+    feed, _, alert_ids = handler_module.build_feed({"nearby": ["Elsewhere"], "feeds": []})
+    assert [i["title"] for i in feed["items"]] == ["Water main break"]
+    assert alert_ids == {feed["items"][0]["id"]}
+    assert "_alert" not in json.dumps(feed) and "alert" not in json.dumps(feed["sources"]).replace("local-alert-0", "")
+
+
+def test_build_feed_reads_official_from_both_the_location_and_the_local_feeds_parameter(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[list[str], list[str], list[str]]] = []
+
+    def fake_sources(urls: Any, official: Any = (), alerts: Any = ()) -> list[Source]:
+        seen.append((list(urls), list(official), list(alerts)))
+        return []
+
+    monkeypatch.setattr(handler_module, "SOURCES", ())
+    monkeypatch.setattr(handler_module, "local_sources", fake_sources)
+    monkeypatch.setattr(
+        handler_module,
+        "cached_local_feeds",
+        lambda: {"official": ["https://b.example/o", "https://a.example/o"], "alerts": ["https://c.example/a"]},
+    )
+    handler_module.build_feed({"nearby": [], "feeds": ["https://f.example/x"], "official": ["https://a.example/o"]})
+    assert seen == [(["https://f.example/x"], ["https://a.example/o", "https://b.example/o"], ["https://c.example/a"])]
+
+
 class FakeS3:
     def __init__(self) -> None:
         self.puts: list[dict[str, Any]] = []
@@ -455,7 +511,7 @@ def test_a_clustering_failure_still_writes_the_feed(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(handler_module, "SOURCES", (src("a", "a"),))
     monkeypatch.setattr("ingest.pipeline.fetch", fake_fetcher)
     monkeypatch.setattr(handler_module, "cluster_items", boom)
-    feed, _ = handler_module.build_feed({"nearby": [], "feeds": []})
+    feed, _, _ = handler_module.build_feed({"nearby": [], "feeds": []})
     assert feed["clusters"] == [] and feed["items"]
     assert all("cluster" not in i for i in feed["items"])
 
@@ -872,7 +928,7 @@ def test_handler_runs_the_push_step_after_the_feed_and_survives_its_failure(monk
     order: list[str] = []
     real_put = s3.put_object
     s3.put_object = lambda **kw: (order.append(kw["Key"]), real_put(**kw))[1]  # type: ignore[method-assign]
-    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed: (order.append("push"), "sent:1")[1])
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts: (order.append("push"), "sent:1")[1])
     result = handler_module.handler({}, object())
     assert result["push"] == "sent:1" and order[-1] == "push" and "data/feed.json" in order[:-1]
 
@@ -881,6 +937,21 @@ def test_handler_runs_the_push_step_after_the_feed_and_survives_its_failure(monk
 
     monkeypatch.setattr("ingest.push.run_push", boom)
     assert handler_module.handler({}, object())["push"] == "failed"
+
+
+def test_handler_hands_the_alert_item_ids_to_the_push_step_and_they_are_not_in_the_written_feed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "cached_local_feeds", lambda: {"official": [], "alerts": ["https://alerts.example/f"]})
+    monkeypatch.setattr("ingest.pipeline.fetch", lambda url: ALERT_DOCS[url] if url in ALERT_DOCS else fake_fetcher(url))
+    given: list[set[str]] = []
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts: (given.append(set(alerts)), "sent:1")[1])
+    handler_module.handler({}, object())
+    written = next(json.loads(p["Body"]) for p in s3.puts if p["Key"] == "data/feed.json")
+    alert_item = next(i for i in written["items"] if i["title"] == "Water main break")
+    assert given == [{alert_item["id"]}] and "_alert" not in alert_item
 
 
 def test_handler_skips_the_push_step_when_the_run_is_late(monkeypatch: pytest.MonkeyPatch) -> None:

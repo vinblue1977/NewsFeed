@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 
@@ -78,6 +79,51 @@ def load_location(ssm: Any = None) -> dict[str, Any]:
     return parse_location(client.get_parameter(Name=name)["Parameter"]["Value"])
 
 
+LOCAL_FEEDS_PARAM_ENV = "LOCAL_FEEDS_PARAM"
+
+
+def _no_local_feeds() -> dict[str, list[str]]:
+    return {"official": [], "alerts": []}  # a fresh one each time: callers may not share, or change, one another's lists
+
+
+def parse_local_feeds(raw: str) -> dict[str, list[str]]:
+    """The local feeds parameter's JSON: {"official": [...], "alerts": [...]}, both optional, each a list of non-empty strings."""
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ConfigError("local feeds parameter is not valid JSON") from exc
+    if not isinstance(doc, dict):
+        raise ConfigError("local feeds parameter must be a JSON object")
+    out: dict[str, list[str]] = {}
+    for key in ("official", "alerts"):
+        urls = doc.get(key, [])
+        if not isinstance(urls, list) or not all(isinstance(v, str) and v for v in urls):
+            raise ConfigError(f"local feeds parameter field {key!r} must be a list of non-empty strings")
+        out[key] = urls
+    return out
+
+
+def load_local_feeds(ssm: Any = None) -> dict[str, list[str]] | None:
+    """The village's own feeds and alert feeds from the optional parameter named by LOCAL_FEEDS_PARAM. Never raises. A name that
+    is not set or a parameter that does not exist means "none" (empty lists); a read or value that cannot be used is logged
+    (never the value) and gives None, so the caller can keep the last good lists."""
+    name = os.environ.get(LOCAL_FEEDS_PARAM_ENV)
+    if not name:
+        return _no_local_feeds()
+    try:
+        client = ssm or boto3.client("ssm")
+        return parse_local_feeds(client.get_parameter(Name=name)["Parameter"]["Value"])
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ParameterNotFound":
+            logger.info("no local feeds parameter; using none")
+            return _no_local_feeds()
+        logger.warning("could not read the local feeds parameter")
+        return None
+    except Exception:  # noqa: BLE001  (a bad value, a network error: the ingest runs without it)
+        logger.warning("the local feeds parameter is unusable")
+        return None
+
+
 LOCATION_TTL_SECONDS = 600  # an edit to the parameter reaches a warm container within this long
 _location: tuple[float, dict[str, Any]] | None = None
 
@@ -85,6 +131,36 @@ _location: tuple[float, dict[str, Any]] | None = None
 def reset_location_cache() -> None:
     global _location
     _location = None
+
+
+def merged_local_feeds(location: dict[str, Any], extra: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    """(official, alerts): `official` from the location parameter (kept for the first version of this feature) and from the
+    local feeds parameter, each URL once, and `alerts` from the local feeds parameter. An alert feed is not also official."""
+    alerts = list(dict.fromkeys(extra["alerts"]))
+    official = [u for u in dict.fromkeys([*location.get("official", []), *extra["official"]]) if u not in alerts]
+    return official, alerts
+
+
+_local_feeds: tuple[float, dict[str, list[str]]] | None = None
+
+
+def reset_local_feeds_cache() -> None:
+    global _local_feeds
+    _local_feeds = None
+
+
+def cached_local_feeds() -> dict[str, list[str]]:
+    """The local feeds, re-read at most every LOCATION_TTL_SECONDS. Never raises: a failed refresh keeps the last good lists, and
+    a failed first read gives none (it is tried again on the next run, not cached)."""
+    global _local_feeds
+    now = time.monotonic()
+    if _local_feeds is not None and now - _local_feeds[0] < LOCATION_TTL_SECONDS:
+        return _local_feeds[1]
+    loaded = load_local_feeds()
+    if loaded is None:
+        return _local_feeds[1] if _local_feeds is not None else _no_local_feeds()
+    _local_feeds = (now, loaded)
+    return loaded
 
 
 def cached_location() -> dict[str, Any]:

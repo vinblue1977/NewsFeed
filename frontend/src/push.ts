@@ -16,11 +16,12 @@ export type PushTopic = (typeof PUSH_TOPICS)[number]['id'];
 export interface PushPrefs {
   topics: PushTopic[];  // the news topics to push, in the order above
   weather: boolean;  // push National Weather Service alerts
+  alerts: boolean;  // push village alerts (the alert feeds named in the server's private local feeds list); they ignore quiet hours
   quietStart: string;  // "HH:MM", local time: no pushes from here...
   quietEnd: string;  // ...until here
 }
 
-export const DEFAULT_PUSH: PushPrefs = { topics: PUSH_TOPICS.map((t) => t.id), weather: true, quietStart: '22:00', quietEnd: '07:00' };
+export const DEFAULT_PUSH: PushPrefs = { topics: PUSH_TOPICS.map((t) => t.id), weather: true, alerts: true, quietStart: '22:00', quietEnd: '07:00' };
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 export const validTime = (s: unknown): s is string => typeof s === 'string' && TIME.test(s);
@@ -35,6 +36,7 @@ export function parsePushPrefs(v: unknown): PushPrefs {
   return {
     topics: PUSH_TOPICS.map((t) => t.id).filter((id) => ids.includes(id)),
     weather: typeof o['weather'] === 'boolean' ? o['weather'] : DEFAULT_PUSH.weather,
+    alerts: typeof o['alerts'] === 'boolean' ? o['alerts'] : DEFAULT_PUSH.alerts,  // settings saved before this existed get it on
     quietStart: validTime(start) ? start : DEFAULT_PUSH.quietStart,
     quietEnd: validTime(end) ? end : DEFAULT_PUSH.quietEnd,
   };
@@ -117,7 +119,7 @@ export function registration(sub: Subscription, prefs: PushPrefs, tz: string, si
     v: 1,
     site,
     subscription: sub,
-    prefs: { topics: prefs.topics, weather: prefs.weather, quiet: { start: prefs.quietStart, end: prefs.quietEnd }, tz },
+    prefs: { topics: prefs.topics, weather: prefs.weather, alerts: prefs.alerts, quiet: { start: prefs.quietStart, end: prefs.quietEnd }, tz },
   });
 }
 
