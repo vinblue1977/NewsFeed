@@ -40,6 +40,8 @@ def test_load_location_needs_the_env_var(monkeypatch: pytest.MonkeyPatch) -> Non
         json.dumps({**LOCATION, "lat": True}),
         json.dumps({"town": "x"}),
         json.dumps({**LOCATION, "feeds": [None]}),
+        json.dumps({**LOCATION, "official": "https://example.com/rss"}),
+        json.dumps({**LOCATION, "official": [""]}),
         json.dumps({**LOCATION, "nearby": [1]}),
         json.dumps({**LOCATION, "lat": 999}),
     ],
@@ -114,3 +116,10 @@ def test_the_quotes_file_is_named_by_a_hash_not_by_the_key() -> None:
 
     name = watch_name("abc")
     assert name == "watch-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_parse_location_takes_an_optional_official_list() -> None:
+    assert parse_location(json.dumps({**LOCATION, "official": ["https://example.com/news.xml"]}))["official"] == [
+        "https://example.com/news.xml"
+    ]
+    assert "official" not in parse_location(json.dumps(LOCATION))

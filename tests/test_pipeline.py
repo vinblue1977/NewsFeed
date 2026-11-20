@@ -115,6 +115,16 @@ def test_local_sources_use_the_host_as_name() -> None:
     assert [(s.id, s.name, s.topic) for s in made] == [("local-0", "example.com", "local"), ("local-1", "local", "local")]
 
 
+def test_official_local_feeds_are_trusted_and_never_place_checked() -> None:
+    google = "https://news.google.com/rss/search?q=site%3Aschool.example"  # ordinary feeds place-check this; official ones do not
+    made = local_sources(["https://wgntv.example/feed"], official=["https://village.example/rss", google])
+    assert [(s.id, s.name, s.trusted) for s in made] == [
+        ("local-0", "wgntv.example", False),
+        ("local-official-0", "village.example", True),
+        ("local-official-1", "news.google.com", True),
+    ]
+
+
 class FakeS3:
     def __init__(self) -> None:
         self.puts: list[dict[str, Any]] = []

@@ -49,7 +49,7 @@ def build_feed(
     location: dict[str, Any], previous: dict[str, str] | None = None, pictures: dict[str, str] | None = None
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """The feed and the articles document (None if it could not be built). Items flagged `full` are exactly those in it."""
-    items, status = collect([*SOURCES, *local_sources(location["feeds"])], location["nearby"])
+    items, status = collect([*SOURCES, *local_sources(location["feeds"], location.get("official", []))], location["nearby"])
     add_pictures(items)  # ESPN's RSS has none; its news API does (fail-soft)
     add_page_pictures(items, pictures)  # NFL.com's sitemap has none; its story pages do (new stories only, fail-soft)
     bodies = {i["id"]: i.pop("_html") for i in items if "_html" in i}  # the raw HTML never goes into feed.json or clustering

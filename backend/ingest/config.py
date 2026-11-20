@@ -45,7 +45,8 @@ class ConfigError(Exception):
 
 
 def parse_location(raw: str) -> dict[str, Any]:
-    """Validate the parameter's JSON: {"town", "lat", "lon", "nearby": [...], "feeds": [...], optional "watch_key"}."""
+    """Validate the parameter's JSON:
+    {"town", "lat", "lon", "nearby": [...], "feeds": [...], optional "official": [...], optional "watch_key"}."""
     try:
         loc = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -55,8 +56,9 @@ def parse_location(raw: str) -> dict[str, Any]:
     for key, kind in _REQUIRED.items():
         if not isinstance(loc.get(key), kind) or isinstance(loc.get(key), bool):
             raise ConfigError(f"location parameter field {key!r} is missing or has the wrong type")
-    if not all(isinstance(v, str) and v for v in loc["nearby"] + loc["feeds"]):
-        raise ConfigError("location parameter fields 'nearby' and 'feeds' must be lists of non-empty strings")
+    official = loc.get("official", [])  # optional: a village's or school's own feeds, kept without the nearby-place check
+    if not isinstance(official, list) or not all(isinstance(v, str) and v for v in loc["nearby"] + loc["feeds"] + official):
+        raise ConfigError("location parameter fields 'nearby', 'feeds' and 'official' must be lists of non-empty strings")
     key = loc.get(
         "watch_key"
     )  # optional: the secret that guards the watchlist endpoint and names its quotes file; without it there is no watchlist
