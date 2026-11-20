@@ -316,3 +316,13 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .mke b { font-weight: 600; color: var(--text); }
 .fold > .note, .fold > .fine { margin-left: 0; margin-right: 0; }
 .fold > .fine { margin-bottom: 8px; }
+
+.hact { display: flex; align-items: center; gap: 10px; }
+.fbtn { border: 1px solid var(--accent); background: none; color: var(--accent); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 600; min-height: 36px; white-space: nowrap; }
+.fbtn.on { background: var(--accent); color: var(--on-accent); }
+.fbtn:disabled { opacity: .5; }
+.hdr > .fbtn { margin-bottom: 4px; }
+.row-between { display: flex; justify-content: space-between; align-items: baseline; }
+.row-between .manage { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; text-decoration: none; }
+.sech span.all { margin-left: auto; color: var(--muted); font-size: 13px; text-transform: none; letter-spacing: 0; }
+.sech a.all { margin-left: auto; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; text-decoration: none; }

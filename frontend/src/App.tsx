@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadArticles, loadEarnings, loadFeed, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
+import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
@@ -391,8 +392,8 @@ function QuoteScreen({ markets, earnings, loaded, symbol, now, canGoBack }: { ma
 }
 
 /** The Browse screen (route and name kept as Discovery). Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
-function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onOpenSports, onRetry, canGoBack, cornersCollapsed, onToggleCorners }: {
-  cornersCollapsed: boolean; onToggleCorners: () => void;
+function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onOpenSports, onRetry, canGoBack, cornersCollapsed, onToggleCorners, following, onFollow }: {
+  cornersCollapsed: boolean; onToggleCorners: () => void; following: string[]; onFollow: (key: string) => void;
   feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void; onOpenSports: () => void;
   onRetry: () => void; canGoBack: boolean;
 }) {
@@ -414,7 +415,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
   return (
     <div class="wrap">
       {sub && <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>}
-      <header class="hdr"><div><div class="e">{sub ? BROWSE : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : BROWSE}</h1></div>{!sub && <SettingsLink />}</header>
+      <header class="hdr"><div><div class="e">{sub ? BROWSE : 'Beyond your top stories'}</div><h1>{sub ? subtopicLabel(sub) : BROWSE}</h1></div>{!sub && <SettingsLink />}{sub && <FollowButton sub={sub} following={following} onFollow={onFollow} />}</header>
       {waiting && <p class="note">Loading…</p>}
       {failed && !feed && (
         <div class="empty"><b>Can't load the news</b><span>Check your connection.</span>
@@ -610,7 +611,8 @@ function ScheduleCard({ items, collapsed, onToggle }: { items: TeamSchedule[]; c
 }
 
 /** Every sports story, newest first (a story many sources cover ranks a little higher, and no source runs on for long), with a chip per sub-topic (NFL, cricket, tennis). */
-function SportsScreen({ feed, scores, schedule, scheduleCollapsed, onToggleSchedule, collapsed, onFold, teams, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+function SportsScreen({ feed, scores, schedule, scheduleCollapsed, onToggleSchedule, collapsed, onFold, teams, loaded, failed, now, sub, shown, onMore, onPick, onRetry, following, onFollow }: {
+  following: string[]; onFollow: (key: string) => void;
   feed: Feed | undefined; scores: Scores | undefined; schedule: Schedule | undefined; scheduleCollapsed: boolean; onToggleSchedule: () => void; collapsed: string[]; onFold: (sport: string) => void; teams: string[]; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
   const step = Math.floor(now.getTime() / BREAKING_STEP_MS);  // re-rank only every few minutes
@@ -631,7 +633,7 @@ function SportsScreen({ feed, scores, schedule, scheduleCollapsed, onToggleSched
   const rest = lead ? page.filter((s) => s !== lead) : page;
   return (
     <div class="wrap">
-      <header class="hdr"><div><div class="e">Scores and stories</div><h1>Sports</h1></div><SettingsLink /></header>
+      <header class="hdr"><div><div class="e">Scores and stories</div><h1>Sports</h1></div><div class="hact">{sub && <FollowButton sub={sub} following={following} onFollow={onFollow} />}<SettingsLink /></div></header>
       <nav class="chips" aria-label="Sports">
         <button type="button" class={!sub ? 'on' : ''} aria-pressed={!sub} onClick={() => pick(undefined)}>All</button>
         {subs.map((id) => (
@@ -668,7 +670,8 @@ function SportsScreen({ feed, scores, schedule, scheduleCollapsed, onToggleSched
 }
 
 /** The Films tab: Bollywood, South Cinema and Hollywood stories, a section per sub-topic (a picture lead, then two more) with a chip each; a chip or "All" opens one list. */
-function FilmsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, onRetry }: {
+function FilmsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, onRetry, following, onFollow }: {
+  following: string[]; onFollow: (key: string) => void;
   feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onPick: () => void; onRetry: () => void;
 }) {
   const step = Math.floor(now.getTime() / BREAKING_STEP_MS);
@@ -683,7 +686,7 @@ function FilmsScreen({ feed, loaded, failed, now, sub, shown, onMore, onPick, on
   const rest = lead ? page.filter((s) => s !== lead) : page;
   return (
     <div class="wrap">
-      <header class="hdr"><div><div class="e">Movies and celebrities</div><h1>Entertainment</h1></div><SettingsLink /></header>
+      <header class="hdr"><div><div class="e">Movies and celebrities</div><h1>Entertainment</h1></div><div class="hact">{sub && <FollowButton sub={sub} following={following} onFollow={onFollow} />}<SettingsLink /></div></header>
       <nav class="chips" aria-label="Entertainment">
         <button type="button" class={!sub ? 'on' : ''} aria-pressed={!sub} onClick={() => pick(undefined)}>All</button>
         {subs.map((id) => (
@@ -873,6 +876,64 @@ function WatchlistEditor({ watchKey, update, onSaved }: { watchKey: string; upda
   );
 }
 
+/** The Follow button on a sub-topic's list: it shows whether the topic is followed and flips that. */
+function FollowButton({ sub, following, onFollow }: { sub: string; following: string[]; onFollow: (key: string) => void }) {
+  const key = topicKey(sub);
+  const on = following.includes(key);
+  const full = !on && following.length >= MAX_FOLLOWS;
+  return (
+    <button type="button" class={'fbtn' + (on ? ' on' : '')} aria-pressed={on} disabled={full} onClick={() => onFollow(key)}>
+      {on ? '✓ Following' : '+ Follow'}
+    </button>
+  );
+}
+
+/** For you's Following section: each followed topic or keyword with its newest few stories. */
+function FollowingSection({ groups, now }: { groups: ReturnType<typeof followGroups>; now: Date }) {
+  if (groups.length === 0) return null;
+  return (
+    <section aria-label="Following">
+      <div class="grp row-between">Following<a class="manage" href="#/settings">Manage ›</a></div>
+      {groups.map((g) => (
+        <div key={g.key} class="fgroup">
+          <div class="grp sech"><i style={{ background: 'var(--accent)' }} />{g.label}
+            {g.route ? <a class="all" href={g.route}>See all {g.total} ›</a> : <span class="all">{g.total} {g.total === 1 ? 'story' : 'stories'}</span>}</div>
+          {g.stories.map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** Settings: the follows, each removable, and a box to follow a keyword (words separated by commas: any of them counts). */
+function FollowEditor({ following, onChange }: { following: string[]; onChange: (next: string[]) => void }) {
+  const [text, setText] = useState('');
+  const key = keywordKey(text);
+  const full = following.length >= MAX_FOLLOWS;
+  const add = () => { if (key) { onChange(toggleFollow(following.filter((k) => k !== key), key)); setText(''); } };
+  return (
+    <div class="teams">
+      {following.length > 0 && (
+        <ul class="tchips">
+          {following.map((k) => {
+            const f = parseFollow(k);
+            const label = f ? (f.kind === 'topic' ? followLabel(f) : f.words.join(', ')) : k;
+            return <li key={k}><button type="button" aria-label={`Stop following ${label}`} onClick={() => onChange(following.filter((x) => x !== k))}>{label} <span aria-hidden="true">×</span></button></li>;
+          })}
+        </ul>
+      )}
+      {following.length === 0 && <p class="note">Nothing followed yet. Follow a topic from its list, or add a keyword here.</p>}
+      <form class="fld trow" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <input type="text" value={text} maxLength={120} placeholder="US election, midterms" aria-label="Keyword to follow"
+          onInput={(e) => setText((e.currentTarget as HTMLInputElement).value)} />
+        <button type="submit" class="btn" disabled={!key || (full && !following.includes(key))}>Follow</button>
+      </form>
+      {full && <p class="note" role="status">You follow {MAX_FOLLOWS} things, the most there is room for. Remove one to add another.</p>}
+      <p class="fine">Separate words with commas; a story with any of them counts. Matches the start of a word in the headline or summary.</p>
+    </div>
+  );
+}
+
 /** Follow teams, countries or players by name: they are matched against the scores and the story headlines. */
 function TeamsEditor({ teams, suggestions, onChange }: { teams: string[]; suggestions: string[]; onChange: (next: string[]) => void }) {
   const [text, setText] = useState('');
@@ -1016,6 +1077,10 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
           </ul>
         </details>
       )}
+      <details class="card fold">
+        <summary>Following{settings.following.length > 0 ? ` (${settings.following.length})` : ''}</summary>
+        <FollowEditor following={settings.following} onChange={(following) => update({ following })} />
+      </details>
       <details class="card fold">
         <summary>My teams{settings.myTeams.length > 0 ? ` (${settings.myTeams.length} followed)` : ''}</summary>
         <TeamsEditor teams={settings.myTeams} suggestions={suggestions} onChange={(myTeams) => update({ myTeams })} />
@@ -1242,6 +1307,7 @@ export function App() {
   };
   const toggleWatchlist = () => change((prev) => ({ ...prev, watchCollapsed: !prev.watchCollapsed }));
   const toggleEarnings = () => change((prev) => ({ ...prev, earningsCollapsed: !prev.earningsCollapsed }));
+  const toggleFollowing = (key: string) => change((prev) => ({ ...prev, following: toggleFollow(prev.following, key) }));
   const toggleCorners = () => change((prev) => ({ ...prev, cornersCollapsed: !prev.cornersCollapsed }));
   const toggleSchedule = () => change((prev) => ({ ...prev, scheduleCollapsed: !prev.scheduleCollapsed }));
   const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
@@ -1252,6 +1318,11 @@ export function App() {
   const list = useMemo(() => (feed ? stories(feed, topic) : []), [feed, topic]);
   const lead = useMemo(() => (feed ? topStory(list, now) : undefined), [feed, list, now]);
   const full = useMemo(() => (feed && lead ? coverage(feed, lead) : []), [feed, lead]);
+  const followed = useMemo(() => {
+    if (!feed || topic !== 'all' || settings.following.length === 0) return [];
+    const pool = [...list, ...stories(feed, 'sports'), ...stories(feed, 'entertainment'), ...stories(feed, 'science')].sort((a, b) => b.item.published.localeCompare(a.item.published));
+    return followGroups(settings.following, pool, new Set(lead ? [lead.item.id] : []));
+  }, [feed, list, lead, topic, settings.following]);
   const today = dayKey(now);
   const [readState, setReadState] = useState(() => ({ day: today, ids: loadRead(today) }));
   const readIds = readState.day === today ? readState.ids : loadRead(today);  // a new day starts with nothing read
@@ -1299,7 +1370,7 @@ export function App() {
       <>
         <PullIndicator {...pull} />
         <DiscoveryScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
-          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)} onOpenSports={() => setSportsShown(PAGE)}
+          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)} onOpenSports={() => setSportsShown(PAGE)} following={settings.following} onFollow={toggleFollowing}
           canGoBack={inAppNavs.current > 0} cornersCollapsed={settings.cornersCollapsed} onToggleCorners={toggleCorners} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="discovery" />
       </>
@@ -1311,7 +1382,7 @@ export function App() {
       <>
         <PullIndicator {...pull} />
         <SportsScreen key={route.sub ?? ''} feed={feed} scores={scores} schedule={schedule} scheduleCollapsed={settings.scheduleCollapsed} onToggleSchedule={toggleSchedule} collapsed={settings.scoresCollapsed} onFold={toggleScores} teams={settings.myTeams} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
-          shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)}
+          shown={sportsShown} onMore={() => setSportsShown((n) => n + PAGE)} onPick={() => setSportsShown(PAGE)} following={settings.following} onFollow={toggleFollowing}
           onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="sports" />
       </>
@@ -1323,7 +1394,7 @@ export function App() {
       <>
         <PullIndicator {...pull} />
         <FilmsScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
-          shown={filmsShown} onMore={() => setFilmsShown((n) => n + PAGE)} onPick={() => setFilmsShown(PAGE)}
+          shown={filmsShown} onMore={() => setFilmsShown((n) => n + PAGE)} onPick={() => setFilmsShown(PAGE)} following={settings.following} onFollow={toggleFollowing}
           onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="films" />
       </>
@@ -1455,6 +1526,7 @@ export function App() {
           </>
         )}
 
+        {topic === 'all' && <FollowingSection groups={followed} now={now} />}
         {topic !== 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && grouped.map((g) => (
           <TopicSection key={g.topic} section={g} now={now} since={since} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
