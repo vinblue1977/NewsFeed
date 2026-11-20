@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kernelFresh, parseKernel } from './kernel';
+import { type Kernel, kernelFresh, kernelTitle, parseKernel } from './kernel';
 
 const rows = [
   { branch: 'Longterm', version: '6.18.64', released: '2026-11-17' },
@@ -32,5 +32,22 @@ describe('kernelFresh', () => {
     expect(kernelFresh('2026-11-13T12:00:00Z', now)).toBe(false);
     expect(kernelFresh('2026-11-21T12:00:00Z', now)).toBe(false);
     expect(kernelFresh('nope', now)).toBe(false);
+  });
+});
+
+describe('kernelTitle', () => {
+  const kernel: Kernel = { generated: 'g', rows };
+  it('adds the Stable version only when asked', () => {
+    expect(kernelTitle(kernel, true)).toBe('Linux kernel · 7.3.5');
+    expect(kernelTitle(kernel, false)).toBe('Linux kernel');
+  });
+
+  it('finds the Stable row in what parseKernel really returns (the two must agree on the branch name)', () => {
+    const parsed = parseKernel({ generated: 'g', rows });
+    expect(parsed && kernelTitle(parsed, true)).toBe('Linux kernel · 7.3.5');
+  });
+
+  it('has no version to add when there is no Stable row', () => {
+    expect(kernelTitle({ generated: 'g', rows: [{ branch: 'Mainline', version: '7.4-rc3', released: '2026-11-15' }] }, true)).toBe('Linux kernel');
   });
 });
