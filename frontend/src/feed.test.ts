@@ -406,6 +406,11 @@ describe('World News corner', () => {
     expect(subtopicLabel('world')).toBe('World News');
   });
 
+  it('makes no Browse tile for film sub-topics, whatever their topic', () => {
+    const list = [mk('i1', 'india', 'bollywood'), mk('i2', 'india', 'south'), mk('n1', 'sports', 'nfl')];
+    expect(discovery(list, now).corners.map((c) => c.id)).toEqual(['nfl']);
+  });
+
   it('labels the Technology and entertainment tiles', () => {
     expect(['gadgets', 'science', 'bollywood', 'south', 'hollywood'].map(subtopicLabel)).toEqual(['Technology', 'Science and Space', 'Bollywood', 'South Cinema', 'Hollywood']);
     expect(topicLabel('entertainment')).toBe('Entertainment');

@@ -343,7 +343,7 @@ export function discovery(list: Story[], now: Date, extraList: Story[] = []): { 
   const byKey = new Map<string, Corner>();  // keyed by the list the tile opens: Sports and Browse may use one sub-topic id, and each opens its own tab
   for (const s of [...list, ...extraList]) {
     const id = subtopicOf(s.item);
-    if (!id) continue;
+    if (!id || FILM_ORDER.includes(id)) continue;  // the Films tab has these; an `india`-topic film story must not make a Browse tile of its own
     const key = subtopicRoute(s.item.topic, id);  // one tile per list it opens: a science copy of a World or Business story joins the Science tile, not a tile of its own
     const have = byKey.get(key);
     if (!have) byKey.set(key, { id, label: subtopicLabel(id), topic: s.item.topic, lead: s, total: 1 });
