@@ -398,7 +398,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
 }) {
   const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
   const sportsAll = useMemo(() => (feed ? stories(feed, 'sports') : []), [feed]);
-  const filmAll = useMemo(() => (feed ? stories(feed, 'entertainment') : []), [feed]);  // only to send an old film tile link to the Films tab
+  const filmAll = useMemo(() => (feed ? stories(feed, 'entertainment') : []), [feed]);  // Browse has no film tiles now; this only sends an old bookmarked film link to the Films tab
   const scienceAll = useMemo(() => (feed ? stories(feed, 'science') : []), [feed]);  // Browse-only: not in For you
   const found = useMemo(() => discovery(all, now, scienceAll), [all, scienceAll, now]);
   const inSub = useMemo(() => {
