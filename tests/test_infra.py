@@ -99,6 +99,20 @@ def test_manifest_is_deployed_separately_with_its_content_type() -> None:
     assert "DistributionId" in manifest
 
 
+def test_no_log_group_keeps_logs_longer_than_14_days() -> None:
+    """Every log group the stack makes expires within two weeks, including the bucket-deployment helper's."""
+    groups = _synthesized(ACCOUNT)[1].find_resources("AWS::Logs::LogGroup")
+    assert groups
+    for logical_id, res in groups.items():
+        assert res["Properties"].get("RetentionInDays", 10**6) <= 14, f"{logical_id} keeps logs too long"
+    resources = _synthesized(ACCOUNT)[1].to_json()["Resources"]
+    # The auto-delete helper has no log-group option in CDK; its tiny group is limited by hand.
+    for logical_id, res in resources.items():
+        if res["Type"] == "AWS::Lambda::Function" and not logical_id.startswith("CustomS3AutoDeleteObjects"):
+            group = res["Properties"].get("LoggingConfig", {}).get("LogGroup")
+            assert group, f"{logical_id} has no explicit log group, so Lambda would make one that never expires"
+
+
 def test_ingest_reads_only_the_location_parameter_and_logs_for_a_week() -> None:
     template = _synthesized(ACCOUNT)[1]
     template.has_resource_properties("AWS::Logs::LogGroup", {"RetentionInDays": 7})

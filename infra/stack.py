@@ -149,10 +149,14 @@ class NewsStack(Stack):
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,
         )
         # The manifest gets an explicit content type (nosniff is on, so a guessed one could make browsers ignore it).
+        # The deploy helper logs here, not in a group Lambda makes itself (that one never expires). Both deployments share one
+        # singleton helper Lambda, so they must share this one group: CDK ignores a different group on the second.
+        deploy_logs = logs.LogGroup(self, "DeployLogs", retention=logs.RetentionDays.TWO_WEEKS)
         site_deploy = s3deploy.BucketDeployment(
             self,
             "DeploySite",
             destination_bucket=site_bucket,
+            log_group=deploy_logs,
             sources=[s3deploy.Source.asset(site_dir)],
             exclude=[MANIFEST],
         )
@@ -160,6 +164,7 @@ class NewsStack(Stack):
             self,
             "DeployManifest",
             destination_bucket=site_bucket,
+            log_group=deploy_logs,
             sources=[s3deploy.Source.asset(site_dir)],
             exclude=["*"],
             include=[MANIFEST],
