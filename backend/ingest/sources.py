@@ -178,6 +178,11 @@ SOURCES: tuple[Source, ...] = (
     _s("tomshw", "Tom's Hardware", "https://www.tomshardware.com/feeds.xml", "tech"),
     _s("register", "The Register", "https://www.theregister.com/headlines.atom", "tech"),
     _s("bbc-tech", "BBC News", "https://feeds.bbci.co.uk/news/technology/rss.xml", "tech"),
+    # Linux, in the Technology tile too
+    _s("9to5linux", "9to5Linux", "https://9to5linux.com/feed", "tech", "gadgets"),
+    _s("phoronix", "Phoronix", "https://www.phoronix.com/rss.php", "tech", "gadgets"),
+    _s("omgubuntu", "OMG! Ubuntu", "https://www.omgubuntu.co.uk/feed", "tech", "gadgets"),
+    _s("itsfoss", "It's FOSS News", "https://news.itsfoss.com/feed/", "tech", "gadgets"),
     # Business
     _s("marketwatch", "MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories", "business"),
     _s("cnbc-finance", "CNBC", "https://www.cnbc.com/id/10000664/device/rss/rss.html", "business", "markets"),
