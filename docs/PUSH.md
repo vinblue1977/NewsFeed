@@ -1,6 +1,6 @@
 # Push notifications: one-time setup
 
-The app can send you notifications (breaking stories, weather alerts). There is no public sign-up endpoint: you copy your phone's subscription into AWS once, by hand. Everything below runs on your own machine and phone. No secret value is ever pasted into chat or committed to the repo.
+The app can send you notifications (breaking stories, weather alerts, village alerts). There is no public sign-up endpoint: you copy your phone's subscription into AWS once, by hand. Everything below runs on your own machine and phone. No secret value is ever pasted into chat or committed to the repo.
 
 ## What goes where
 
@@ -41,15 +41,24 @@ The app can send you notifications (breaking stories, weather alerts). There is 
    aws ssm put-parameter --name /news/push/registration --type SecureString --overwrite --value '<paste here>'
    ```
 
-   The registration is JSON: `{"v":1,"site":"https://<the app's address>","subscription":{...},"prefs":{"topics":[...],"weather":true,"quiet":{"start":"22:00","end":"07:00"},"tz":"America/Chicago"}}`.
+   The registration is JSON: `{"v":1,"site":"https://<the app's address>","subscription":{...},"prefs":{"topics":[...],"weather":true,"alerts":true,"quiet":{"start":"22:00","end":"07:00"},"tz":"America/Chicago"}}`.
 
 8. **Delete `vapid.json`** from the folder it was created in.
 
 VAPID claims use the site's own address as the subject, not an email address.
 
+## Village alerts
+
+Village alerts are pushed from the alert feeds you list under `"alerts"` in the optional SSM parameter `/news/local-feeds` (a plain `String`; see the README for its shape). Every item from those feeds that is under two days old and not yet sent is pushed once, newest first, ahead of breaking stories.
+
+- They go through quiet hours (an official alert feed is rare), but share the other limits: at most 2 pushes per run and 5 per local day.
+- They are on by default. The "Village alerts" switch in Settings (Notifications) turns them off; copy the registration again afterwards (steps 6 and 7). A registration made before this switch existed keeps getting them.
+- The first run that sees an alert feed (and has village alerts switched on) marks whatever the feed already holds as sent, without pushing it. Only items that appear after that are pushed, so adding a feed never sends a backlog, least of all at night.
+- The sent ids start with `alert:` in the private push state file, so they never collide with story ids.
+
 ## Changing preferences
 
-Change topics, weather alerts or quiet hours in Settings, then do steps 6 and 7 again. The server reads the parameter, so there is nothing to deploy.
+Change topics, weather alerts, village alerts or quiet hours in Settings, then do steps 6 and 7 again. The server reads the parameter, so there is nothing to deploy.
 
 The registration you copy replaces the one stored in SSM, including the preferences. Preferences are kept on the phone, so if the app's stored data is ever cleared they return to the defaults: check the toggles before copying again.
 

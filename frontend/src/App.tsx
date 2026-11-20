@@ -1035,6 +1035,9 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
             <li><label>Weather alerts
               <input type="checkbox" checked={prefs.weather} onChange={(e) => onChange({ ...prefs, weather: e.currentTarget.checked })} />
             </label></li>
+            <li><label>Village alerts
+              <input type="checkbox" checked={prefs.alerts} onChange={(e) => onChange({ ...prefs, alerts: e.currentTarget.checked })} />
+            </label></li>
             <li><label>Quiet from
               <input type="time" value={prefs.quietStart} onChange={(e) => timeChange('quietStart', e.currentTarget.value)} />
             </label></li>
@@ -1042,7 +1045,8 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
               <input type="time" value={prefs.quietEnd} onChange={(e) => timeChange('quietEnd', e.currentTarget.value)} />
             </label></li>
           </ul>
-          {prefs.topics.length === 0 && <p class="note">No news topics are chosen, so only {prefs.weather ? 'weather alerts' : 'nothing'} will be sent.</p>}
+          <p class="note">Village alerts come from your village's own alert feed and are sent even during quiet hours.</p>
+          {prefs.topics.length === 0 && <p class="note">No news topics are chosen, so only {[prefs.weather && 'weather alerts', prefs.alerts && 'village alerts'].filter(Boolean).join(' and ') || 'nothing'} will be sent.</p>}
         </>
       )}
       {state === 'enabled' && (

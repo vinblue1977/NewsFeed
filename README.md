@@ -22,7 +22,14 @@ Deploys run from CI on every push to `main`, through GitHub OIDC (no stored keys
      '{"town": "...", "lat": 0.0, "lon": 0.0, "nearby": ["..."], "feeds": ["https://..."]}'
    ```
 
-   Optional: `"official": ["https://..."]`, a village's or school's own feeds (or a Google News `site:` search of its website). Their items go to Local without the nearby-place check, so list only feeds that are about the place; a broad or regional feed belongs in `"feeds"`.
+   Optional, in a second parameter (the location one is near its size limit): the village's or school's own feeds. Create `/news/local-feeds` by hand (the ingest reads it when it exists, and runs fine without it):
+
+   ```sh
+   aws ssm put-parameter --region us-east-2 --name /news/local-feeds --type String --value \
+     '{"official": ["https://village.example/news.xml"], "alerts": ["https://village.example/alerts.xml"]}'
+   ```
+
+   Both lists are optional. `"official"` feeds (or a Google News `site:` search of a website) go to Local without the nearby-place check, so list only feeds that are about the place; a broad or regional feed belongs in `"feeds"` of the location parameter. (An `"official"` list in the location parameter still works; the two are merged, each URL once.) `"alerts"` feeds are treated the same way, and every new item in them, under two days old, is also pushed to your phone once (see `docs/PUSH.md`).
 
    Optional: a private Markets watchlist. Add `"watch_key": "<16 to 64 random lowercase letters and digits>"`. Enter the same key once in the app's Settings, then add symbols there ("Edit watchlist symbols"). The symbols are stored in a private S3 object and the quotes in `data/watch-<sha256 of the key>.json` (so the key itself never appears in a URL); nothing about them is in a public file. The one endpoint (`POST /api/watchlist`, a Lambda Function URL behind CloudFront) refuses any request without the key. Without a key there is no watchlist.
 

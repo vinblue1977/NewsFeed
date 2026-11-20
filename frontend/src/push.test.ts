@@ -52,23 +52,28 @@ describe('times', () => {
 });
 
 describe('preferences', () => {
-  it('defaults to every topic, weather on and quiet 22:00-07:00', () => {
+  it('defaults to every topic, weather and village alerts on and quiet 22:00-07:00', () => {
     expect(parsePushPrefs(undefined)).toEqual(DEFAULT_PUSH);
     expect(parsePushPrefs('junk')).toEqual(DEFAULT_PUSH);
-    expect(DEFAULT_PUSH).toEqual({ topics: ['us', 'world', 'india', 'sports', 'local'], weather: true, quietStart: '22:00', quietEnd: '07:00' });
+    expect(DEFAULT_PUSH).toEqual({ topics: ['us', 'world', 'india', 'sports', 'local'], weather: true, alerts: true, quietStart: '22:00', quietEnd: '07:00' });
   });
   it('keeps what is valid and drops the rest, in the fixed topic order', () => {
-    expect(parsePushPrefs({ topics: ['local', 'us', 'bogus', 7], weather: false, quietStart: '23:30', quietEnd: '25:00' }))
-      .toEqual({ topics: ['us', 'local'], weather: false, quietStart: '23:30', quietEnd: '07:00' });
+    expect(parsePushPrefs({ topics: ['local', 'us', 'bogus', 7], weather: false, alerts: false, quietStart: '23:30', quietEnd: '25:00' }))
+      .toEqual({ topics: ['us', 'local'], weather: false, alerts: false, quietStart: '23:30', quietEnd: '07:00' });
     expect(parsePushPrefs({ topics: [] }).topics).toEqual([]);
+  });
+  it('turns village alerts on for settings saved before they existed, and ignores a value that is not a boolean', () => {
+    expect(parsePushPrefs({ topics: ['us'], weather: false, quietStart: '23:30', quietEnd: '07:00' }).alerts).toBe(true);
+    expect(parsePushPrefs({ alerts: 'no' }).alerts).toBe(true);
+    expect(parsePushPrefs({ alerts: false }).alerts).toBe(false);
   });
 });
 
 describe('registration', () => {
   const sub = { endpoint: 'https://push.example/abc', keys: { p256dh: 'P', auth: 'A' } };
   it('builds exactly the agreed blob', () => {
-    expect(JSON.parse(registration(sub, { topics: ['us', 'sports'], weather: true, quietStart: '22:00', quietEnd: '07:00' }, 'America/Chicago', 'https://news.example')))
-      .toEqual({ v: 1, site: 'https://news.example', subscription: sub, prefs: { topics: ['us', 'sports'], weather: true, quiet: { start: '22:00', end: '07:00' }, tz: 'America/Chicago' } });
+    expect(JSON.parse(registration(sub, { topics: ['us', 'sports'], weather: true, alerts: true, quietStart: '22:00', quietEnd: '07:00' }, 'America/Chicago', 'https://news.example')))
+      .toEqual({ v: 1, site: 'https://news.example', subscription: sub, prefs: { topics: ['us', 'sports'], weather: true, alerts: true, quiet:{ start: '22:00', end: '07:00' }, tz: 'America/Chicago' } });
   });
   it('reads a subscription and rejects incomplete or non-https ones', () => {
     expect(readSubscription({ endpoint: 'https://push.example/abc', keys: { p256dh: 'P', auth: 'A' }, expirationTime: null })).toEqual(sub);

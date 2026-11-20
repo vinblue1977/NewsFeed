@@ -34,12 +34,15 @@ def _scoped_search(url: str) -> bool:
     return parts.hostname == "news.google.com" and not PUBLISHER_LIMIT.search(unquote_plus(parts.query).lower())
 
 
-def local_sources(urls: Iterable[str], official: Iterable[str] = ()) -> list[Source]:
+def local_sources(urls: Iterable[str], official: Iterable[str] = (), alerts: Iterable[str] = ()) -> list[Source]:
     """Sources for the feed URLs in the location parameter. Their items are kept only if they mention a nearby place, except
     for a Google News search that is already scoped to the places. The `official` feeds (a village's or a school district's own)
-    are about the place by origin, so every item is kept: list only place-specific feeds there (see the README)."""
+    are about the place by origin, so every item is kept: list only place-specific feeds there (see the README). The `alerts`
+    feeds are the same, and their items are also marked so the push step can send each one (once)."""
     own = [Source(f"local-{i}", _host(u), u, "local", trusted=_scoped_search(u)) for i, u in enumerate(urls)]
-    return own + [Source(f"local-official-{i}", _host(u), u, "local", trusted=True) for i, u in enumerate(official)]
+    given = [Source(f"local-official-{i}", _host(u), u, "local", trusted=True) for i, u in enumerate(official)]
+    pushed = [Source(f"local-alert-{i}", _host(u), u, "local", trusted=True, alert=True) for i, u in enumerate(alerts)]
+    return own + given + pushed
 
 
 def _host(url: str) -> str:
@@ -132,7 +135,11 @@ def collect(
             if seen is not None:
                 if item.get("subtopic") and not seen.get("subtopic"):
                     seen["subtopic"] = item["subtopic"]  # first seen in a general feed: it still gets the sub-topic tag
+                if source.alert:
+                    seen["_alert"] = True  # the village's own alert for a story another feed carried first is still an alert
                 continue
+            if source.alert:
+                item["_alert"] = True  # private: build_feed takes it off again before anything is written
             items[key] = item
             by_headline[same_headline] = item
             kept += 1

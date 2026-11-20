@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError
 
 from ingest.articles import build_articles, dumps
 from ingest.cluster import cluster_items
-from ingest.config import cached_location, earnings_name, finnhub_key, watch_name
+from ingest.config import cached_local_feeds, cached_location, earnings_name, finnhub_key, merged_local_feeds, watch_name
 from ingest.earnings import build_earnings, is_due
 from ingest.espn_pictures import add_pictures
 from ingest.images import attach_images, known_images
@@ -50,9 +50,13 @@ def previous_state(s3: Any) -> tuple[dict[str, str], dict[str, str]]:
 
 def build_feed(
     location: dict[str, Any], previous: dict[str, str] | None = None, pictures: dict[str, str] | None = None
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """The feed and the articles document (None if it could not be built). Items flagged `full` are exactly those in it."""
-    items, status = collect([*SOURCES, *local_sources(location["feeds"], location.get("official", []))], location["nearby"])
+) -> tuple[dict[str, Any], dict[str, Any] | None, set[str]]:
+    """The feed, the articles document (None if it could not be built) and the ids of the items that came from the alert
+    feeds (they are pushed, not published as such). Items flagged `full` are exactly those in the articles document."""
+    official, alerts = merged_local_feeds(location, cached_local_feeds())
+    sources = [*SOURCES, *local_sources(location["feeds"], official, alerts)]
+    items, status = collect(sources, location["nearby"])
+    alert_ids = {i["id"] for i in items if i.pop("_alert", False)}  # the flag never reaches feed.json
     add_pictures(items)  # ESPN's RSS has none; its news API does (fail-soft)
     add_page_pictures(items, pictures)  # NFL.com's sitemap has none; its story pages do (new stories only, fail-soft)
     bodies = {i["id"]: i.pop("_html") for i in items if "_html" in i}  # the raw HTML never goes into feed.json or clustering
@@ -75,7 +79,7 @@ def build_feed(
         articles = None
         for item in items:
             item.pop("full", None)
-    return {"generated": generated, "items": items, "clusters": clusters, "sources": status}, articles
+    return {"generated": generated, "items": items, "clusters": clusters, "sources": status}, articles, alert_ids
 
 
 def soft(name: str, build: Callable[[], dict[str, Any]]) -> dict[str, Any] | None:
@@ -190,15 +194,15 @@ def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     return "ok"
 
 
-def notify(s3: Any, feed: dict[str, Any], started: float) -> str:
-    """Breaking-story pushes, after the feed is safely written. Never raises: a missing `cryptography`, a bad parameter or a
-    push service outage must not fail the run (the module is imported here so even a failed import is caught)."""
+def notify(s3: Any, feed: dict[str, Any], started: float, alert_ids: set[str] | None = None) -> str:
+    """Breaking-story and village-alert pushes, after the feed is safely written. Never raises: a missing `cryptography`, a bad
+    parameter or a push service outage must not fail the run (the module is imported here so even a failed import is caught)."""
     if time.monotonic() - started > PUSH_CUTOFF_SECONDS:
         return "late"
     try:
         from ingest.push import run_push
 
-        return run_push(s3, feed)
+        return run_push(s3, feed, alert_ids or set())
     except Exception:  # noqa: BLE001
         logger.exception("push step failed")
         return "failed"
@@ -246,9 +250,10 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         side["earnings"] = pool.submit(soft, "earnings", lambda: build_earnings(symbols, finnhub_key()))
     statuses: dict[str, str] = {}
     articles_status = "failed"
+    alert_ids: set[str] = set()
     try:
         clusters_before, images_before = previous_state(s3)
-        feed, articles = build_feed(location, clusters_before, images_before)
+        feed, articles, alert_ids = build_feed(location, clusters_before, images_before)
         failed = [sid for sid, s in feed["sources"].items() if not s["ok"]]
         if len(failed) * 2 > len(feed["sources"]) or not feed["items"]:  # a bad run must not replace a good feed
             raise RuntimeError(f"{len(failed)} of {len(feed['sources'])} sources failed; keeping the previous feed")
@@ -296,7 +301,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         statuses.setdefault("schedule", "fresh")  # not rebuilt this run
         statuses.setdefault("onthisday", "fresh")
         pool.shutdown(wait=False)
-    push_status = notify(s3, feed, started)  # only reached when the feed was written
+    push_status = notify(s3, feed, started, alert_ids)  # only reached when the feed was written
     return {
         "status": "ok",
         "articles": articles_status,

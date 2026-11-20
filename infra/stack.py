@@ -29,6 +29,7 @@ FINNHUB_PARAM = "/portfolio-tracker/finnhub-api-key"  # shared with the portfoli
 PUSH_KEY_PARAM = "/news/push/vapid-private-key"  # created by hand: the VAPID private key (a PEM)
 PUSH_REG_PARAM = "/news/push/registration"  # created by hand after the app is installed: the phone's push subscription
 LOCATION_PARAM = "/news/location"  # created by hand (see README); holds the home town, so it stays out of the repo
+LOCAL_FEEDS_PARAM = "/news/local-feeds"  # created by hand (optional): the village's own feeds and alert feeds (README)
 LOGS_POLICY = "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
@@ -197,6 +198,7 @@ class NewsStack(Stack):
                 "DATA_PREFIX": DATA_PREFIX,
                 "PUSH_KEY_PARAM": PUSH_KEY_PARAM,
                 "PUSH_REG_PARAM": PUSH_REG_PARAM,
+                "LOCAL_FEEDS_PARAM": LOCAL_FEEDS_PARAM,
             },
             log_group=logs.LogGroup(self, "IngestLogs", retention=logs.RetentionDays.ONE_WEEK),
         )
@@ -219,6 +221,12 @@ class NewsStack(Stack):
             iam.PolicyStatement(
                 actions=["ssm:GetParameter"],
                 resources=[location_param_arn],
+            )
+        )
+        fn.add_to_role_policy(  # the optional local feeds list: read only, this one parameter (a missing one is fine)
+            iam.PolicyStatement(
+                actions=["ssm:GetParameter"],
+                resources=[self.format_arn(service="ssm", resource="parameter", resource_name=LOCAL_FEEDS_PARAM.lstrip("/"))],
             )
         )
         fn.add_to_role_policy(  # the Finnhub key for earnings dates: read only, one parameter

@@ -24,7 +24,7 @@ describe('settings', () => {
     const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
     expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], myTeams: [], watchKey: '', push: DEFAULTS.push });
     expect(parseSettings(JSON.stringify({ push: { topics: ['us', 'x'], weather: false, quietStart: '23:00' } })).push)
-      .toEqual({ topics: ['us'], weather: false, quietStart: '23:00', quietEnd: '07:00' });
+      .toEqual({ topics: ['us'], weather: false, alerts: true, quietStart: '23:00', quietEnd: '07:00' });  // an old save has no alerts field: on
     expect(parseSettings(JSON.stringify({ push: 'junk' })).push).toEqual(DEFAULTS.push);
     expect(parseSettings(JSON.stringify({ watchCollapsed: true })).watchCollapsed).toBe(true);
     expect(parseSettings(JSON.stringify({ watchCollapsed: 'yes' })).watchCollapsed).toBe(false);
