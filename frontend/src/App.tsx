@@ -1,10 +1,11 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadEarnings, loadFeed, loadKernel, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
+import { loadArticles, loadEarnings, loadFeed, loadKernel, loadOnThisDay, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { type Block, groupBlocks, readingMinutes } from './article';
 import { useChrome } from './chrome';
 import { type Kernel, kernelFresh } from './kernel';
+import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
@@ -1143,7 +1144,7 @@ function MarketsStrip({ markets, earnings, hidden, now }: { markets: Markets | u
 }
 
 /** Today's briefing: the day's best-covered stories and how many are read; the heading says "You're caught up" once all are. */
-function Briefing({ stories: list, read, onOpen, now }: { stories: Story[]; read: string[]; onOpen: (id: string) => void; now: Date }) {
+function Briefing({ stories: list, read, onOpen, now, fact }: { stories: Story[]; read: string[]; onOpen: (id: string) => void; now: Date; fact?: Fact }) {
   if (list.length === 0) return null;
   const done = list.filter((s) => read.includes(s.item.id)).length;
   const caught = done === list.length;
@@ -1160,6 +1161,7 @@ function Briefing({ stories: list, read, onOpen, now }: { stories: Story[]; read
         </a>
       ))}
       <div class="bp"><i><u style={{ width: `${(done / list.length) * 100}%` }} /></i><span>{done} of {list.length} read</span></div>
+      {fact && <p class="otd"><b>On this day · {fact.year}</b>{fact.text}</p>}
     </section>
   );
 }
@@ -1203,6 +1205,7 @@ export function App() {
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<Weather | undefined>();
   const [kernel, setKernel] = useState<Kernel | undefined>();
+  const [facts, setFacts] = useState<OnThisDay | undefined>();  // by day: a stale file just has no entry for today, so nothing shows
   const [scores, setScores] = useState<Scores | undefined>();
   const [schedule, setSchedule] = useState<Schedule | undefined>();
   const scheduleAt = useRef(0);  // when the schedule was last asked for
@@ -1268,6 +1271,10 @@ export function App() {
     }
     refreshMarkets();
   };
+  const day = dayKey(now);
+  useEffect(() => {  // once a day: the file changes once a day, so a new local day asks again
+    void loadOnThisDay().then((f) => { if (f) setFacts(f); });
+  }, [day]);
   useEffect(() => {  // a few hundred bytes, asked for only when the Technology list is opened
     if (topic === 'tech') void loadKernel().then((k) => { if (k) setKernel(k); });
   }, [topic]);
@@ -1520,7 +1527,7 @@ export function App() {
         {topic === 'tech' && kernel && kernelFresh(kernel.generated, now) && <KernelTable kernel={kernel} />}
         {topic === 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && <MarketsStrip markets={markets} earnings={earnings} hidden={settings.hiddenTickers} now={now} />}
-        {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} />}
+        {topic === 'all' && <Briefing stories={brief} read={readIds} onOpen={(id) => setReadState({ day: today, ids: markRead(today, id) })} now={now} fact={factFor(facts, today)} />}
 
         {lead && (
           <>
