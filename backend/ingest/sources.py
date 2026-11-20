@@ -22,6 +22,7 @@ class Source:
         False  # a Google News search already scoped to the places (not one limited to a publisher): skip the place filter
     )
     sitemap: bool = False  # the URL is a Google News sitemap (title, link, time), not RSS or Atom
+    news_only: bool = False  # a Google News search of one site: keep only headline-like titles, not the site's page titles
     alert: bool = False  # an official alert feed: each new item is pushed (see ingest.push); items carry a private `_alert` flag
     only_matching: str | None = (
         None  # regex: keep an item only when its title or summary matches (a mixed feed narrowed to one theme)

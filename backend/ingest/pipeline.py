@@ -40,9 +40,34 @@ def local_sources(urls: Iterable[str], official: Iterable[str] = (), alerts: Ite
     are about the place by origin, so every item is kept: list only place-specific feeds there (see the README). The `alerts`
     feeds are the same, and their items are also marked so the push step can send each one (once)."""
     own = [Source(f"local-{i}", _host(u), u, "local", trusted=_scoped_search(u)) for i, u in enumerate(urls)]
-    given = [Source(f"local-official-{i}", _host(u), u, "local", trusted=True) for i, u in enumerate(official)]
-    pushed = [Source(f"local-alert-{i}", _host(u), u, "local", trusted=True, alert=True) for i, u in enumerate(alerts)]
+    given = [
+        Source(f"local-official-{i}", _host(u), u, "local", trusted=True, news_only=_is_google_news(u))
+        for i, u in enumerate(official)
+    ]
+    pushed = [
+        Source(f"local-alert-{i}", _host(u), u, "local", trusted=True, alert=True, news_only=_is_google_news(u))
+        for i, u in enumerate(alerts)
+    ]
     return own + given + pushed
+
+
+_WORD = re.compile(r"[^\W\d_][\w'’]*")  # a word starts with a letter, so "2", "3" and "102" alone are not words
+
+
+def headline_like(item: dict[str, Any]) -> bool:
+    """Whether the title reads as a news headline and not a web page's title. A Google News search of one site returns the site's
+    pages too: "Home | Tripp Elementary School", "District 102", or just the site name. Looking at the part before any "|" (the
+    usual page-title separator, also used as "Headline | Publisher"), a headline has three or more words once the site's name
+    is taken out."""
+    head = item["title"].split("|", 1)[0]
+    source = item.get("source", "")
+    if source:
+        head = re.sub(re.escape(source), "", head, flags=re.IGNORECASE)
+    return len(_WORD.findall(head)) >= 3
+
+
+def _is_google_news(url: str) -> bool:
+    return urlsplit(url).hostname == "news.google.com"
 
 
 def _host(url: str) -> str:
@@ -125,6 +150,9 @@ def collect(
                 blocked += 1
                 continue
             if source.topic == "local" and not source.trusted and not (place_re and _mentions(item, place_re)):
+                continue
+            if source.news_only and not headline_like(item):
+                filtered += 1
                 continue
             if only and not only.search(f"{item['title']} {item['summary']}"):
                 filtered += 1

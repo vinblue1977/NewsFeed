@@ -12,7 +12,7 @@ from ingest import handler as handler_module
 from ingest import pipeline
 from ingest.config import earnings_name, watch_name
 from ingest.feeds import FeedError
-from ingest.pipeline import collect, local_sources
+from ingest.pipeline import collect, headline_like, local_sources
 from ingest.sources import Source
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
@@ -63,6 +63,17 @@ def fake_fetcher(url: str) -> bytes:
 
 def src(id: str, host: str, **kw: Any) -> Source:  # noqa: A002
     return Source(id, id, f"https://{host}.example/f", kw.pop("topic", "us"), **kw)
+
+
+def test_a_news_only_source_drops_page_titles_and_keeps_headlines() -> None:
+    page = rss(
+        ("Home | Tripp School", "https://x.example/p1", "", "Fri, 13 Nov 2026 10:00:00 GMT"),
+        ("Board adopts the new school calendar", "https://x.example/p2", "", "Fri, 13 Nov 2026 09:00:00 GMT"),
+    )
+    school = Source("official", "official", "https://school.example/f", "local", trusted=True, news_only=True)
+    items, status = collect([school], now=NOW, fetcher=lambda url: page)
+    assert [i["title"] for i in items] == ["Board adopts the new school calendar"]
+    assert status["official"] == {"ok": True, "items": 1, "filtered": 1}
 
 
 def test_collect_dedupes_drops_old_clamps_future_and_isolates_failures() -> None:
@@ -123,6 +134,37 @@ def test_official_local_feeds_are_trusted_and_never_place_checked() -> None:
         ("local-official-0", "village.example", True),
         ("local-official-1", "news.google.com", True),
     ]
+
+
+def test_only_an_official_google_news_search_keeps_just_headline_like_titles() -> None:
+    made = local_sources(
+        [], official=["https://village.example/rss", "https://news.google.com/rss/search?q=site%3Aschool.example"]
+    )
+    assert [(s.id, s.news_only) for s in made] == [("local-official-0", False), ("local-official-1", True)]
+
+
+@pytest.mark.parametrize(
+    ("title", "headline"),
+    [
+        ("District 102 Honor Local Heroes Across Schools on Veterans Day", True),
+        ("Superintendent McIntyre Recognizes Board Members Ahead of Appreciation Day", True),
+        ("- Aptakisic-Tripp School District 102", False),  # just the site name
+        ("District 102", False),
+        ("Home | Aptakisic Junior High School", False),  # a page title
+        ("Board votes 5-2 on new calendar | Aptakisic-Tripp School District 102", True),  # "Headline | Publisher"
+        ("Events | Aptakisic Junior High School", False),
+        (
+            "aptakisic-tripp school district 102 - Aptakisic-Tripp School District 102",
+            False,
+        ),  # the name in another case, then nothing
+        ("Snow day declared", True),  # a short headline is still a headline
+        ("Board adopts calendar", True),
+        ("Home 2 3 4", False),  # digits are not words
+        ("Pritchett Elementary", False),
+    ],
+)
+def test_headline_like_tells_a_headline_from_a_page_title(title: str, headline: bool) -> None:
+    assert headline_like({"title": title, "source": "Aptakisic-Tripp School District 102"}) is headline
 
 
 def test_alert_feeds_are_trusted_official_sources_marked_for_push() -> None:
