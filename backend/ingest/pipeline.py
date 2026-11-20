@@ -34,13 +34,12 @@ def _scoped_search(url: str) -> bool:
     return parts.hostname == "news.google.com" and not PUBLISHER_LIMIT.search(unquote_plus(parts.query).lower())
 
 
-def local_sources(urls: Iterable[str]) -> list[Source]:
+def local_sources(urls: Iterable[str], official: Iterable[str] = ()) -> list[Source]:
     """Sources for the feed URLs in the location parameter. Their items are kept only if they mention a nearby place, except
-    for a Google News search that is already scoped to the places."""
-    return [
-        Source(id=f"local-{i}", name=_host(url), url=url, topic="local", trusted=_scoped_search(url))
-        for i, url in enumerate(urls)
-    ]
+    for a Google News search that is already scoped to the places. The `official` feeds (a village's or a school district's own)
+    are about the place by origin, so every item is kept: list only place-specific feeds there (see the README)."""
+    own = [Source(f"local-{i}", _host(u), u, "local", trusted=_scoped_search(u)) for i, u in enumerate(urls)]
+    return own + [Source(f"local-official-{i}", _host(u), u, "local", trusted=True) for i, u in enumerate(official)]
 
 
 def _host(url: str) -> str:
