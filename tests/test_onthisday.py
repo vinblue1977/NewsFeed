@@ -3,7 +3,18 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ingest.onthisday import MAX_CHARS, ONTHISDAY_URL, OnThisDayError, build_onthisday, clean, is_due, parse_events, pick, shorten
+from ingest.onthisday import (
+    MAX_CHARS,
+    ONTHISDAY_URL,
+    OnThisDayError,
+    build_onthisday,
+    clean,
+    is_due,
+    is_grim,
+    parse_events,
+    pick,
+    shorten,
+)
 
 NOW = datetime(2026, 11, 20, 9, 30, tzinfo=UTC)
 
@@ -110,3 +121,78 @@ def test_a_neighbouring_day_that_cannot_be_read_is_left_out_but_the_day_itself_m
         build_onthisday(getter=only_neighbours, now=NOW)
     with pytest.raises(OnThisDayError):
         build_onthisday(getter=lambda url: listing(event(0, "no")), now=NOW)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A gunman killed 12 people in a shooting.",
+        "The Battle of Hastings is fought.",
+        "World War II ends in Europe.",
+        "A massive earthquake strikes the coast.",
+        "The ship sinks after hitting an iceberg.",
+        "A plane crash kills all aboard.",
+        "The prime minister is assassinated.",
+        "A famine spreads across the region.",
+        "NAZI forces invade the country.",
+        "Troops open fire on a crowd.",
+        "An explosion destroys the factory.",
+        "Colonial forces launch a pacification campaign.",
+        "Slaves begin an insurrection on the island.",
+        "Six robbers break into a warehouse and steal a fortune.",
+        "The great storm destroys hundreds of ships.",
+    ],
+)
+def test_grim_events_are_recognised(text: str) -> None:
+    assert is_grim(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Microsoft releases Windows 1.0.",
+        "The first episode of Star Trek is broadcast.",
+        "Warsaw hosts the first marathon of the season.",
+        "A couple marries in the first televised wedding.",
+        "The Bombay Stock Exchange opens.",
+        "Rudolf Diesel patents his engine.",
+        "An executive order creates a national park.",
+        "The deadline for the prize is extended.",
+        "Burnley win the league title.",
+        "Burning Man begins in the Nevada desert.",
+        "The Berlin Wall opens and crowds celebrate.",
+        "A fire brigade is founded in the city.",
+        "The United States Space Force is established.",
+        "The Eiffel Tower opens to the public.",
+        "A new species of frog is discovered.",
+        "A sculpture commemorating a local hero is unveiled in Leeds.",
+        "The first Nobel Prizes are awarded.",
+    ],
+)
+def test_light_events_are_kept(text: str) -> None:
+    assert not is_grim(text)
+
+
+def test_a_grim_event_is_never_picked_and_a_day_with_only_grim_events_has_no_line() -> None:
+    mixed = listing(
+        event(1900, "A deadly battle is fought."), event(1985, "Windows 1.0 was released."), event(1990, "A bomb explodes.")
+    )
+    assert build_onthisday(getter=lambda url: mixed, now=NOW)["days"]["2026-11-20"] == {
+        "year": 1985,
+        "text": "Windows 1.0 was released.",
+    }
+
+    def only_grim(url: str) -> bytes:
+        return listing(event(1900, "A deadly battle is fought."), event(1990, "A bomb explodes."))
+
+    doc = build_onthisday(getter=only_grim, now=NOW)
+    assert doc["days"] == {} and doc["date"] == "2026-11-20"  # the file is still written, so the day is not retried every run
+
+
+def test_when_today_is_all_grim_the_neighbouring_days_keep_their_lines() -> None:
+    def getter(url: str) -> bytes:
+        if url.endswith("/11/20"):
+            return listing(event(1900, "A deadly battle is fought."))
+        return listing(event(1985, "Windows 1.0 was released."))
+
+    assert list(build_onthisday(getter=getter, now=NOW)["days"]) == ["2026-11-19", "2026-11-21"]
