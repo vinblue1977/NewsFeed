@@ -15,11 +15,22 @@ export interface Quote {
   series: number[];
 }
 
+/** Which way US stocks lean before the open: from index futures, confirmed or softened by the VIX and the 10-year yield. */
+export type PreState = 'bull' | 'lean_up' | 'flat' | 'lean_down' | 'bear';
+
+export interface PreMarket {
+  state: PreState;
+  futures: { symbol: string; name: string; changePct: number }[];
+  vix: { price: number; changePct: number; vote: number } | null;  // vote: +1 supports stocks, -1 weighs on them, 0 neither
+  yield10: { price: number; changeBp: number; vote: number } | null;
+}
+
 export interface Markets {
   generated: string;
   indexes: Quote[];
   tickers: Quote[];
   missing: number;  // symbols the ingest could not read
+  premarket?: PreMarket;  // only before the open on a US trading day
 }
 
 const MAX_AGE_MS = 60 * 60 * 1000;
@@ -61,13 +72,36 @@ function parseList(value: unknown): { quotes: Quote[]; missing: number } {
   return { quotes, missing };
 }
 
+const PRE_STATES: PreState[] = ['bull', 'lean_up', 'flat', 'lean_down', 'bear'];
+const vote = (v: unknown): number => (v === 1 || v === -1 ? v : 0);
+
+function parsePreMarket(value: unknown): PreMarket | undefined {
+  const v = value as Record<string, unknown> | null;
+  if (!v || !PRE_STATES.includes(v.state as PreState) || !Array.isArray(v.futures)) return undefined;
+  const futures = v.futures.flatMap((f: Record<string, unknown> | null) => {
+    const pct = num(f?.change_pct);
+    return f && typeof f.symbol === 'string' && typeof f.name === 'string' && pct !== null ? [{ symbol: f.symbol, name: f.name, changePct: pct }] : [];
+  });
+  if (futures.length < 2) return undefined;  // the ingest never sends fewer; anything else is not a read
+  const vix = v.vix as Record<string, unknown> | null;
+  const ten = v.yield10 as Record<string, unknown> | null;
+  const vixPrice = num(vix?.price), vixPct = num(vix?.change_pct), tenPrice = num(ten?.price), tenBp = num(ten?.change_bp);
+  return {
+    state: v.state as PreState,
+    futures,
+    vix: vix && vixPrice !== null && vixPct !== null ? { price: vixPrice, changePct: vixPct, vote: vote(vix.vote) } : null,
+    yield10: ten && tenPrice !== null && tenBp !== null ? { price: tenPrice, changeBp: tenBp, vote: vote(ten.vote) } : null,
+  };
+}
+
 /** The markets document, reduced to what the screen shows; undefined if it does not look like one. An empty watchlist is valid. */
 export function parseMarkets(value: unknown): Markets | undefined {
   const v = value as Record<string, unknown> | null;
   if (!v || typeof v.generated !== 'string') return undefined;
   const indexes = parseList(v.indexes);
   const tickers = parseList(v.tickers);
-  return { generated: v.generated, indexes: indexes.quotes, tickers: tickers.quotes, missing: indexes.missing + tickers.missing };
+  const premarket = parsePreMarket(v.premarket);
+  return { generated: v.generated, indexes: indexes.quotes, tickers: tickers.quotes, missing: indexes.missing + tickers.missing, ...(premarket && { premarket }) };
 }
 
 /** Prices older than this are flagged rather than shown as if they were current. */
@@ -230,12 +264,49 @@ export function upcoming(earnings: Earnings | undefined, shown: string[], now: D
 export function marketPhase(markets: Markets, now: Date): 'open' | 'pre-open' | 'closed' {
   const us = markets.tickers.filter((q) => q.currency === 'USD');  // a watchlist can hold stocks from other exchanges
   if (isFresh(markets.generated, now) && (us.length > 0 ? us : markets.tickers).some((q) => q.open)) return 'open';
+  return beforeTheOpen(now) ? 'pre-open' : 'closed';
+}
+
+/** A weekday between 4:00 AM (when pre-market trading starts) and 9:30 AM US Eastern. Holidays are not known here. */
+function beforeTheOpen(now: Date): boolean {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(now);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   const minutes = Number(get('hour')) * 60 + Number(get('minute'));
-  const weekday = !['Sat', 'Sun'].includes(get('weekday'));
-  return weekday && minutes >= 4 * 60 && minutes < 9 * 60 + 30 ? 'pre-open' : 'closed';  // pre-market trading starts at 4:00 AM Eastern
+  return !['Sat', 'Sun'].includes(get('weekday')) && minutes >= 4 * 60 && minutes < 9 * 60 + 30;
 }
+
+/** "+0.6%" / "−0.8%", or "0.0%" (flat, no sign) when the move rounds to nothing at this many digits. */
+export function signedPercent(pct: number, digits = 1): { text: string; dir: 'up' | 'down' | 'flat' } {
+  const shown = Math.abs(pct).toFixed(digits);
+  if (Number(shown) === 0) return { text: `${shown}%`, dir: 'flat' };
+  return pct > 0 ? { text: `+${shown}%`, dir: 'up' } : { text: `−${shown}%`, dir: 'down' };
+}
+
+const PRE_LABELS: Record<PreState, { text: string; arrow: string; dir: 'up' | 'down' | 'flat' }> = {
+  bull: { text: 'Bullish', arrow: '▲', dir: 'up' },
+  lean_up: { text: 'Leaning up', arrow: '↗', dir: 'up' },
+  flat: { text: 'Flat', arrow: '→', dir: 'flat' },
+  lean_down: { text: 'Leaning down', arrow: '↘', dir: 'down' },
+  bear: { text: 'Bearish', arrow: '▼', dir: 'down' },
+};
+export const preMarketLabel = (state: PreState) => PRE_LABELS[state];
+
+const PREMARKET_MAX_AGE_MS = 20 * 60 * 1000;  // the ingest refreshes every 5 minutes: older than this is not "before the open" any more
+
+/** The pre-market read while it applies: a fresh read, and the clock still before the open. After 9:30 AM Eastern, on a weekend or
+ *  holiday (the ingest sends none) or when the file is old, there is nothing to show. */
+export function activePreMarket(markets: Markets | undefined, now: Date): PreMarket | undefined {
+  if (!markets?.premarket) return undefined;
+  const age = now.getTime() - new Date(markets.generated).getTime();
+  if (!(age > -CLOCK_SKEW_MS && age < PREMARKET_MAX_AGE_MS)) return undefined;
+  return beforeTheOpen(now) ? markets.premarket : undefined;  // by the clock, not marketPhase: a 24-hour or Indian symbol on the watchlist is "open" now
+}
+
+/** "8:42 AM ET": when the read was made, in the market's own time. */
+export const etClock = (iso: string): string => {
+  const t = new Date(iso);
+  return Number.isNaN(t.getTime()) ? '' : `${t.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET`;
+};
 
 export interface StripMove {
   symbol: string;
@@ -249,12 +320,7 @@ export function stripMoves(tickers: Quote[], max = 4): { moves: StripMove[]; mor
   const moved = tickers
     .filter((q) => q.changePct !== null)
     .sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0) || a.symbol.localeCompare(b.symbol));
-  const moves = moved.slice(0, max).map((q): StripMove => {
-    const pct = q.changePct ?? 0;
-    const shown = Math.abs(pct).toFixed(1);
-    if (Number(shown) === 0) return { symbol: q.symbol, text: '0.0%', dir: 'flat' };
-    return pct > 0 ? { symbol: q.symbol, text: `+${shown}%`, dir: 'up' } : { symbol: q.symbol, text: `−${shown}%`, dir: 'down' };
-  });
+  const moves = moved.slice(0, max).map((q): StripMove => ({ symbol: q.symbol, ...signedPercent(q.changePct ?? 0) }));
   return { moves, more: Math.max(moved.length - max, 0) };
 }
 

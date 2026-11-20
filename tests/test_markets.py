@@ -2,6 +2,7 @@ import json
 import threading
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import unquote
 
 import pytest
 
@@ -175,7 +176,7 @@ def test_chart_url_quotes_the_symbol() -> None:
 
 def make_getter(bodies: dict[str, bytes | Exception]) -> Any:
     def get(url: str) -> bytes:
-        symbol = url.split("/chart/")[1].split("?")[0].replace("%5E", "^")
+        symbol = unquote(url.split("/chart/")[1].split("?")[0])
         body = bodies.get(symbol, FeedError("fetch failed: 404"))
         if isinstance(body, Exception):
             raise body
@@ -343,3 +344,32 @@ def test_removed_symbols_leave_the_history_cache() -> None:
     markets._HISTORY["OLD"] = (0.0, [1.0, 2.0])
     build_markets(["AAA"], getter=lambda url: history_chart([1.0, 2.0]) if "range=3mo" in url else chart(), now=NOW)
     assert "OLD" not in markets._HISTORY
+
+
+def test_before_the_open_the_premarket_read_is_built_from_futures_vix_and_the_yield() -> None:
+    now = datetime(2026, 11, 13, 13, 0, tzinfo=UTC)  # Friday, 8:00 AM EST
+    ts = int(now.timestamp()) - 60
+    bodies = {s: chart(regularMarketTime=ts) for s in (*INDEXES, "AAA")}
+    bodies.update({"ES=F": chart(100.5, 100.0, regularMarketTime=ts), "NQ=F": chart(100.7, 100.0, regularMarketTime=ts)})
+    bodies.update({"YM=F": chart(100.3, 100.0, regularMarketTime=ts), "^VIX": chart(19.0, 20.0, regularMarketTime=ts)})
+    bodies["^TNX"] = chart(4.0, 4.04, regularMarketTime=ts)
+    doc = build_markets(["AAA"], getter=make_getter(bodies), now=now)
+    assert doc["premarket"]["state"] == "bull"  # futures up, the VIX down 5% and the yield down 4 bp: all agree
+    assert doc["premarket"]["yield10"]["change_bp"] == -4 and len(doc["indexes"]) == len(INDEXES)  # the strip is unchanged
+
+
+def test_the_premarket_symbols_never_sink_a_run_and_a_failed_read_is_none() -> None:
+    now = datetime(2026, 11, 13, 13, 0, tzinfo=UTC)
+    doc = build_markets(getter=make_getter({s: chart() for s in INDEXES}), now=now)  # every signal request fails
+    assert doc["premarket"] is None and all(q["ok"] for q in doc["indexes"])
+
+
+def test_after_the_open_nothing_extra_is_fetched() -> None:
+    seen: list[str] = []
+
+    def get(url: str) -> bytes:
+        seen.append(url)
+        return chart()
+
+    assert build_markets(getter=get, now=NOW)["premarket"] is None  # 10:00 AM EST
+    assert len(seen) == len(INDEXES)
