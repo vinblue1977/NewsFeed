@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadKernel, loadScores, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
+import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadKernel, loadOnThisDay, loadScores, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) });
 
@@ -41,6 +41,19 @@ describe('loadWeather', () => {
     expect(await loadWeather()).toBeUndefined();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     expect(await loadWeather()).toBeUndefined();
+  });
+});
+
+describe('loadOnThisDay', () => {
+  it('returns the parsed fact, and undefined for a missing file, a bad body or a network error', async () => {
+    vi.stubGlobal('fetch', reply({ generated: 'g', date: '2026-11-20', days: { '2026-11-20': { year: 1985, text: 'Windows 1.0 was released.' } } }));
+    expect((await loadOnThisDay())?.days['2026-11-20']?.year).toBe(1985);
+    vi.stubGlobal('fetch', reply({}, false, 403));
+    expect(await loadOnThisDay()).toBeUndefined();
+    vi.stubGlobal('fetch', reply({ nope: 1 }));
+    expect(await loadOnThisDay()).toBeUndefined();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await loadOnThisDay()).toBeUndefined();
   });
 });
 

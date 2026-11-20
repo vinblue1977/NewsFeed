@@ -204,6 +204,7 @@ def no_side_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handler_module, "build_scores", down)
     monkeypatch.setattr(handler_module, "build_schedule", down)
     monkeypatch.setattr(handler_module, "build_kernel", down)
+    monkeypatch.setattr(handler_module, "build_onthisday", down)
 
 
 def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,6 +265,61 @@ def test_handler_writes_the_kernel_document_and_a_kernel_failure_changes_nothing
     monkeypatch.setattr(handler_module, "build_kernel", lambda: (_ for _ in ()).throw(RuntimeError("kernel.org is down")))
     result = handler_module.handler({}, object())
     assert result["status"] == "ok" and result["kernel"] == "failed"
+    assert [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
+
+
+class OnThisDayS3(FakeS3):
+    """An S3 whose on-this-day file is `previous` (a dict), missing (None) or unreadable ("error")."""
+
+    def __init__(self, previous: dict[str, Any] | str | None) -> None:
+        super().__init__()
+        self.previous = previous
+
+    def get_object(self, **kw: Any) -> Any:
+        if not kw["Key"].endswith("onthisday.json"):
+            raise OSError("no previous feed")
+        if self.previous is None:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        if self.previous == "error":
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+        return {"Body": io.BytesIO(json.dumps(self.previous).encode())}
+
+
+def _on_this_day_run(
+    monkeypatch: pytest.MonkeyPatch, previous: dict[str, Any] | str | None, build: Any
+) -> tuple[dict[str, Any], OnThisDayS3]:
+    s3 = OnThisDayS3(previous)
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "build_onthisday", build)
+    return handler_module.handler({}, object()), s3
+
+
+def _on_this_day_doc(date: str) -> dict[str, Any]:
+    return {"generated": "o", "date": date, "days": {date: {"year": 1985, "text": "t"}}}
+
+
+def test_handler_writes_the_on_this_day_document_when_it_is_missing_or_from_another_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    today = datetime.now(UTC).date().isoformat()
+    for previous in (None, _on_this_day_doc("2020-01-01")):
+        result, s3 = _on_this_day_run(monkeypatch, previous, lambda: _on_this_day_doc(today))
+        assert result["onthisday"] == "ok" and "data/onthisday.json" in [p["Key"] for p in s3.puts]
+
+
+def test_handler_leaves_a_current_or_unreadable_on_this_day_file_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    def never() -> dict[str, Any]:
+        raise AssertionError("Wikipedia must not be asked")
+
+    for previous in (_on_this_day_doc(datetime.now(UTC).date().isoformat()), "error"):
+        result, s3 = _on_this_day_run(monkeypatch, previous, never)
+        assert result["onthisday"] == "fresh" and [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
+
+
+def test_an_on_this_day_failure_changes_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    def down() -> dict[str, Any]:
+        raise RuntimeError("wikipedia is down")
+
+    result, s3 = _on_this_day_run(monkeypatch, None, down)
+    assert result["status"] == "ok" and result["onthisday"] == "failed"
     assert [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
 
 

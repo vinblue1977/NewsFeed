@@ -20,6 +20,8 @@ from ingest.espn_pictures import add_pictures
 from ingest.images import attach_images, known_images
 from ingest.kernel import build_kernel
 from ingest.markets import build_markets
+from ingest.onthisday import build_onthisday
+from ingest.onthisday import is_due as onthisday_is_due
 from ingest.page_pictures import add_page_pictures
 from ingest.pipeline import collect, local_sources
 from ingest.schedule import build_schedule
@@ -81,7 +83,7 @@ def build_feed(
 
 
 def soft(name: str, build: Callable[[], dict[str, Any]]) -> dict[str, Any] | None:
-    """A side document (weather, markets, scores, kernel), or None. Fail-soft: trouble is logged, never raised."""
+    """A side document (weather, markets, scores, kernel, on this day), or None. Fail-soft: trouble is logged, never raised."""
     try:
         return build()
     except Exception:  # noqa: BLE001  (a missing side document must not fail the ingest run; its old file stays)
@@ -164,6 +166,17 @@ def schedule_needed(s3: Any) -> bool:
     return schedule_is_due(previous)
 
 
+def onthisday_needed(s3: Any) -> bool:
+    """Whether to fetch the on-this-day facts: they are missing or built for another day. A file that cannot be read means no,
+    so a storage hiccup does not turn into Wikipedia requests on every run."""
+    try:
+        previous = read_doc(s3, "onthisday")
+    except Exception:  # noqa: BLE001
+        logger.exception("could not read the on-this-day file; not rebuilding it this run")
+        return False
+    return onthisday_is_due(previous)
+
+
 def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     """Write data/<name>.json ("failed" if there is nothing to write or the write fails). Each document carries `generated`."""
     if doc is None:
@@ -208,8 +221,8 @@ def send_push_test() -> str:
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     """EventBridge entry point. Writes data/feed.json (kept as is if more than half the sources failed), plus weather.json,
-    scores.json, kernel.json and the private watchlist quotes. Those are fetched alongside the feed and written even when
-    the feed run is rejected, so none of them holds up another."""
+    scores.json, kernel.json, onthisday.json and the private watchlist quotes. Those are fetched alongside the feed and
+    written even when the feed run is rejected, so none of them holds up another."""
     started = time.monotonic()
     if event.get("only") == "push-test":  # by hand only: one test message, nothing else runs
         result = send_push_test()
@@ -220,12 +233,14 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         return run_markets(s3, location, force=event.get("force") is True)
     watch_key = location.get("watch_key")
     symbols = saved_symbols(s3, watch_key) or []
-    pool = ThreadPoolExecutor(max_workers=6)
+    pool = ThreadPoolExecutor(max_workers=7)
     side = {
         "weather": pool.submit(soft, "weather", lambda: build_weather(location["lat"], location["lon"])),
         "scores": pool.submit(soft, "scores", build_scores),
         "kernel": pool.submit(soft, "kernel", build_kernel),
     }
+    if onthisday_needed(s3):  # once a day
+        side["onthisday"] = pool.submit(soft, "onthisday", build_onthisday)
     if watch_key and symbols:  # no watchlist, no quotes to fetch
         side["markets"] = pool.submit(soft, "markets", lambda: build_markets(symbols))
     if schedule_needed(s3):
@@ -284,6 +299,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
             )
             statuses["markets"] = "superseded" if edited else write_doc(s3, watch_name(watch_key), watch)
         statuses.setdefault("schedule", "fresh")  # not rebuilt this run
+        statuses.setdefault("onthisday", "fresh")
         pool.shutdown(wait=False)
     push_status = notify(s3, feed, started, alert_ids)  # only reached when the feed was written
     return {
