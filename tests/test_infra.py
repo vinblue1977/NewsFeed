@@ -54,7 +54,7 @@ def test_buckets_are_private() -> None:
 def test_ingest_runs_on_a_schedule() -> None:
     template = _synthesized(ACCOUNT)[1]
     template.has_resource_properties("AWS::Events::Rule", {"ScheduleExpression": "cron(0/15 * * * ? *)"})
-    for hours in ("3-10", "13-21"):  # quotes every 5 minutes while an exchange may be open, weekdays only
+    for hours in ("3-10", "8-21"):  # quotes every 5 minutes while an exchange may be open (US from 4 AM Eastern), weekdays only
         template.has_resource_properties(
             "AWS::Events::Rule", {"ScheduleExpression": f"cron(0/5 {hours} ? * MON-FRI *)", "Targets": Match.any_value()}
         )

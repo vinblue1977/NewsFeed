@@ -254,9 +254,10 @@ class NewsStack(Stack):
             targets=[targets.LambdaFunction(fn)],  # pyright: ignore[reportArgumentType]
         )
 
-        # Quotes every 5 minutes while an exchange may be open (weekdays, UTC): India 03:00-10:55, US 13:00-21:55. The run
-        # writes nothing if no market is open, so the wide windows (DST, holidays) cost a probe, not a write.
-        for rule_id, hours in (("MarketsIndia", "3-10"), ("MarketsUS", "13-21")):
+        # Quotes every 5 minutes while an exchange may be open (weekdays, UTC): India 03:00-10:55, US 08:00-21:55 (from 4:00 AM
+        # Eastern in summer time, for the pre-market read). The run writes nothing if no market is open and there is no
+        # pre-market read, so the wide windows (DST, holidays) cost a probe, not a write.
+        for rule_id, hours in (("MarketsIndia", "3-10"), ("MarketsUS", "8-21")):
             events.Rule(
                 self,
                 rule_id,

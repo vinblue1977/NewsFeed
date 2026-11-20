@@ -108,7 +108,12 @@ def watch_doc(markets: dict[str, Any] | None) -> tuple[dict[str, Any] | None, bo
     if markets is None:
         return None, False
     is_open = any(q.get("open") for q in [*markets.get("indexes", []), *markets["tickers"]])  # a 24-hour symbol counts too
-    return {"generated": markets["generated"], "indexes": [], "tickers": markets["tickers"]}, is_open
+    return {
+        "generated": markets["generated"],
+        "indexes": [],
+        "tickers": markets["tickers"],
+        "premarket": markets.get("premarket"),
+    }, is_open
 
 
 def run_markets(s3: Any, location: dict[str, Any], force: bool = False) -> dict[str, Any]:
@@ -122,7 +127,7 @@ def run_markets(s3: Any, location: dict[str, Any], force: bool = False) -> dict[
     doc, is_open = watch_doc(soft("markets", lambda: build_markets(symbols)))
     if doc is None:
         return {"status": "ok", "markets": "failed"}
-    if not is_open and not force:
+    if not is_open and not doc.get("premarket") and not force:  # before the open there is still the pre-market read to write
         return {"status": "ok", "markets": "closed"}
     return {"status": "ok", "markets": write_doc(s3, watch_name(key), doc)}
 

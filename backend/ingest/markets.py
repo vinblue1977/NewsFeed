@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
+from ingest import premarket
 from ingest.config import SYMBOL
 from ingest.feeds import USER_AGENT, FeedError, clean_text, fetch
 
@@ -145,8 +146,9 @@ def _fetch_history(symbol: str, get: Any) -> list[float]:
 
 
 def build_markets(tickers: list[str] | None = None, *, getter: Any = None, now: datetime | None = None) -> dict[str, Any]:
-    """The markets document: {"generated", "indexes": [...], "tickers": [...]}; each watchlist quote also carries a 3-month
-    daily `history`. Raises MarketsError if no more than half of the quotes could be read."""
+    """The markets document: {"generated", "indexes": [...], "tickers": [...], "premarket": {...} | None}; each watchlist quote
+    also carries a 3-month daily `history`, and `premarket` is the read from futures, VIX and the 10-year yield on a US trading
+    day before the open (see ingest.premarket). Raises MarketsError if no more than half of the quotes could be read."""
     now = now or datetime.now(UTC)
     get = getter or (lambda url: fetch(url, accept=JSON_ACCEPT, deadline_seconds=DEADLINE_SECONDS, user_agent=USER_AGENT))
     # Case-insensitive, and an index named in the watchlist is not shown twice (it is already in the strip).
@@ -154,15 +156,20 @@ def build_markets(tickers: list[str] | None = None, *, getter: Any = None, now: 
     symbols = [*INDEXES, *extra]
     for gone in set(_HISTORY) - set(extra):  # symbols dropped from the watchlist do not stay cached
         del _HISTORY[gone]
-    pool = ThreadPoolExecutor(max_workers=len(symbols) + len(extra))
+    signal_symbols = premarket.SYMBOLS if premarket.in_window(now) else ()  # the pre-market read, only before the open
+    pool = ThreadPoolExecutor(max_workers=len(symbols) + len(extra) + len(signal_symbols))
     try:
         futures = {s: pool.submit(_fetch_quote, s, now, get) for s in symbols}
         histories = {s: pool.submit(_fetch_history, s, get) for s in extra}  # a missing graph never fails the quote
-        everything: list[Future[Any]] = [*futures.values(), *histories.values()]
+        signals = {
+            s: pool.submit(_fetch_quote, s, now, get) for s in signal_symbols
+        }  # kept out of `quotes`: they never sink a run
+        everything: list[Future[Any]] = [*futures.values(), *histories.values(), *signals.values()]
         wait(everything, timeout=WAIT_SECONDS)
         quotes = {s: f.result() if f.done() else {"symbol": s, "ok": False} for s, f in futures.items()}
         for s in extra:
             quotes[s]["history"] = histories[s].result() if histories[s].done() else []
+        signal_quotes = {s: f.result() for s, f in signals.items() if f.done()}
     finally:
         pool.shutdown(wait=False, cancel_futures=True)  # a stalled request is abandoned, not waited for
     good = sum(q["ok"] for q in quotes.values())
@@ -172,4 +179,5 @@ def build_markets(tickers: list[str] | None = None, *, getter: Any = None, now: 
         "generated": now.isoformat(timespec="seconds"),
         "indexes": [quotes[s] for s in INDEXES],
         "tickers": [quotes[s] for s in extra],
+        "premarket": premarket.read(signal_quotes, now) if signal_symbols else None,
     }
