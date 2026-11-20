@@ -138,7 +138,7 @@ class FakeS3:
 
 @pytest.fixture(autouse=True)
 def no_side_documents(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The weather, markets and scores builders reach the network, so every handler test starts with them failing and opts in."""
+    """The side-document builders (weather, markets, scores, schedule, kernel) reach the network: tests start with them down."""
 
     def down(*args: Any) -> dict[str, Any]:
         raise RuntimeError("down")
@@ -147,6 +147,7 @@ def no_side_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(handler_module, "build_markets", down)
     monkeypatch.setattr(handler_module, "build_scores", down)
     monkeypatch.setattr(handler_module, "build_schedule", down)
+    monkeypatch.setattr(handler_module, "build_kernel", down)
 
 
 def test_handler_writes_the_feed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,6 +194,20 @@ def test_handler_survives_a_weather_failure(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(handler_module, "build_weather", boom)
     result = handler_module.handler({}, object())
     assert result["status"] == "ok" and result["weather"] == "failed"
+    assert [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
+
+
+def test_handler_writes_the_kernel_document_and_a_kernel_failure_changes_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "build_kernel", lambda: {"generated": "k", "rows": []})
+    result = handler_module.handler({}, object())
+    assert result["kernel"] == "ok" and "data/kernel.json" in [p["Key"] for p in s3.puts]
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    monkeypatch.setattr(handler_module, "build_kernel", lambda: (_ for _ in ()).throw(RuntimeError("kernel.org is down")))
+    result = handler_module.handler({}, object())
+    assert result["status"] == "ok" and result["kernel"] == "failed"
     assert [p["Key"] for p in s3.puts] == ["data/articles.json", "data/feed.json"]
 
 

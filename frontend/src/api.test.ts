@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadScores, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
+import { ARTICLES_URL, FEED_URL, loadArticles, loadFeed, loadKernel, loadScores, loadWatchlist, loadWeather, resetArticlesCache, watchFile, watchlistSymbols } from './api';
 
 const reply = (body: unknown, ok = true, status = 200) => vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) });
 
@@ -41,6 +41,19 @@ describe('loadWeather', () => {
     expect(await loadWeather()).toBeUndefined();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     expect(await loadWeather()).toBeUndefined();
+  });
+});
+
+describe('loadKernel', () => {
+  it('returns the parsed kernel table, and undefined for a missing file, a bad body or a network error', async () => {
+    vi.stubGlobal('fetch', reply({ generated: 'g', rows: [{ branch: 'Stable', version: '7.3.5', released: '2026-11-17' }] }));
+    expect((await loadKernel())?.rows[0]?.version).toBe('7.3.5');
+    vi.stubGlobal('fetch', reply({}, false, 403));
+    expect(await loadKernel()).toBeUndefined();
+    vi.stubGlobal('fetch', reply({ nope: 1 }));
+    expect(await loadKernel()).toBeUndefined();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await loadKernel()).toBeUndefined();
   });
 });
 

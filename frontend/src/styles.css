@@ -326,3 +326,11 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .row-between .manage { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; text-decoration: none; }
 .sech span.all { margin-left: auto; color: var(--muted); font-size: 13px; text-transform: none; letter-spacing: 0; }
 .sech a.all { margin-left: auto; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; text-decoration: none; }
+
+.ktable { width: calc(100% - 32px); margin: 8px 16px 6px; border-collapse: separate; border-spacing: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; }
+.ktable th, .ktable td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.ktable tr:last-child th, .ktable tr:last-child td { border-bottom: 0; }
+.ktable thead th { font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+.ktable tbody th { font-weight: 500; }
+.ktable td:nth-child(2) { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ktable td:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
