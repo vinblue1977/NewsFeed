@@ -1145,7 +1145,7 @@ function MarketsStrip({ markets, earnings, hidden, now }: { markets: Markets | u
       {moves.length > 0 && (
         <div class="mkm">
           {moves.map((m) => <div key={m.symbol}><b>{m.symbol}</b><span class={`chg ${m.dir}`}>{m.text}</span></div>)}
-          {more > 0 && <div><span class="chg">+{more} more</span></div>}
+          {more > 0 && <div class="mkmore"><span class="chg">+{more} more</span></div>}
         </div>
       )}
       {reports.length > 0 && <div class="mke">Earnings today: <b>{reports.join(', ')}</b></div>}
