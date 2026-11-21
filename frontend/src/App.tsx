@@ -1396,17 +1396,11 @@ export function App() {
   }, [settings.textSize]);
   const firstTeam = settings.myTeams[0];  // the theme depends on this one name, so editing another team does not rebuild it
   const theme = useMemo(() => (route.kind === 'sports' && settings.teamColors ? teamTheme(firstTeam ? [firstTeam] : []) : undefined), [route.kind, settings.teamColors, firstTeam]);
-  useEffect(() => {  // the Sports tab wears the first team's colours (and the phone's status bar follows); every other screen gets the normal theme back
+  useEffect(() => {  // the Sports tab wears the first team's accent; every other screen gets the normal one back
     const root = document.documentElement.style;
-    const meta = document.querySelector('meta[name="theme-color"]');
-    const normal = meta?.getAttribute('content') ?? undefined;
-    if (theme) {
-      for (const [name, value] of Object.entries(themeVars(theme))) root.setProperty(name, value);
-      meta?.setAttribute('content', theme.bg);
-    }
+    if (theme) for (const [name, value] of Object.entries(themeVars(theme))) root.setProperty(name, value);
     return () => {
       for (const name of THEME_VARS) root.removeProperty(name);
-      if (normal !== undefined) meta?.setAttribute('content', normal);
     };
   }, [theme]);
   const list = useMemo(() => (feed ? stories(feed, topic) : []), [feed, topic]);
