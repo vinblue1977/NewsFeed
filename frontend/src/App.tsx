@@ -237,6 +237,7 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
             {page.coverageId && <a class="btn g" href={`#/story/${page.coverageId}`}>Full coverage</a>}
           </div>
           <div class="note">Paywalled articles are filtered out · sources that limit free reads are marked Metered</div>
+          <div class="btns"><button type="button" class="btn g" onClick={goBack}><span aria-hidden="true">‹</span> Back</button></div>
         </article>
       )}
     </div>
