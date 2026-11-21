@@ -8,7 +8,7 @@ import { type Kernel, kernelFresh, kernelTitle } from './kernel';
 import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
-import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
@@ -28,6 +28,8 @@ const screenKeyOf = (r: Route): string =>
 /** The Browse tab (was Discovery). Its route stays `#/discovery` and the code keeps the Discovery names so old links and bookmarks still work. */
 const BROWSE = 'Browse';
 const HOME_MARKETS_MS = 5 * 60 * 1000;  // quotes move every 5 minutes: the strip on For you looks again no sooner than that
+const STALE_RETRIES = 3;  // asks again this many times when the feed on screen is stale
+const STALE_RETRY_MS = 10_000;
 const needsMarkets =(kind: string) => kind === 'home' || kind === 'markets' || kind === 'settings' || kind === 'quote';
 const PAGE = 30;
 const TICK_MS = 60_000;
@@ -1284,14 +1286,38 @@ export function App() {
     }
   };
   const latest = useRef(0);
-  const refresh = () => {
+  const staleRetries = useRef(0);
+  const staleTimer = useRef<number | undefined>(undefined);
+  const shownGenerated = useRef<string | undefined>(undefined);  // the feed on screen, for the error path
+  /** Only the feed: the retry must not repeat the weather and scores requests on a weak signal. */
+  const refreshFeed = () => {
+    clearTimeout(staleTimer.current);
     const mine = ++latest.current;  // a slower, older response must not overwrite a newer one
+    const retryIfStale = () => {
+      if (!shouldRetryStale(shownGenerated.current, new Date(), staleRetries.current, STALE_RETRIES)) return;
+      staleRetries.current += 1;
+      // hidden at the time: nothing is lost, coming back to the app runs refresh() again
+      staleTimer.current = window.setTimeout(() => { if (document.visibilityState === 'visible') refreshFeed(); }, STALE_RETRY_MS);
+    };
+    loadFeed().then(
+      (feed) => {
+        if (mine !== latest.current) return;
+        if (feed.generated !== shownGenerated.current) staleRetries.current = 0;  // new data: a new budget
+        shownGenerated.current = feed.generated;
+        setLoad({ state: 'ready', feed });
+        retryIfStale();  // a weak signal on opening makes the service worker hand back the kept copy after 4 s: ask again
+      },
+      () => {
+        if (mine !== latest.current) return;
+        setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' }));
+        retryIfStale();  // a fresh feed on screen needs nothing; none or a stale one asks again
+      },
+    );
+  };
+  const refresh = () => {
     void loadWeather().then((w) => { if (w) setWeather(w); });  // independent of the feed; a failed refresh keeps the last good one
     if (routeRef.current.kind === 'sports') refreshScores();  // only the Sports tab shows them
-    loadFeed().then(
-      (feed) => { if (mine === latest.current) setLoad({ state: 'ready', feed }); },
-      () => { if (mine === latest.current) setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' })); },
-    );
+    refreshFeed();
   };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -1369,6 +1395,7 @@ export function App() {
       clearInterval(quotes);
       clearInterval(live);
       timers.current.forEach(clearTimeout);
+      clearTimeout(staleTimer.current);
     };
   }, []);
 

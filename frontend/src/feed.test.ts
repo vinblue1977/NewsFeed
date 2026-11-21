@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { FILM_ORDER, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { FILM_ORDER, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, readerPage, storyLink, storyPage, isStale, shouldRetryStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 import type { Story } from './feed';
 
@@ -40,6 +40,14 @@ describe('feed helpers', () => {
     expect(safeUrl('https://e.com/x')).toBe('https://e.com/x');
     expect(safeUrl(['java', 'script:alert(1)'].join(''))).toBe('#');
     expect(safeUrl('not a url')).toBe('#');
+  });
+
+  it('retries only for a missing or stale feed, and only while the budget lasts', () => {
+    expect(shouldRetryStale(undefined, NOW, 0, 3)).toBe(true);
+    expect(shouldRetryStale('2026-11-13T11:00:00Z', NOW, 0, 3)).toBe(false);
+    expect(shouldRetryStale('2026-11-12T00:00:00Z', NOW, 2, 3)).toBe(true);
+    expect(shouldRetryStale('2026-11-12T00:00:00Z', NOW, 3, 3)).toBe(false);
+    expect(shouldRetryStale(undefined, NOW, 3, 3)).toBe(false);
   });
 
   it('detects a stale feed', () => {
