@@ -42,6 +42,11 @@ export function isStale(generated: string, now: Date): boolean {
   return now.getTime() - new Date(generated).getTime() > STALE_AFTER_MS;
 }
 
+/** Ask for the feed again: nothing on screen or a stale feed, and the budget of retries is not spent. */
+export function shouldRetryStale(generated: string | undefined, now: Date, tries: number, max: number): boolean {
+  return tries < max && (generated === undefined || isStale(generated, now));
+}
+
 /** A stable colour for a source's round badge, so the same source always looks the same. */
 export function badgeColor(source: string): string {
   let h = 0;
