@@ -244,6 +244,11 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
   );
 }
 
+/** The same Back as the top-left button, at the end of a long page so there is no scrolling up. */
+function BottomBack({ onBack }: { onBack: () => void }) {
+  return <div class="btns"><button type="button" class="btn g" onClick={onBack}><span aria-hidden="true">‹</span> Back</button></div>;
+}
+
 function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; id: string; now: Date; canGoBack: boolean; chromeHidden: boolean }) {
   const page = storyPage(feed, id);
   const [all, setAll] = useState(false);
@@ -283,6 +288,7 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
               ))}
             </>
           )}
+          <BottomBack onBack={goBack} />
         </>
       )}
     </div>
@@ -410,7 +416,8 @@ function QuoteScreen({ markets, earnings, loaded, symbol, now, canGoBack }: { ma
             <Stat label="Day range" value={dayRange(q.dayLow, q.dayHigh, q.currency)} />
             <Stat label="Last trade" value={q.lastTrade ? timeAgo(q.lastTrade, now) : ''} />
           </ul>
-          <p class="fine">Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
+          <p class="fine" style={{ marginBottom: 10 }}>Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
+          <BottomBack onBack={goBack} />
         </>
       )}
     </div>
@@ -451,6 +458,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
       {feed && sub && inSub.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No stories in this sub-topic right now.</span></div>}
       {sub && inSub.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
       {sub && inSub.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
+      {sub && inSub.length > 0 && <BottomBack onBack={goBack} />}
       {feed && !sub && found.widely.length + found.justIn.length + found.corners.length === 0 && (
         <div class="empty"><b>Nothing to discover yet</b><span>Check back after the next update.</span></div>
       )}
