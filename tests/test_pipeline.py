@@ -1091,7 +1091,7 @@ def test_handler_runs_the_push_step_after_the_feed_and_survives_its_failure(monk
     order: list[str] = []
     real_put = s3.put_object
     s3.put_object = lambda **kw: (order.append(kw["Key"]), real_put(**kw))[1]  # type: ignore[method-assign]
-    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts: (order.append("push"), "sent:1")[1])
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts, **_: (order.append("push"), "sent:1")[1])
     result = handler_module.handler({}, object())
     assert result["push"] == "sent:1" and order[-1] == "push" and "data/feed.json" in order[:-1]
 
@@ -1110,11 +1110,22 @@ def test_handler_hands_the_alert_item_ids_to_the_push_step_and_they_are_not_in_t
     monkeypatch.setattr(handler_module, "cached_local_feeds", lambda: {"official": [], "alerts": ["https://alerts.example/f"]})
     monkeypatch.setattr("ingest.pipeline.fetch", lambda url: ALERT_DOCS[url] if url in ALERT_DOCS else fake_fetcher(url))
     given: list[set[str]] = []
-    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts: (given.append(set(alerts)), "sent:1")[1])
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts, **_: (given.append(set(alerts)), "sent:1")[1])
     handler_module.handler({}, object())
     written = next(json.loads(p["Body"]) for p in s3.puts if p["Key"] == "data/feed.json")
     alert_item = next(i for i in written["items"] if i["title"] == "Water main break")
     assert given == [{alert_item["id"]}] and "_alert" not in alert_item
+
+
+def test_handler_hands_the_weather_document_it_built_to_the_push_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    doc = {"generated": "2026-11-13T12:00:00+00:00", "alerts": [], "alerts_ok": True}
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: doc)
+    given: list[Any] = []
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts, **kw: (given.append(kw.get("weather")), "none")[1])
+    handler_module.handler({}, object())
+    assert given == [doc]
 
 
 def test_handler_skips_the_push_step_when_the_run_is_late(monkeypatch: pytest.MonkeyPatch) -> None:

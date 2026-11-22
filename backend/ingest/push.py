@@ -11,7 +11,12 @@ Which stories qualify (strict on purpose, so a push means something):
 Quiet hours hold pushes back (they are not marked sent, so a still-fresh story can go out afterwards). At most 2 pushes per run
 and 5 per local day, and one cluster is pushed once: the sent ids are kept in a private state file, pruned after 3 days.
 
-Village alerts are the other kind: every item from a feed listed under `alerts` in the location parameter, under two days old and
+Weather alerts: each active National Weather Service alert of Severe or Extreme severity (from the weather document the run just
+built), not yet ended and not yet sent, when the registration has `weather` on. They go first, are sent through quiet hours (a
+tornado warning at 3 a.m. is the point), and do not use up the daily cap, so a busy news day cannot hold one back; the per-run cap
+still applies. Their sent ids start with "wx:".
+
+Village alerts are another kind: every item from a feed listed under `alerts` in the location parameter, under two days old and
 not yet sent, when the registration has `alerts` on (the default). They go before breaking stories, are sent through quiet hours
 (an alert feed is rare and official), and share the per-run and per-day caps. Their sent ids start with "alert:"."""
 
@@ -43,11 +48,14 @@ ALERT_MAX_AGE = timedelta(days=2)  # an official alert feed is quiet: an item a 
 PER_RUN = 2
 PER_DAY = 5
 KEEP = timedelta(days=3)
+KEEP_WEATHER = timedelta(days=14)  # a long-lived warning (a heat wave) must not be pushed again when its dedupe entry ages out
+WEATHER_REPEAT = timedelta(hours=6)  # the NWS reissues a continuing warning under a new id: one push per event name per 6 hours
 DEFAULT_QUIET = (22 * 60, 7 * 60)  # 22:00 to 07:00, when the registration says nothing
 CONFIG_TTL_SECONDS = 600  # an edit to the parameters reaches a warm container within this long
 NEGATIVE_TTL_SECONDS = 60  # "not set up" is re-checked sooner, so registering the phone takes effect within a minute
 TRUSTED = frozenset({"BBC News", "NPR", "PBS NewsHour", "CBS News", "ABC News", "NBC News", "The Guardian", "Al Jazeera", "DW"})
 BREAKING = re.compile(r"\s*(?:breaking(?:\s+news)?|developing|live)\s*[:|–—-]", re.IGNORECASE)
+WEATHER_SEVERITIES = frozenset({"Severe", "Extreme"})  # Moderate and Minor (a wind advisory, a frost) are not worth a buzz
 TITLE_CHARS = 140
 BODY_CHARS = 100
 
@@ -58,7 +66,7 @@ class Registration:
 
     subscription: dict[str, Any]  # {"endpoint", "keys": {"p256dh", "auth"}}
     topics: frozenset[str]
-    weather: bool  # reserved: weather alert pushes are a later change
+    weather: bool  # push severe National Weather Service alerts
     quiet: tuple[int, int] | None  # minutes after local midnight: (start, end), end may be before start
     tz: ZoneInfo
     site: str  # https://<the app's origin>: the VAPID `sub` claim (the deploy cannot know it: see parse_registration)
@@ -75,6 +83,7 @@ class Notification:
     body: str
     url: str
     topic: str
+    group: str = ""  # weather: "wxe:<event>", a second dedupe key (the NWS reissues a continuing warning under a new id)
 
     def payload(self) -> dict[str, str]:
         return {"title": self.title, "body": self.body, "url": self.url, "tag": self.id}
@@ -219,6 +228,41 @@ def village_alerts(
     return [n for _, n in found]
 
 
+def weather_alerts(weather: dict[str, Any] | None, reg: Registration, sent: dict[str, Any], now: datetime) -> list[Notification]:
+    """The Severe or Extreme NWS alerts in the weather document that have not ended and are not yet sent, most severe first."""
+    if not reg.weather or not isinstance(weather, dict):
+        return []
+    found = []
+    for alert in weather.get("alerts") or []:
+        if not isinstance(alert, dict) or alert.get("severity") not in WEATHER_SEVERITIES or not alert.get("id"):
+            continue
+        key = f"wx:{alert['id']}"
+        event = str(alert.get("event") or "Weather alert")
+        group = f"wxe:{event}"
+        ends = _when(alert.get("ends")) if alert.get("ends") else None
+        if key in sent or (ends is not None and ends <= now):
+            continue
+        last = _when(sent.get(group))
+        if last is not None and now - last < WEATHER_REPEAT:
+            continue
+        found.append(
+            (
+                alert["severity"] != "Extreme",  # False sorts first
+                Notification(
+                    kind="weather",
+                    id=key,
+                    title=event[:TITLE_CHARS],
+                    body=str(alert.get("headline") or alert.get("instruction") or "")[:BODY_CHARS],
+                    url="/",
+                    topic="local",
+                    group=group,
+                ),
+            )
+        )
+    found.sort(key=lambda f: f[0])
+    return [n for _, n in found]
+
+
 def candidates(
     feed: dict[str, Any],
     reg: Registration,
@@ -226,11 +270,15 @@ def candidates(
     now: datetime,
     alert_ids: Iterable[str] = (),
     quiet: bool = False,
+    weather: dict[str, Any] | None = None,
 ) -> list[Notification]:
-    """Everything that could be pushed now: village alerts first, then breaking stories unless it is quiet (alerts go through
-    quiet hours). Weather alerts (a later change) add their own Notification here when reg.weather is on; the caps, dedupe and
-    state below then apply to them unchanged."""
-    return [*village_alerts(feed, reg, sent, now, alert_ids), *([] if quiet else breaking(feed, reg, sent, now))]
+    """Everything that could be pushed now: weather alerts, then village alerts, then breaking stories unless it is quiet (the
+    two kinds of alert go through quiet hours). The caps, dedupe and state in run_push apply to all of them."""
+    return [
+        *weather_alerts(weather, reg, sent, now),
+        *village_alerts(feed, reg, sent, now, alert_ids),
+        *([] if quiet else breaking(feed, reg, sent, now)),
+    ]
 
 
 @dataclass(frozen=True)
@@ -309,17 +357,20 @@ def load_state(s3: Any, name: str, now: datetime) -> dict[str, Any]:
     if not isinstance(doc, dict):
         doc = {}
     cutoff = now - KEEP
+    weather_cutoff = now - KEEP_WEATHER
     sent_raw, days_raw = doc.get("sent"), doc.get("days")
     sent = {}
     for cid, at in (sent_raw if isinstance(sent_raw, dict) else {}).items():
         when = _when(at)
-        if when is not None and when >= cutoff:
+        if when is not None and when >= (weather_cutoff if str(cid).startswith("wx:") else cutoff):
             sent[cid] = at
     oldest_day = cutoff.date().isoformat()
     days = {d: n for d, n in (days_raw if isinstance(days_raw, dict) else {}).items() if isinstance(n, int) and d >= oldest_day}
     state: dict[str, Any] = {"sent": sent, "days": days}
     if isinstance(doc.get("seeded"), str):
         state["seeded"] = doc["seeded"]  # when the alert feeds were first seen (see run_push); never pruned
+    if isinstance(doc.get("wx_seeded"), str):
+        state["wx_seeded"] = doc["wx_seeded"]  # the same for weather alerts
     return state
 
 
@@ -340,9 +391,10 @@ def run_push(
     now: datetime | None = None,
     config: Config | None = None,
     sender: Callable[..., int] = webpush.send,
+    weather: dict[str, Any] | None = None,
 ) -> str:
     """Send what qualifies. Returns a short status for the run's result: off, quiet, none, sent:N, expired or failed.
-    `alert_ids` are the feed items that came from the village alert feeds."""
+    `alert_ids` are the feed items that came from the village alert feeds; `weather` is the run's weather document."""
     now = now or datetime.now(UTC)
     config = config or load_config()
     if config is None:
@@ -350,7 +402,8 @@ def run_push(
     reg = config.registration
     alert_ids = set(alert_ids)
     quiet = in_quiet(now, reg)
-    if quiet and not (alert_ids and reg.alerts):
+    urgent = bool(alert_ids and reg.alerts) or bool(weather_alerts(weather, reg, {}, now))
+    if quiet and not urgent:
         return "quiet"
     state = load_state(s3, config.state_name, now)
     if alert_ids and reg.alerts and "seeded" not in state:
@@ -363,9 +416,30 @@ def run_push(
             save_state(s3, config.state_name, state, now)
         except Exception:  # noqa: BLE001
             logger.exception("could not save the push state; the existing alerts may be pushed")
+    if (
+        reg.weather
+        and "wx_seeded" not in state
+        and isinstance(weather, dict)
+        and weather.get("alerts_ok") is True  # a failed alerts read says nothing: seed on a run that could read them
+    ):
+        # The first run that can read the alerts (or the first after weather was switched on): what is active now is not new.
+        for note in weather_alerts(weather, reg, {}, now):
+            state["sent"][note.id] = now.isoformat(timespec="seconds")
+            state["sent"][note.group] = now.isoformat(timespec="seconds")
+        state["wx_seeded"] = now.isoformat(timespec="seconds")
+        try:
+            save_state(s3, config.state_name, state, now)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not save the push state; the active weather alerts may be pushed")
     day = local_day(now, reg)
-    room = min(PER_RUN, PER_DAY - state["days"].get(day, 0))
-    todo = candidates(feed, reg, state["sent"], now, alert_ids, quiet)[: max(room, 0)]
+    room = max(min(PER_RUN, PER_DAY - state["days"].get(day, 0)), 0)
+    wanted = candidates(feed, reg, state["sent"], now, alert_ids, quiet, weather)
+    others = [n for n in wanted if n.kind != "weather"]
+    # Weather is exempt from the daily cap, but one slot a run stays free for the rest when there is any, so a storm's string of
+    # alerts cannot starve a breaking story or a village alert for hours.
+    urgent_first = [n for n in wanted if n.kind == "weather"][: PER_RUN - 1 if others and room else PER_RUN]
+    rest = others[: max(min(room, PER_RUN - len(urgent_first)), 0)]
+    todo = [*urgent_first, *rest]
     status = "quiet" if quiet else "none"
     count = 0
     for note in todo:
@@ -381,7 +455,10 @@ def run_push(
             status = "failed"
             break
         state["sent"][note.id] = now.isoformat(timespec="seconds")
-        state["days"][day] = state["days"].get(day, 0) + 1
+        if note.group:
+            state["sent"][note.group] = now.isoformat(timespec="seconds")
+        if note.kind != "weather":
+            state["days"][day] = state["days"].get(day, 0) + 1
         count += 1
         status = f"sent:{count}"
         try:  # after each message, so a run that dies mid-way never repeats one that already went
