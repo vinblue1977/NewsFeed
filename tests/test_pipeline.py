@@ -522,6 +522,58 @@ def test_a_mixed_feed_keeps_only_the_items_matching_its_filter() -> None:
     )  # a dropped story is counted, so a too-narrow filter shows
 
 
+def test_an_india_front_page_drops_its_world_and_sports_sections() -> None:
+    from ingest.sources import NOT_INDIA_PATH
+
+    when = "Fri, 13 Nov 2026 11:00:00 GMT"
+    base = "https://timesofindia.example"
+    docs = {
+        "https://a.example/f": rss(
+            ("Revanth Reddy sets 2028 target", f"{base}/india/revanth-1", "", when),
+            ("Democrats win House tally", f"{base}/world/us/democrats-2", "", when),
+            ("Alcaraz scripts history", f"{base}/sports/tennis/alcaraz-3", "", when),
+            ("Tata Sons weighs a listing", f"{base}/business/india-business/tata-4", "", when),
+            ("Storm nears San Francisco", "https://www.livemint.example/news/us-news/storm-5", "", when),
+            ("Delhi pollution report", "https://www.livemint.example/news/india/delhi-6", "", when),
+        )
+    }
+    front = Source("fp", "Site", "https://a.example/f", "india", skip_path=NOT_INDIA_PATH)
+    items, status = collect([front], now=NOW, fetcher=docs.__getitem__)
+    assert sorted(i["title"] for i in items) == [
+        "Delhi pollution report",
+        "Revanth Reddy sets 2028 target",
+        "Tata Sons weighs a listing",
+    ]
+    assert status["fp"]["filtered"] == 3
+
+
+@pytest.mark.parametrize(
+    ("path", "dropped"),
+    [
+        ("/world/us/a", True),
+        ("/world-news/a", True),
+        ("/sports/tennis/a", True),
+        ("/entertainment/a", True),
+        ("/life-style/people/a", True),
+        ("/news/us-news/a", True),
+        ("/news/world/a", True),
+        ("/article/world/a", True),
+        ("/article/sports/a", True),
+        ("/article/lifestyle/a", True),
+        ("/india/a", False),
+        ("/india-news/a", False),
+        ("/business/india-business/a", False),
+        ("/news/india/a", False),
+        ("/article/india/a", False),
+        ("/article/cities/delhi/a", False),
+    ],
+)
+def test_not_india_path_matches_each_section(path: str, dropped: bool) -> None:
+    from ingest.sources import NOT_INDIA_PATH
+
+    assert bool(re.search(NOT_INDIA_PATH, path, re.IGNORECASE)) is dropped
+
+
 def test_the_south_cinema_filter_ignores_look_alike_names() -> None:
     from ingest.sources import SOUTH_CINEMA
 

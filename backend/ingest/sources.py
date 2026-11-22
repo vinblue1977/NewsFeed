@@ -27,6 +27,18 @@ class Source:
     only_matching: str | None = (
         None  # regex: keep an item only when its title or summary matches (a mixed feed narrowed to one theme)
     )
+    skip_path: str | None = (
+        None  # regex on the article URL's path: drop sections that are not this topic (a front page that carries world news)
+    )
+
+
+# Site sections that are not India news. The big Indian front pages also carry US, world, sports and lifestyle stories; their
+# URLs name the section, so those are dropped (the World, US and Sports tabs have their own feeds for them).
+NOT_INDIA_PATH = (
+    r"^/(world|world-news|sports|entertainment|life-style|lifestyle)(/|$)"
+    r"|^/news/(us-news|world|world-news)(/|$)"
+    r"|^/article/(world|sports|lifestyle|entertainment)(/|$)"
+)
 
 
 # Words that mark a South Indian film story: the industries and languages, the big studios and the best-known stars and
@@ -58,8 +70,9 @@ def _s(
     *,
     metered: bool = False,
     only_matching: str | None = None,
+    skip_path: str | None = None,
 ) -> Source:
-    return Source(id, name, url, topic, subtopic, metered=metered, only_matching=only_matching)
+    return Source(id, name, url, topic, subtopic, metered=metered, only_matching=only_matching, skip_path=skip_path)
 
 
 SOURCES: tuple[Source, ...] = (
@@ -91,11 +104,11 @@ SOURCES: tuple[Source, ...] = (
     _s("guardian-world", "The Guardian", "https://www.theguardian.com/world/rss", "world"),
     # India
     _s("bbc-india", "BBC News", "https://feeds.bbci.co.uk/news/world/asia/india/rss.xml", "india"),
-    _s("ndtv", "NDTV", "https://feeds.feedburner.com/ndtvnews-top-stories", "india"),
+    _s("ndtv", "NDTV", "https://feeds.feedburner.com/ndtvnews-top-stories", "india", skip_path=NOT_INDIA_PATH),
     _s("thehindu", "The Hindu", "https://www.thehindu.com/news/national/feeder/default.rss", "india", metered=True),
-    _s("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "india"),
-    _s("indianexpress", "The Indian Express", "https://indianexpress.com/feed/", "india"),
-    _s("livemint", "Mint", "https://www.livemint.com/rss/news", "india"),
+    _s("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "india", skip_path=NOT_INDIA_PATH),
+    _s("indianexpress", "The Indian Express", "https://indianexpress.com/feed/", "india", skip_path=NOT_INDIA_PATH),
+    _s("livemint", "Mint", "https://www.livemint.com/rss/news", "india", skip_path=NOT_INDIA_PATH),
     # Sports
     Source(
         "nfl-com", "NFL.com", "https://www.nfl.com/sitemap-fast-changing.xml", "sports", "nfl", headline_only=True, sitemap=True
