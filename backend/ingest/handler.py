@@ -199,15 +199,18 @@ def write_doc(s3: Any, name: str, doc: dict[str, Any] | None) -> str:
     return "ok"
 
 
-def notify(s3: Any, feed: dict[str, Any], started: float, alert_ids: set[str] | None = None) -> str:
-    """Breaking-story and village-alert pushes, after the feed is safely written. Never raises: a missing `cryptography`, a bad
-    parameter or a push service outage must not fail the run (the module is imported here so even a failed import is caught)."""
+def notify(
+    s3: Any, feed: dict[str, Any], started: float, alert_ids: set[str] | None = None, weather: dict[str, Any] | None = None
+) -> str:
+    """Breaking-story, village-alert and weather-alert pushes, after the feed is safely written. Never raises: a missing
+    `cryptography`, a bad parameter or a push service outage must not fail the run (the module is imported here so even a
+    failed import is caught)."""
     if time.monotonic() - started > PUSH_CUTOFF_SECONDS:
         return "late"
     try:
         from ingest.push import run_push
 
-        return run_push(s3, feed, alert_ids or set())
+        return run_push(s3, feed, alert_ids or set(), weather=weather)
     except Exception:  # noqa: BLE001
         logger.exception("push step failed")
         return "failed"
@@ -256,6 +259,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     statuses: dict[str, str] = {}
     articles_status = "failed"
     alert_ids: set[str] = set()
+    weather_doc: dict[str, Any] | None = None
     try:
         clusters_before, images_before = previous_state(s3)
         feed, articles, alert_ids = build_feed(location, clusters_before, images_before)
@@ -288,6 +292,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         )
     finally:
         docs = {name: future.result() for name, future in side.items()}
+        weather_doc = docs.get("weather")
         earnings = docs.pop("earnings", None)
         watch, _ = watch_doc(docs.pop("markets", None))  # no public markets file: the quotes go to one only you can name
         statuses = {name: write_doc(s3, name, doc) for name, doc in docs.items()}
@@ -306,7 +311,7 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
         statuses.setdefault("schedule", "fresh")  # not rebuilt this run
         statuses.setdefault("onthisday", "fresh")
         pool.shutdown(wait=False)
-    push_status = notify(s3, feed, started, alert_ids)  # only reached when the feed was written
+    push_status = notify(s3, feed, started, alert_ids, weather_doc)  # only reached when the feed was written
     return {
         "status": "ok",
         "articles": articles_status,
