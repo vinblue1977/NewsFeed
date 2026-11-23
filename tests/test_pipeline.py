@@ -566,6 +566,9 @@ def test_an_india_front_page_drops_its_world_and_sports_sections() -> None:
         ("/news/india/a", False),
         ("/article/india/a", False),
         ("/article/cities/delhi/a", False),
+        ("/article/explained/explained-global/a", True),
+        ("/article/explained/explained-economics/a", False),
+        ("/news/trends/a", True),
     ],
 )
 def test_not_india_path_matches_each_section(path: str, dropped: bool) -> None:
@@ -1149,3 +1152,42 @@ def test_push_test_event_runs_only_the_test_send(monkeypatch: pytest.MonkeyPatch
     assert handler_module.handler({"only": "push-test"}, object()) == {"status": "ok", "push": "sent"}
     monkeypatch.setattr("ingest.push.send_test", lambda: 1 / 0)
     assert handler_module.handler({"only": "push-test"}, object()) == {"status": "failed", "push": "failed"}
+
+
+@pytest.mark.parametrize(
+    ("title", "dropped"),
+    [
+        ("258 seats secured: US Democrats win largest House tally since 1992", True),
+        ("China This Week | Trump, Xi and Putin's declaration", True),
+        ("Who is Cliff Savage? Streamer lands job to play GTA 6 for US start-up", True),
+        ("Wall Street ends higher as Fed signals a pause", True),
+        ("India-US trade deal: tariffs cut on Indian exports", False),
+        ("Trump's H-1B fee hits Indian techies", False),
+        ("Sensex, Nifty open lower tracking Wall Street selloff", False),
+        ("Rupee falls as US yields rise", False),
+        ("Jaishankar meets Rubio in Washington", False),
+        ("Seat-sharing talks with Congress today, Akhilesh picks Ram Gopal", False),
+        ("Give us a clear timeline, says Delhi High Court", False),
+        ("Parliament On Hold, Delimitation Hangs Between BJP and Congress", False),
+    ],
+)
+def test_not_india_title_matches_us_stories(title: str, dropped: bool) -> None:
+    from ingest.sources import NOT_INDIA_TITLE
+
+    assert bool(re.search(NOT_INDIA_TITLE, title)) is dropped
+
+
+def test_skip_title_drops_us_stories_from_an_india_feed() -> None:
+    from ingest.sources import NOT_INDIA_TITLE
+
+    when = "Fri, 13 Nov 2026 11:00:00 GMT"
+    docs = {
+        "https://a.example/f": rss(
+            ("US Democrats win the House", "https://a.example/india/1", "", when),
+            ("Delhi pollution report", "https://a.example/india/2", "", when),
+        )
+    }
+    feed = Source("fp", "Site", "https://a.example/f", "india", skip_title=NOT_INDIA_TITLE)
+    items, status = collect([feed], now=NOW, fetcher=docs.__getitem__)
+    assert [i["title"] for i in items] == ["Delhi pollution report"]
+    assert status["fp"]["filtered"] == 1
