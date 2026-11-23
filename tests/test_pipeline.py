@@ -522,6 +522,61 @@ def test_a_mixed_feed_keeps_only_the_items_matching_its_filter() -> None:
     )  # a dropped story is counted, so a too-narrow filter shows
 
 
+def test_an_india_front_page_drops_its_world_and_sports_sections() -> None:
+    from ingest.sources import NOT_INDIA_PATH
+
+    when = "Fri, 13 Nov 2026 11:00:00 GMT"
+    base = "https://timesofindia.example"
+    docs = {
+        "https://a.example/f": rss(
+            ("Revanth Reddy sets 2028 target", f"{base}/india/revanth-1", "", when),
+            ("Democrats win House tally", f"{base}/world/us/democrats-2", "", when),
+            ("Alcaraz scripts history", f"{base}/sports/tennis/alcaraz-3", "", when),
+            ("Tata Sons weighs a listing", f"{base}/business/india-business/tata-4", "", when),
+            ("Storm nears San Francisco", "https://www.livemint.example/news/us-news/storm-5", "", when),
+            ("Delhi pollution report", "https://www.livemint.example/news/india/delhi-6", "", when),
+        )
+    }
+    front = Source("fp", "Site", "https://a.example/f", "india", skip_path=NOT_INDIA_PATH)
+    items, status = collect([front], now=NOW, fetcher=docs.__getitem__)
+    assert sorted(i["title"] for i in items) == [
+        "Delhi pollution report",
+        "Revanth Reddy sets 2028 target",
+        "Tata Sons weighs a listing",
+    ]
+    assert status["fp"]["filtered"] == 3
+
+
+@pytest.mark.parametrize(
+    ("path", "dropped"),
+    [
+        ("/world/us/a", True),
+        ("/world-news/a", True),
+        ("/sports/tennis/a", True),
+        ("/entertainment/a", True),
+        ("/life-style/people/a", True),
+        ("/news/us-news/a", True),
+        ("/news/world/a", True),
+        ("/article/world/a", True),
+        ("/article/sports/a", True),
+        ("/article/lifestyle/a", True),
+        ("/india/a", False),
+        ("/india-news/a", False),
+        ("/business/india-business/a", False),
+        ("/news/india/a", False),
+        ("/article/india/a", False),
+        ("/article/cities/delhi/a", False),
+        ("/article/explained/explained-global/a", True),
+        ("/article/explained/explained-economics/a", False),
+        ("/news/trends/a", True),
+    ],
+)
+def test_not_india_path_matches_each_section(path: str, dropped: bool) -> None:
+    from ingest.sources import NOT_INDIA_PATH
+
+    assert bool(re.search(NOT_INDIA_PATH, path, re.IGNORECASE)) is dropped
+
+
 def test_the_south_cinema_filter_ignores_look_alike_names() -> None:
     from ingest.sources import SOUTH_CINEMA
 
@@ -1039,7 +1094,7 @@ def test_handler_runs_the_push_step_after_the_feed_and_survives_its_failure(monk
     order: list[str] = []
     real_put = s3.put_object
     s3.put_object = lambda **kw: (order.append(kw["Key"]), real_put(**kw))[1]  # type: ignore[method-assign]
-    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts: (order.append("push"), "sent:1")[1])
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts, **_: (order.append("push"), "sent:1")[1])
     result = handler_module.handler({}, object())
     assert result["push"] == "sent:1" and order[-1] == "push" and "data/feed.json" in order[:-1]
 
@@ -1058,11 +1113,22 @@ def test_handler_hands_the_alert_item_ids_to_the_push_step_and_they_are_not_in_t
     monkeypatch.setattr(handler_module, "cached_local_feeds", lambda: {"official": [], "alerts": ["https://alerts.example/f"]})
     monkeypatch.setattr("ingest.pipeline.fetch", lambda url: ALERT_DOCS[url] if url in ALERT_DOCS else fake_fetcher(url))
     given: list[set[str]] = []
-    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts: (given.append(set(alerts)), "sent:1")[1])
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts, **_: (given.append(set(alerts)), "sent:1")[1])
     handler_module.handler({}, object())
     written = next(json.loads(p["Body"]) for p in s3.puts if p["Key"] == "data/feed.json")
     alert_item = next(i for i in written["items"] if i["title"] == "Water main break")
     assert given == [{alert_item["id"]}] and "_alert" not in alert_item
+
+
+def test_handler_hands_the_weather_document_it_built_to_the_push_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    s3 = FakeS3()
+    _weather_handler_setup(monkeypatch, s3)
+    doc = {"generated": "2026-11-13T12:00:00+00:00", "alerts": [], "alerts_ok": True}
+    monkeypatch.setattr(handler_module, "build_weather", lambda lat, lon: doc)
+    given: list[Any] = []
+    monkeypatch.setattr("ingest.push.run_push", lambda s3_, feed, alerts, **kw: (given.append(kw.get("weather")), "none")[1])
+    handler_module.handler({}, object())
+    assert given == [doc]
 
 
 def test_handler_skips_the_push_step_when_the_run_is_late(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1086,3 +1152,42 @@ def test_push_test_event_runs_only_the_test_send(monkeypatch: pytest.MonkeyPatch
     assert handler_module.handler({"only": "push-test"}, object()) == {"status": "ok", "push": "sent"}
     monkeypatch.setattr("ingest.push.send_test", lambda: 1 / 0)
     assert handler_module.handler({"only": "push-test"}, object()) == {"status": "failed", "push": "failed"}
+
+
+@pytest.mark.parametrize(
+    ("title", "dropped"),
+    [
+        ("258 seats secured: US Democrats win largest House tally since 1992", True),
+        ("China This Week | Trump, Xi and Putin's declaration", True),
+        ("Who is Cliff Savage? Streamer lands job to play GTA 6 for US start-up", True),
+        ("Wall Street ends higher as Fed signals a pause", True),
+        ("India-US trade deal: tariffs cut on Indian exports", False),
+        ("Trump's H-1B fee hits Indian techies", False),
+        ("Sensex, Nifty open lower tracking Wall Street selloff", False),
+        ("Rupee falls as US yields rise", False),
+        ("Jaishankar meets Rubio in Washington", False),
+        ("Seat-sharing talks with Congress today, Akhilesh picks Ram Gopal", False),
+        ("Give us a clear timeline, says Delhi High Court", False),
+        ("Parliament On Hold, Delimitation Hangs Between BJP and Congress", False),
+    ],
+)
+def test_not_india_title_matches_us_stories(title: str, dropped: bool) -> None:
+    from ingest.sources import NOT_INDIA_TITLE
+
+    assert bool(re.search(NOT_INDIA_TITLE, title)) is dropped
+
+
+def test_skip_title_drops_us_stories_from_an_india_feed() -> None:
+    from ingest.sources import NOT_INDIA_TITLE
+
+    when = "Fri, 13 Nov 2026 11:00:00 GMT"
+    docs = {
+        "https://a.example/f": rss(
+            ("US Democrats win the House", "https://a.example/india/1", "", when),
+            ("Delhi pollution report", "https://a.example/india/2", "", when),
+        )
+    }
+    feed = Source("fp", "Site", "https://a.example/f", "india", skip_title=NOT_INDIA_TITLE)
+    items, status = collect([feed], now=NOW, fetcher=docs.__getitem__)
+    assert [i["title"] for i in items] == ["Delhi pollution report"]
+    assert status["fp"]["filtered"] == 1

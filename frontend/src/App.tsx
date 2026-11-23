@@ -8,7 +8,7 @@ import { type Kernel, kernelFresh, kernelTitle } from './kernel';
 import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
-import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
@@ -20,6 +20,8 @@ import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type S
 import type { Feed, Item, Topic } from './types';
 import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
 import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores, teamCards, teamMatcher, teamSuggestions } from './scores';
+import { useOnline } from './online';
+import { warmPictures } from './pictures';
 import { degrees, headline, hourBars, isFresh, tip, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
@@ -28,6 +30,8 @@ const screenKeyOf = (r: Route): string =>
 /** The Browse tab (was Discovery). Its route stays `#/discovery` and the code keeps the Discovery names so old links and bookmarks still work. */
 const BROWSE = 'Browse';
 const HOME_MARKETS_MS = 5 * 60 * 1000;  // quotes move every 5 minutes: the strip on For you looks again no sooner than that
+const STALE_RETRIES = 3;  // asks again this many times when the feed on screen is stale
+const STALE_RETRY_MS = 10_000;
 const needsMarkets =(kind: string) => kind === 'home' || kind === 'markets' || kind === 'settings' || kind === 'quote';
 const PAGE = 30;
 const TICK_MS = 60_000;
@@ -189,6 +193,7 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
   const page = readerPage(feed, id);
   const wantsFull = page?.item.full === true;
   const [blocks, setBlocks] = useState<Block[] | undefined>();
+  const online = useOnline();
   const [answered, setAnswered] = useState(false);  // the full-text request has finished (with or without this article)
   const fetching = wantsFull && !answered;  // so "Loading" shows exactly while waiting, and cannot hang
   useEffect(() => {
@@ -225,7 +230,8 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
             {page.item.source} · {timeAgo(page.item.published, now)}{blocks ? ` · ${minutes} min read` : ''}{page.item.metered ? ' · Metered' : ''}
           </div>
           {blocks ? <ArticleBody blocks={blocks} /> : page.item.summary ? <p>{page.item.summary}</p> : null}
-          {fetching && !blocks && <p class="wait">Loading the full text…</p>}
+          {fetching && !blocks && online && <p class="wait">Loading the full text…</p>}
+          {wantsFull && !blocks && !online && <p class="wait">You're offline: the full text and the original need a connection.</p>}
           <div class="box infobox">
             <span aria-hidden="true">ⓘ</span>
             <span>{readerNote({ source: page.item.source, hasSummary: page.item.summary !== '', hasLink: url !== '#', hasFullText: blocks !== undefined })}</span>
@@ -235,10 +241,16 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
             {page.coverageId && <a class="btn g" href={`#/story/${page.coverageId}`}>Full coverage</a>}
           </div>
           <div class="note">Paywalled articles are filtered out · sources that limit free reads are marked Metered</div>
+          <div class="btns"><button type="button" class="btn g" onClick={goBack}><span aria-hidden="true">‹</span> Back</button></div>
         </article>
       )}
     </div>
   );
+}
+
+/** The same Back as the top-left button, at the end of a long page so there is no scrolling up. */
+function BottomBack({ onBack }: { onBack: () => void }) {
+  return <div class="btns"><button type="button" class="btn g" onClick={onBack}><span aria-hidden="true">‹</span> Back</button></div>;
 }
 
 function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; id: string; now: Date; canGoBack: boolean; chromeHidden: boolean }) {
@@ -280,6 +292,7 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
               ))}
             </>
           )}
+          <BottomBack onBack={goBack} />
         </>
       )}
     </div>
@@ -407,7 +420,8 @@ function QuoteScreen({ markets, earnings, loaded, symbol, now, canGoBack }: { ma
             <Stat label="Day range" value={dayRange(q.dayLow, q.dayHigh, q.currency)} />
             <Stat label="Last trade" value={q.lastTrade ? timeAgo(q.lastTrade, now) : ''} />
           </ul>
-          <p class="fine">Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
+          <p class="fine" style={{ marginBottom: 10 }}>Delayed, unofficial data from Yahoo Finance. Not investment advice.</p>
+          <BottomBack onBack={goBack} />
         </>
       )}
     </div>
@@ -448,6 +462,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
       {feed && sub && inSub.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No stories in this sub-topic right now.</span></div>}
       {sub && inSub.slice(0, shown).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
       {sub && inSub.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
+      {sub && inSub.length > 0 && <BottomBack onBack={goBack} />}
       {feed && !sub && found.widely.length + found.justIn.length + found.corners.length === 0 && (
         <div class="empty"><b>Nothing to discover yet</b><span>Check back after the next update.</span></div>
       )}
@@ -1284,14 +1299,39 @@ export function App() {
     }
   };
   const latest = useRef(0);
-  const refresh = () => {
+  const staleRetries = useRef(0);
+  const staleTimer = useRef<number | undefined>(undefined);
+  const shownGenerated = useRef<string | undefined>(undefined);  // the feed on screen, for the error path
+  /** Only the feed: the retry must not repeat the weather and scores requests on a weak signal. */
+  const refreshFeed = () => {
+    clearTimeout(staleTimer.current);
     const mine = ++latest.current;  // a slower, older response must not overwrite a newer one
+    const retryIfStale = () => {
+      if (!shouldRetryStale(shownGenerated.current, new Date(), staleRetries.current, STALE_RETRIES)) return;
+      staleRetries.current += 1;
+      // hidden at the time: nothing is lost, coming back to the app runs refresh() again
+      staleTimer.current = window.setTimeout(() => { if (document.visibilityState === 'visible') refreshFeed(); }, STALE_RETRY_MS);
+    };
+    loadFeed().then(
+      (feed) => {
+        if (mine !== latest.current) return;
+        if (feed.generated !== shownGenerated.current) staleRetries.current = 0;  // new data: a new budget
+        shownGenerated.current = feed.generated;
+        setLoad({ state: 'ready', feed });
+        warmPictures(feed);  // so the top stories still have their pictures with no signal
+        retryIfStale();  // a weak signal on opening makes the service worker hand back the kept copy after 4 s: ask again
+      },
+      () => {
+        if (mine !== latest.current) return;
+        setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' }));
+        retryIfStale();  // a fresh feed on screen needs nothing; none or a stale one asks again
+      },
+    );
+  };
+  const refresh = () => {
     void loadWeather().then((w) => { if (w) setWeather(w); });  // independent of the feed; a failed refresh keeps the last good one
     if (routeRef.current.kind === 'sports') refreshScores();  // only the Sports tab shows them
-    loadFeed().then(
-      (feed) => { if (mine === latest.current) setLoad({ state: 'ready', feed }); },
-      () => { if (mine === latest.current) setLoad((prev) => (prev.state === 'ready' ? prev : { state: 'error' })); },
-    );
+    refreshFeed();
   };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -1369,6 +1409,7 @@ export function App() {
       clearInterval(quotes);
       clearInterval(live);
       timers.current.forEach(clearTimeout);
+      clearTimeout(staleTimer.current);
     };
   }, []);
 

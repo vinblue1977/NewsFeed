@@ -136,6 +136,8 @@ def collect(
         blocked = 0
         filtered = 0
         only = re.compile(source.only_matching, re.IGNORECASE) if source.only_matching else None
+        skip = re.compile(source.skip_path, re.IGNORECASE) if source.skip_path else None
+        skip_title = re.compile(source.skip_title) if source.skip_title else None  # case-sensitive on purpose
         for item in sorted(parsed, key=lambda i: i["published"], reverse=True):
             if kept >= MAX_PER_SOURCE:  # the cap counts stories that survive the filters, not raw entries
                 break
@@ -152,6 +154,12 @@ def collect(
             if source.topic == "local" and not source.trusted and not (place_re and _mentions(item, place_re)):
                 continue
             if source.news_only and not headline_like(item):
+                filtered += 1
+                continue
+            if skip and skip.search(urlsplit(item["url"]).path):  # counted as "filtered", like news_only and only_matching
+                filtered += 1
+                continue
+            if skip_title and skip_title.search(item["title"]):
                 filtered += 1
                 continue
             if only and not only.search(f"{item['title']} {item['summary']}"):

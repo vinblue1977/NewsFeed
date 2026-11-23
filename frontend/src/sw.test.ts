@@ -7,7 +7,7 @@ type Handler = (event: unknown) => void;
 function load(match: (key: unknown) => Promise<unknown> = () => Promise.resolve(undefined)) {
   const handlers: Record<string, Handler> = {};
   const put = vi.fn(() => Promise.resolve());
-  const cache = { put, keys: () => Promise.resolve([]), delete: () => Promise.resolve(true) };
+  const cache = { put, match: () => Promise.resolve(undefined), keys: () => Promise.resolve([]), delete: () => Promise.resolve(true) };
   const showNotification = vi.fn(() => Promise.resolve());
   const openWindow = vi.fn(() => Promise.resolve());
   let windows: unknown[] = [];
@@ -42,7 +42,12 @@ function load(match: (key: unknown) => Promise<unknown> = () => Promise.resolve(
     await waitUntil.mock.calls[0]?.[0];
     return close;
   };
-  return { run, put, fetchFn, push, click, showNotification, openWindow };
+  const message = (data: unknown) => {
+    const waitUntil = vi.fn();
+    handlers['message']?.({ data, waitUntil });
+    return waitUntil;
+  };
+  return { run, put, fetchFn, push, click, message, showNotification, openWindow };
 }
 
 describe('service worker', () => {
@@ -82,6 +87,53 @@ describe('service worker', () => {
     t.fetchFn.mockImplementation(() => Promise.reject(new Error('offline')));
     const r = t.run('https://n.example/data/feed.json');
     await expect(r.respondWith.mock.calls[0]?.[0]).rejects.toThrow('offline');
+  });
+});
+
+describe('picture warming', () => {
+  const good = '/data/img/0123456789abcdef.jpg';
+
+  it('fetches and keeps the pictures that are not kept yet', async () => {
+    const t = load();
+    const wait = t.message({ type: 'warm', urls: [good, '/data/img/fedcba9876543210.webp'] });
+    await wait.mock.calls[0]?.[0];
+    expect(t.fetchFn).toHaveBeenCalledTimes(2);
+    expect(t.put).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes only our own picture names, and ignores other messages', () => {
+    const t = load();
+    expect(t.message({ type: 'warm', urls: ['https://evil.example/a.jpg', '/api/watchlist', '/data/img/../x.jpg', 5] })).not.toHaveBeenCalled();
+    expect(t.message({ type: 'other', urls: [good] })).not.toHaveBeenCalled();
+    expect(t.message({ type: 'warm', urls: 'x' })).not.toHaveBeenCalled();
+    expect(t.message(null)).not.toHaveBeenCalled();
+  });
+
+  it('skips the pictures already kept, and stops quietly when the network fails', async () => {
+    const cache = { match: vi.fn(() => Promise.resolve({ ok: true })), put: vi.fn(), keys: () => Promise.resolve([]), delete: () => Promise.resolve(true) };
+    const handlers: Record<string, Handler> = {};
+    const fetchFn = vi.fn(() => Promise.reject(new Error('offline')));
+    const scope = { location: { origin: 'https://n.example' }, addEventListener: (n: string, h: Handler) => { handlers[n] = h; }, skipWaiting: () => undefined };
+    // eslint-disable-next-line no-new-func -- the worker file is plain script, run here against a fake scope
+    new Function('self', 'caches', 'fetch', source)(scope, { open: () => Promise.resolve(cache), match: () => Promise.resolve(undefined) }, fetchFn);
+    const waitUntil = vi.fn();
+    handlers['message']?.({ data: { type: 'warm', urls: [good] }, waitUntil });
+    await waitUntil.mock.calls[0]?.[0];
+    expect(fetchFn).not.toHaveBeenCalled();  // already kept
+    cache.match.mockImplementation(() => Promise.resolve(undefined as never));
+    const again = vi.fn();
+    handlers['message']?.({ data: { type: 'warm', urls: [good, good.replace('0', '1')] }, waitUntil: again });
+    await expect(again.mock.calls[0]?.[0]).resolves.toBeUndefined();
+    expect(fetchFn).toHaveBeenCalledTimes(1);  // the first failure ends the run
+    expect(cache.put).not.toHaveBeenCalled();
+  });
+
+  it('keeps going when one put fails and still trims', async () => {
+    const t = load();
+    t.put.mockImplementation(() => Promise.reject(new Error('quota')));
+    const wait = t.message({ type: 'warm', urls: [good, '/data/img/fedcba9876543210.webp'] });
+    await wait.mock.calls[0]?.[0];
+    expect(t.fetchFn).toHaveBeenCalledTimes(2);
   });
 });
 
