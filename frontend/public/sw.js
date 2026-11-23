@@ -110,7 +110,18 @@ async function warm(urls) {
   }
 }
 
+/** True when the message came from a page of this app (a window client on our own origin). Defence in depth: only our own
+ * pages can reach this worker anyway. A sender without a url (a worker, a port) is ignored; the app only posts from pages. */
+function fromOurPage(event) {
+  try {
+    return !!event.source && typeof event.source.url === 'string' && new URL(event.source.url).origin === self.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener('message', (event) => {
+  if (!fromOurPage(event)) return;
   const data = event.data;
   if (!data || data.type !== 'warm' || !Array.isArray(data.urls)) return;
   const urls = data.urls.filter((u) => typeof u === 'string' && WARM_URL.test(u)).slice(0, MAX_WARM);
