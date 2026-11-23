@@ -1,12 +1,15 @@
 import { render } from 'preact';
 
 import { App } from './App';
+import { OfflineBar } from './online';
+import { warmAgain } from './pictures';
 import './styles.css';
 
 const root = document.getElementById('app');
-if (root) render(<App />, root);
+if (root) render(<><OfflineBar /><App /></>, root);
 
 // Offline access: the service worker keeps the app and the last stories on the phone (production builds only).
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => { void navigator.serviceWorker.register('/sw.js').catch(() => undefined); });
 }
+window.addEventListener('online', warmAgain);

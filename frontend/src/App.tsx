@@ -20,6 +20,8 @@ import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type S
 import type { Feed, Item, Topic } from './types';
 import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
 import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores, teamCards, teamMatcher, teamSuggestions } from './scores';
+import { useOnline } from './online';
+import { warmPictures } from './pictures';
 import { degrees, headline, hourBars, isFresh, tip, type Weather } from './weather';
 
 /** What identifies a screen for scroll memory: its kind, plus the story, symbol or sub-topic it shows. */
@@ -191,6 +193,7 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
   const page = readerPage(feed, id);
   const wantsFull = page?.item.full === true;
   const [blocks, setBlocks] = useState<Block[] | undefined>();
+  const online = useOnline();
   const [answered, setAnswered] = useState(false);  // the full-text request has finished (with or without this article)
   const fetching = wantsFull && !answered;  // so "Loading" shows exactly while waiting, and cannot hang
   useEffect(() => {
@@ -227,7 +230,8 @@ function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; 
             {page.item.source} · {timeAgo(page.item.published, now)}{blocks ? ` · ${minutes} min read` : ''}{page.item.metered ? ' · Metered' : ''}
           </div>
           {blocks ? <ArticleBody blocks={blocks} /> : page.item.summary ? <p>{page.item.summary}</p> : null}
-          {fetching && !blocks && <p class="wait">Loading the full text…</p>}
+          {fetching && !blocks && online && <p class="wait">Loading the full text…</p>}
+          {wantsFull && !blocks && !online && <p class="wait">You're offline: the full text and the original need a connection.</p>}
           <div class="box infobox">
             <span aria-hidden="true">ⓘ</span>
             <span>{readerNote({ source: page.item.source, hasSummary: page.item.summary !== '', hasLink: url !== '#', hasFullText: blocks !== undefined })}</span>
@@ -1314,6 +1318,7 @@ export function App() {
         if (feed.generated !== shownGenerated.current) staleRetries.current = 0;  // new data: a new budget
         shownGenerated.current = feed.generated;
         setLoad({ state: 'ready', feed });
+        warmPictures(feed);  // so the top stories still have their pictures with no signal
         retryIfStale();  // a weak signal on opening makes the service worker hand back the kept copy after 4 s: ask again
       },
       () => {

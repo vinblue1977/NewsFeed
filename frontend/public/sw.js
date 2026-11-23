@@ -82,6 +82,41 @@ self.addEventListener('fetch', (event) => {
   else if (request.mode === 'navigate') event.respondWith(networkFirst(event, PAGES, '/index.html'));
 });
 
+/* Warming: the page lists the newest story pictures after each feed load, and the ones not yet kept are fetched in the
+ * background, so a phone with no signal still shows the top stories with their pictures. Only our own picture names are taken. */
+const WARM_URL = /^\/data\/img\/[0-9a-f]{16}\.(jpg|png|webp)$/;
+const MAX_WARM = 30;
+
+async function warm(urls) {
+  const cache = await caches.open(IMAGES);
+  try {
+    for (const url of urls) {
+      if (await cache.match(url)) continue;
+      let response;
+      try {
+        response = await fetch(url);
+      } catch {
+        break;  // no signal: the rest would fail too
+      }
+      if (!response.ok) continue;
+      try {
+        await cache.put(url, response);
+      } catch {
+        /* a full quota: the trim below makes room for the next run */
+      }
+    }
+  } finally {
+    await trim(IMAGES, MAX_IMAGES);
+  }
+}
+
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || data.type !== 'warm' || !Array.isArray(data.urls)) return;
+  const urls = data.urls.filter((u) => typeof u === 'string' && WARM_URL.test(u)).slice(0, MAX_WARM);
+  if (urls.length) event.waitUntil(warm(urls));
+});
+
 /* Web Push. The sender (the ingest Lambda) sends {title, body, url, tag}. A notification is ALWAYS shown for a push: iOS
  * revokes the permission of a site that receives pushes without showing one. */
 const APP_URL = /^\/(#\/((story|read)\/[A-Za-z0-9_-]{1,64}|local|markets|sports))?$/;  // a story screen or a tab of the app, never anywhere else
