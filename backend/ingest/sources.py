@@ -30,6 +30,9 @@ class Source:
     skip_path: str | None = (
         None  # regex on the article URL's path: drop sections that are not this topic (a front page that carries world news)
     )
+    skip_title: str | None = (
+        None  # case-sensitive regex on the title: drop stories about another country (US politics in an India feed)
+    )
 
 
 # Site sections that are not India news. The big Indian front pages also carry US, world, sports and lifestyle stories; their
@@ -38,6 +41,18 @@ NOT_INDIA_PATH = (
     r"^/(world|world-news|sports|entertainment|life-style|lifestyle)(/|$)"
     r"|^/news/(us-news|world|world-news)(/|$)"
     r"|^/article/(world|sports|lifestyle|entertainment)(/|$)"
+    r"|^/article/explained/explained-global(/|$)"
+    r"|^/news/trends(/|$)"
+)
+
+# US stories that arrive through India sections (TOI files "US Democrats win the House" under India business). A story with an
+# India angle is kept ("India-US trade deal", "Sensex tracks Wall Street", "Trump's H-1B fee hits Indian techies"): the lookahead
+# fails the match when the title names India, an Indian market term or a leader. Case-sensitive, so "us" the pronoun never
+# matches (an all-caps title is the one gap); "Congress" is left alone, it is an Indian party.
+INDIA_ANGLE = r"India|Sensex|Nifty|Rupee|RBI|Dalal|Modi|Jaishankar|Delhi|Mumbai"
+NOT_INDIA_TITLE = (
+    rf"^(?!.*(?:{INDIA_ANGLE})).*(?:\bUS\b|\bU\.S\.|\bTrump\b|White House|Wall Street|\bDemocrats?\b|\bRepublicans?\b|\bUSA\b"
+    r"|\bAmerica(?:n|ns)?\b)"
 )
 
 
@@ -71,8 +86,32 @@ def _s(
     metered: bool = False,
     only_matching: str | None = None,
     skip_path: str | None = None,
+    skip_title: str | None = None,
 ) -> Source:
-    return Source(id, name, url, topic, subtopic, metered=metered, only_matching=only_matching, skip_path=skip_path)
+    return Source(
+        id,
+        name,
+        url,
+        topic,
+        subtopic,
+        metered=metered,
+        only_matching=only_matching,
+        skip_path=skip_path,
+        skip_title=skip_title,
+    )
+
+
+def _in(id: str, name: str, url: str, *, metered: bool = False, front_page: bool = True) -> Source:
+    """An India-news feed. The big front pages also get the section filter; every one gets the US-story title filter."""
+    return _s(
+        id,
+        name,
+        url,
+        "india",
+        metered=metered,
+        skip_path=NOT_INDIA_PATH if front_page else None,
+        skip_title=NOT_INDIA_TITLE,
+    )
 
 
 SOURCES: tuple[Source, ...] = (
@@ -103,12 +142,12 @@ SOURCES: tuple[Source, ...] = (
     _s("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "world"),
     _s("guardian-world", "The Guardian", "https://www.theguardian.com/world/rss", "world"),
     # India
-    _s("bbc-india", "BBC News", "https://feeds.bbci.co.uk/news/world/asia/india/rss.xml", "india"),
-    _s("ndtv", "NDTV", "https://feeds.feedburner.com/ndtvnews-top-stories", "india", skip_path=NOT_INDIA_PATH),
-    _s("thehindu", "The Hindu", "https://www.thehindu.com/news/national/feeder/default.rss", "india", metered=True),
-    _s("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "india", skip_path=NOT_INDIA_PATH),
-    _s("indianexpress", "The Indian Express", "https://indianexpress.com/feed/", "india", skip_path=NOT_INDIA_PATH),
-    _s("livemint", "Mint", "https://www.livemint.com/rss/news", "india", skip_path=NOT_INDIA_PATH),
+    _in("bbc-india", "BBC News", "https://feeds.bbci.co.uk/news/world/asia/india/rss.xml", front_page=False),
+    _in("ndtv", "NDTV", "https://feeds.feedburner.com/ndtvnews-top-stories"),
+    _in("thehindu", "The Hindu", "https://www.thehindu.com/news/national/feeder/default.rss", metered=True, front_page=False),
+    _in("toi", "Times of India", "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"),
+    _in("indianexpress", "The Indian Express", "https://indianexpress.com/feed/"),
+    _in("livemint", "Mint", "https://www.livemint.com/rss/news"),
     # Sports
     Source(
         "nfl-com", "NFL.com", "https://www.nfl.com/sitemap-fast-changing.xml", "sports", "nfl", headline_only=True, sitemap=True
