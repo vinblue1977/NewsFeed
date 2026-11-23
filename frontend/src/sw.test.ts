@@ -42,9 +42,9 @@ function load(match: (key: unknown) => Promise<unknown> = () => Promise.resolve(
     await waitUntil.mock.calls[0]?.[0];
     return close;
   };
-  const message = (data: unknown) => {
+  const message = (data: unknown, source: unknown = { url: 'https://n.example/' }) => {
     const waitUntil = vi.fn();
-    handlers['message']?.({ data, waitUntil });
+    handlers['message']?.({ data, source, waitUntil });
     return waitUntil;
   };
   return { run, put, fetchFn, push, click, message, showNotification, openWindow };
@@ -109,6 +109,23 @@ describe('picture warming', () => {
     expect(t.message(null)).not.toHaveBeenCalled();
   });
 
+  it('ignores messages that do not come from a page of this app', () => {
+    const t = load();
+    const msg = { type: 'warm', urls: [good] };
+    for (const source of [null, {}, { url: 'https://evil.example/' }, { url: 'not a url' }, { url: 5 }]) {
+      expect(t.message(msg, source)).not.toHaveBeenCalled();
+    }
+  });
+
+  it('accepts a page of this app at any path, query or hash', async () => {
+    for (const url of ['https://n.example/', 'https://n.example/#/story/x', 'https://n.example/a/b?c=d']) {
+      const t = load();
+      const wait = t.message({ type: 'warm', urls: [good] }, { url });
+      expect(wait).toHaveBeenCalledTimes(1);
+      await wait.mock.calls[0]?.[0];
+    }
+  });
+
   it('skips the pictures already kept, and stops quietly when the network fails', async () => {
     const cache = { match: vi.fn(() => Promise.resolve({ ok: true })), put: vi.fn(), keys: () => Promise.resolve([]), delete: () => Promise.resolve(true) };
     const handlers: Record<string, Handler> = {};
@@ -117,12 +134,12 @@ describe('picture warming', () => {
     // eslint-disable-next-line no-new-func -- the worker file is plain script, run here against a fake scope
     new Function('self', 'caches', 'fetch', source)(scope, { open: () => Promise.resolve(cache), match: () => Promise.resolve(undefined) }, fetchFn);
     const waitUntil = vi.fn();
-    handlers['message']?.({ data: { type: 'warm', urls: [good] }, waitUntil });
+    handlers['message']?.({ data: { type: 'warm', urls: [good] }, source: { url: 'https://n.example/' }, waitUntil });
     await waitUntil.mock.calls[0]?.[0];
     expect(fetchFn).not.toHaveBeenCalled();  // already kept
     cache.match.mockImplementation(() => Promise.resolve(undefined as never));
     const again = vi.fn();
-    handlers['message']?.({ data: { type: 'warm', urls: [good, good.replace('0', '1')] }, waitUntil: again });
+    handlers['message']?.({ data: { type: 'warm', urls: [good, good.replace('0', '1')] }, source: { url: 'https://n.example/' }, waitUntil: again });
     await expect(again.mock.calls[0]?.[0]).resolves.toBeUndefined();
     expect(fetchFn).toHaveBeenCalledTimes(1);  // the first failure ends the run
     expect(cache.put).not.toHaveBeenCalled();
