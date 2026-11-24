@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULTS, parseSettings, withTeam, readSize, shownCount, sourceNames, toggled, withoutSources } from './settings';
+import { DEFAULTS, parseSettings, withTeam, shownCount, sourceNames, toggled, withoutSources } from './settings';
 import type { Feed } from './types';
 
 const it_ = (id: string, source: string, cluster?: string) => ({ id, title: id, url: 'https://e.com', summary: '', published: 'p', source, topic: 'us' as const, cluster });
@@ -21,8 +21,8 @@ describe('settings', () => {
     expect(parseSettings('null')).toEqual(DEFAULTS);
   });
   it('keeps valid values and drops bad ones', () => {
-    const s = parseSettings(JSON.stringify({ textSize: 'large', hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ textSize: 'large', hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULTS.push });
+    const s = parseSettings(JSON.stringify({ hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
+    expect(s).toEqual({ hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULTS.push });
     expect(parseSettings(JSON.stringify({ push: { topics: ['us', 'x'], weather: false, quietStart: '23:00' } })).push)
       .toEqual({ topics: ['us'], weather: false, alerts: true, quietStart: '23:00', quietEnd: '07:00' });  // an old save has no alerts field: on
     expect(parseSettings(JSON.stringify({ push: 'junk' })).push).toEqual(DEFAULTS.push);
@@ -41,15 +41,12 @@ describe('settings', () => {
     expect(parseSettings(JSON.stringify({ scoresCollapsed: 'nfl' })).scoresCollapsed).toEqual([]);
     expect(parseSettings(JSON.stringify({ watchKey: 'a1b2c3d4e5f6a7b8' })).watchKey).toBe('a1b2c3d4e5f6a7b8');
     for (const bad of ['short', 'UPPERCASEUPPERCASE', '../data/feed', 5, '']) expect(parseSettings(JSON.stringify({ watchKey: bad })).watchKey).toBe('');
-    expect(parseSettings(JSON.stringify({ textSize: 'huge' })).textSize).toBe('medium');
   });
   it('caps list length', () => {
     const many = Array.from({ length: 500 }, (_, n) => `s${n}`);
     expect(parseSettings(JSON.stringify({ hiddenSources: many })).hiddenSources).toHaveLength(200);
   });
-  it('maps sizes and toggles names', () => {
-    expect(readSize('small')).toBe(16);
-    expect(readSize('large')).toBe(21);
+  it('toggles names', () => {
     expect(toggled(['a'], 'b')).toEqual(['a', 'b']);
     expect(toggled(['a', 'b'], 'a')).toEqual(['b']);
   });

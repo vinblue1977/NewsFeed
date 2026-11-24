@@ -278,7 +278,7 @@ export function sections(list: Story[], top: Story | undefined): Section[] {
 
 export type Route = { kind: 'home' } | { kind: 'local' } | { kind: 'discovery'; sub?: string } | { kind: 'sports'; sub?: string } | { kind: 'films'; sub?: string } | { kind: 'markets' } | { kind: 'settings' } | { kind: 'quote'; id: string } | { kind: 'story'; id: string } | { kind: 'read'; id: string };
 
-/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>", "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/sports", "#/sports/<sub-topic>", "#/films", "#/films/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
+/** The screen named by the URL hash: "#/story/<cluster id>", "#/read/<item id>" (opens the publisher's page), "#/local", "#/discovery", "#/discovery/<sub-topic>", "#/sports", "#/sports/<sub-topic>", "#/films", "#/films/<sub-topic>", "#/markets", "#/settings", "#/quote/<symbol>", anything else is the home screen. */
 export function parseRoute(hash: string): Route {
   if (hash === '#/local') return { kind: 'local' };
   if (hash === '#/discovery') return { kind: 'discovery' };
@@ -412,19 +412,15 @@ export function teamStories(list: Story[], matches: ((text: string) => boolean) 
   return matches ? list.filter((s) => matches(s.item.title)) : [];
 }
 
-/** Where a story leads: the Story screen when several sources cover it, otherwise the Reader. Both are inside the app. */
-export function storyLink(story: Story): string {
-  return story.cluster && story.sources > 1 ? `#/story/${story.cluster.id}` : `#/read/${story.item.id}`;
+/** Where one article leads: the publisher's page, or (no usable link) "#/read/<id>", which shows a "no link" notice. */
+export function itemLink(item: Item): string {
+  const url = safeUrl(item.url);
+  return url === '#' ? `#/read/${item.id}` : url;
 }
 
-/** The Reader's article and, if other sources cover the same story, the cluster to link to. */
-export function readerPage(feed: Feed, itemId: string): { item: Item; coverageId: string | undefined } | undefined {
-  const item = feed.items.find((i) => i.id === itemId);
-  if (!item) return undefined;
-  const cluster = item.cluster ? feed.clusters.find((c) => c.id === item.cluster) : undefined;
-  if (!cluster) return { item, coverageId: undefined };
-  const sources = new Set(feed.items.filter((i) => i.cluster === cluster.id).map((i) => i.source)).size;
-  return { item, coverageId: sources > 1 ? cluster.id : undefined };
+/** Where a story leads: the Story screen when several sources cover it, otherwise straight to the publisher's page. */
+export function storyLink(story: Story): string {
+  return story.cluster && story.sources > 1 ? `#/story/${story.cluster.id}` : itemLink(story.item);
 }
 
 export interface StoryPage {

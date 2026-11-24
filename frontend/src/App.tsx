@@ -1,14 +1,13 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { loadArticles, loadEarnings, loadFeed, loadKernel, loadOnThisDay, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
-import { type Block, groupBlocks, readingMinutes } from './article';
+import { loadEarnings, loadFeed, loadKernel, loadOnThisDay, loadSchedule, loadScores, loadWatchlist, loadWeather, watchlistSymbols } from './api';
 import { useChrome } from './chrome';
 import { type Kernel, kernelFresh, kernelTitle } from './kernel';
 import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
-import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, parseRoute, readerPage, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, itemLink, parseRoute, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
@@ -16,11 +15,10 @@ import { activePreMarket, dayRange, earningDate, earningDay, EARNINGS_DAYS, type
 import { usePullToRefresh } from './pull';
 import { httpsOrigin, PUSH_NOTES, PUSH_SUMMARY, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
 import { disable as disablePush, enable as enablePush, readEnv } from './pushClient';
-import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, readSize, saveSettings, type Settings, shownCount, sourceNames, TEXT_SIZES, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
+import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, saveSettings, type Settings, shownCount, sourceNames, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
 import { cricketUpcoming, type CricketMatch, type Game, hasScores, type LiveCard, liveNow, type Match, type ScoreView, scoresFor, type Scores, teamCards, teamMatcher, teamSuggestions } from './scores';
-import { useOnline } from './online';
 import { warmPictures } from './pictures';
 import { degrees, headline, hourBars, isFresh, tip, type Weather } from './weather';
 
@@ -162,87 +160,35 @@ function TopicSection({ section, now, onAll, since }: { section: Pick<Section, '
   );
 }
 
-/** A story link: the Story screen when several sources cover it, otherwise the Reader. */
+/** Attributes for a link that leaves the app (a publisher's page opens in a new tab); in-app "#/..." links get none. */
+function linkAttrs(href: string): { href: string; target?: string; rel?: string } {
+  return href.startsWith('#') ? { href } : { href, ...EXTERNAL };
+}
+
+/** A story link: the Story screen when several sources cover it, otherwise the publisher's page. */
 function StoryAnchor({ story, class: cls, children }: { story: Story; class: string; children: ComponentChildren }) {
-  return <a class={cls} href={storyLink(story)}>{children}</a>;
+  return <a class={cls} {...linkAttrs(storyLink(story))}>{children}</a>;
 }
 
-function readerNote(o: { source: string; hasSummary: boolean; hasLink: boolean; hasFullText: boolean }): string {
-  const { source } = o;
-  if (!o.hasLink) return `${source} did not supply a usable link to the story.`;
-  if (o.hasFullText) return `Text supplied by ${source}. Open the original for images and the full page.`;
-  return o.hasSummary
-    ? `Showing the summary supplied by ${source}. Read the rest on their site.`
-    : `${source} supplies only the headline. Read the story on their site.`;
-}
-
-function ArticleBody({ blocks }: { blocks: Block[] }) {
-  return (
-    <div class="body">
-      {groupBlocks(blocks).map((g, n) => {
-        if (g.kind === 'h') return <h2 key={n}>{g.text}</h2>;
-        if (g.kind === 'q') return <blockquote key={n}>{g.text}</blockquote>;
-        if (g.kind === 'list') return <ul key={n}>{g.items.map((x, k) => <li key={k}>{x}</li>)}</ul>;
-        return <p key={n}>{g.text}</p>;
-      })}
-    </div>
-  );
-}
-
-function ReaderScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; id: string; now: Date; canGoBack: boolean; chromeHidden: boolean }) {
-  const page = readerPage(feed, id);
-  const wantsFull = page?.item.full === true;
-  const [blocks, setBlocks] = useState<Block[] | undefined>();
-  const online = useOnline();
-  const [answered, setAnswered] = useState(false);  // the full-text request has finished (with or without this article)
-  const fetching = wantsFull && !answered;  // so "Loading" shows exactly while waiting, and cannot hang
-  useEffect(() => {
-    if (!wantsFull) return undefined;
-    let current = true;
-    void loadArticles(id).then((articles) => {
-      if (!current) return;
-      const found = articles?.[id];
-      setBlocks(Array.isArray(found) ? found : undefined);
-      setAnswered(true);
-    });
-    return () => { current = false; };
-  }, [wantsFull, id]);
-  const minutes = useMemo(() => (blocks ? readingMinutes(blocks) : 0), [blocks]);
+/** "#/read/<id>": an old link or a notification. Shows the story with a button to the publisher's page (a button, not an automatic
+ * redirect: in the home-screen app a redirect would leave no way back). */
+function OpenScreen({ feed, id, now, canGoBack }: { feed: Feed; id: string; now: Date; canGoBack: boolean }) {
+  const item = feed.items.find((i) => i.id === id);
+  const url = item ? safeUrl(item.url) : '#';
   const goBack = () => { if (canGoBack) history.back(); else location.hash = ''; };
-  const url = page ? safeUrl(page.item.url) : '#';
-  const canShare = typeof navigator.share === 'function' && url !== '#';
   return (
     <div class="wrap">
-      <div class={chromeHidden ? 'back hide' : 'back'}>
-        <button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button>
-        {page && canShare && (
-          <button type="button" class="ib" aria-label="Share" onClick={() => { void navigator.share({ title: page.item.title, url }).catch(() => undefined); }}>↗</button>
-        )}
-      </div>
-      {!page && <div class="empty"><b>Article not found</b><span>It may have dropped out of the latest news.</span></div>}
-      {page && (
-        <article class="art">
-          <div class="tag">{topicLabel(page.item.topic)}</div>
-          <h1>{page.item.title}</h1>
-          <Pic item={page.item} class="pic" />
-          <div class="src art-src">
-            <span class="fav" style={{ background: badgeColor(page.item.source) }}>{initial(page.item.source)}</span>
-            {page.item.source} · {timeAgo(page.item.published, now)}{blocks ? ` · ${minutes} min read` : ''}{page.item.metered ? ' · Metered' : ''}
-          </div>
-          {blocks ? <ArticleBody blocks={blocks} /> : page.item.summary ? <p>{page.item.summary}</p> : null}
-          {fetching && !blocks && online && <p class="wait">Loading the full text…</p>}
-          {wantsFull && !blocks && !online && <p class="wait">You're offline: the full text and the original need a connection.</p>}
-          <div class="box infobox">
-            <span aria-hidden="true">ⓘ</span>
-            <span>{readerNote({ source: page.item.source, hasSummary: page.item.summary !== '', hasLink: url !== '#', hasFullText: blocks !== undefined })}</span>
-          </div>
+      <div class="back"><button type="button" class="ib" aria-label="Back" onClick={goBack}>‹</button></div>
+      {!item && <div class="empty"><b>Article not found</b><span>It may have dropped out of the latest news.</span></div>}
+      {item && (
+        <>
+          <div class="tag">{topicLabel(item.topic)}</div>
+          <h1 class="ttl">{item.title}</h1>
+          <div class="meta">{item.source} · {timeAgo(item.published, now)}</div>
           <div class="btns">
-            {url !== '#' && <a class="btn" href={url} {...EXTERNAL}>Open original ↗</a>}
-            {page.coverageId && <a class="btn g" href={`#/story/${page.coverageId}`}>Full coverage</a>}
+            {url !== '#' ? <a class="btn" href={url} {...EXTERNAL}>Open at {item.source} ↗</a> : <span class="note">{item.source} did not supply a usable link.</span>}
           </div>
-          <div class="note">Paywalled articles are filtered out · sources that limit free reads are marked Metered</div>
-          <div class="btns"><button type="button" class="btn g" onClick={goBack}><span aria-hidden="true">‹</span> Back</button></div>
-        </article>
+        </>
       )}
     </div>
   );
@@ -269,7 +215,7 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
           <div class="meta">Updated {timeAgo(page.items[0]?.published ?? page.cluster.published, now)} · {page.sources} {page.sources === 1 ? 'source' : 'sources'}</div>
           <div class="sh"><b>Coverage from {page.sources} {page.sources === 1 ? 'source' : 'sources'}</b></div>
           {shown.map((i) => (
-            <a class="cv" key={i.id} href={`#/read/${i.id}`}>
+            <a class="cv" key={i.id} {...linkAttrs(itemLink(i))}>
               <span class="fav" style={{ background: badgeColor(i.source) }}>{initial(i.source)}</span>
               <div class="cvt"><b>{i.title}</b><small>{i.source} · {timeAgo(i.published, now)}{i.metered ? ' · Metered' : ''}</small></div>
               <span class="chev" aria-hidden="true">›</span>
@@ -1098,14 +1044,6 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
     <div class="wrap">
       <div class="back"><button type="button" class="ib" aria-label="Back" onClick={() => { if (canGoBack) history.back(); else location.hash = '#'; }}>‹</button></div>
       <header class="hdr"><div><div class="e">On this device</div><h1>Settings</h1></div></header>
-      <div class="grp">Reader text size</div>
-      <div class="seg" role="group" aria-label="Reader text size">
-        {TEXT_SIZES.map((t) => (
-          <button key={t.id} type="button" class={t.id === settings.textSize ? 'on' : ''} aria-pressed={t.id === settings.textSize}
-            onClick={() => update({ textSize: t.id })}>{t.label}</button>
-        ))}
-      </div>
-      <p class="sample">Sample of how an article will read.</p>
       <div class="grp">News sources</div>
       {sources.length === 0 && <p class="note">Sources appear once the news has loaded.</p>}
       {sources.length > 0 && (
@@ -1221,7 +1159,7 @@ function Briefing({ stories: list, read, onOpen, now, fact }: { stories: Story[]
     <section class="brief" aria-label="Your briefing">
       <div class="bh"><b>{caught ? "You're caught up" : 'Your briefing'}</b><span>{list.length} stories</span></div>
       {list.map((s, n) => (
-        <a key={s.item.id} class={read.includes(s.item.id) ? 'bi seen' : 'bi'} href={storyLink(s)} onClick={() => onOpen(s.item.id)}>
+        <a key={s.item.id} class={read.includes(s.item.id) ? 'bi seen' : 'bi'} {...linkAttrs(storyLink(s))} onClick={() => onOpen(s.item.id)}>
           <span class="bn">{n + 1}</span>
           <div class="bt">
             <b>{s.item.title}</b>
@@ -1281,11 +1219,7 @@ export function App() {
   const [markets, setMarkets] = useState<Markets | undefined>();
   const [marketsLoaded, setMarketsLoaded] = useState(false);
   const [earnings, setEarnings] = useState<Earnings | undefined>();
-  const [settings, setSettings] = useState<Settings>(() => {
-    const s = loadSettings();
-    document.documentElement.style.setProperty('--read-size', `${readSize(s.textSize)}px`);  // before the first paint, so no reflow
-    return s;
-  });
+  const [settings, setSettings] = useState<Settings>(loadSettings);
   const [route, setRoute] = useState(() => parseRoute(location.hash));
   const scrolls = useRef<Record<string, number>>({});  // where the long list screens (home, local) were left
   const routeRef = useRef(route);
@@ -1413,7 +1347,7 @@ export function App() {
     };
   }, []);
 
-  const raw = load.state === 'ready' ? load.feed : undefined;  // the Reader opens any article, even from a hidden source
+  const raw = load.state === 'ready' ? load.feed : undefined;  // the Story screen and old links open any article, even from a hidden source
   const feed = useMemo(() => (raw ? withoutSources(raw, settings.hiddenSources) : undefined), [raw, settings.hiddenSources]);
   const sources = useMemo(() => sourceNames(raw, settings.hiddenSources), [raw, settings.hiddenSources]);
   const change = (next: (prev: Settings) => Settings) => {
@@ -1432,9 +1366,6 @@ export function App() {
   const toggleSchedule = () => change((prev) => ({ ...prev, scheduleCollapsed: !prev.scheduleCollapsed }));
   const toggleScores = (sport: string) => change((prev) => ({ ...prev, scoresCollapsed: toggled(prev.scoresCollapsed, sport) }));
   const update = (next: Partial<Settings>) => change((prev) => ({ ...prev, ...next }));
-  useEffect(() => {
-    document.documentElement.style.setProperty('--read-size', `${readSize(settings.textSize)}px`);
-  }, [settings.textSize]);
   const firstTeam = settings.myTeams[0];  // the theme depends on this one name, so editing another team does not rebuild it
   const theme = useMemo(() => (route.kind === 'sports' && settings.teamColors ? teamTheme(firstTeam ? [firstTeam] : []) : undefined), [route.kind, settings.teamColors, firstTeam]);
   useEffect(() => {  // the Sports tab wears the first team's accent; every other screen gets the normal one back
@@ -1491,7 +1422,7 @@ export function App() {
       if (routeRef.current.kind === 'home') { homeMarketsAt.current = Date.now(); refreshMarkets(); }  // the strip on For you: a pull always asks
     }
   });
-  const chrome = useChrome(route.kind === 'story' || route.kind === 'read', screenKey);
+  const chrome = useChrome(route.kind === 'story', screenKey);
   const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   if (route.kind === 'discovery') {
@@ -1578,7 +1509,7 @@ export function App() {
         {feed ? (
           route.kind === 'story'
             ? <StoryScreen key={route.id} feed={raw ?? feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
-            : <ReaderScreen key={route.id} feed={raw ?? feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} chromeHidden={chrome.hidden} />
+            : <OpenScreen key={route.id} feed={raw ?? feed} id={route.id} now={now} canGoBack={inAppNavs.current > 0} />
         ) : (
           <div class="wrap">
             <div class="back"><a class="ib" href="#" aria-label="Home">‹</a></div>
@@ -1646,7 +1577,7 @@ export function App() {
               <div class="full">
                 <div class="lab">FULL COVERAGE · {lead.sources} SOURCES</div>
                 {full.map((i) => (
-                  <a class="it" key={i.id} href={`#/read/${i.id}`}>
+                  <a class="it" key={i.id} {...linkAttrs(itemLink(i))}>
                     <Source name={i.source} when={timeAgo(i.published, now)} />
                     <b>{i.title}</b>
                   </a>

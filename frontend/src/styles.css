@@ -1,5 +1,4 @@
 :root {
-  --read-font: -apple-system, system-ui, sans-serif;  /* the article reader and the text-size preview share one face */
   --headline-size: 17px;  /* feed headlines: top card, story rows, section leads */
   color-scheme: dark;
   --bg: #000;
@@ -145,21 +144,9 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .cvt small { color: var(--muted); font-size: 12.5px; }
 .chev { color: var(--muted); }
 
-.art { padding: 0 0 8px; }
-.art .tag { padding: 4px 16px 0; }
-.art h1 { font-size: 28px; line-height: 1.15; font-weight: 700; margin: 4px 16px 8px; overflow-wrap: anywhere; }
-.art .art-src { margin: 0 16px 14px; }
-.art p { font: var(--read-size, 18px)/1.55 var(--read-font); margin: 0 16px 16px; color: var(--text); overflow-wrap: anywhere; }
-.infobox { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 14px; }
 .btns { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 16px; }
 .btns .btn { display: inline-block; }
 
-.body h2 { font-size: 20px; line-height: 1.25; font-weight: 600; margin: 22px 16px 10px; overflow-wrap: anywhere; }
-.body p { font: var(--read-size, 18px)/1.55 var(--read-font); margin: 0 16px 16px; color: var(--text); overflow-wrap: anywhere; }
-.body ul { margin: 0 16px 16px; padding-left: 22px; font: var(--read-size, 18px)/1.55 var(--read-font); }
-.body li { margin-bottom: 6px; overflow-wrap: anywhere; }
-.body blockquote { margin: 0 16px 16px; padding-left: 14px; border-left: 3px solid var(--line); font: italic var(--read-size, 18px)/1.55 var(--read-font); color: var(--muted); overflow-wrap: anywhere; }
-.art p.wait { font: 14px/1.4 var(--read-font); color: var(--muted); }
 
 /* reading screens: the bars slide away while you scroll down and come back when you scroll up */
 .back, .tabbar { transition: transform .22s ease; }
@@ -197,7 +184,6 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .lead h2 { font-size: var(--headline-size); line-height: 1.25; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .sech { justify-content: flex-start; }
 .sech .all { margin-left: auto; background: none; border: 0; padding: 0; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 13px; }
-.art .pic { margin: 0 16px 14px; width: calc(100% - 32px); }
 
 /* Settings */
 .set { list-style: none; margin: 0 16px 10px; padding: 0; background: var(--card-bg); border: 1px solid var(--line); border-radius: 12px; }
@@ -206,10 +192,6 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .set label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; font-size: 15px; }
 .set input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
 .set input[type=time] { font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
-.seg { display: flex; gap: 8px; padding: 12px 14px; }
-.seg button { flex: 1; padding: 9px 0; border: 1px solid var(--line); border-radius: 8px; background: none; font-size: 14px; }
-.seg button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-.sample { margin: 0; padding: 0 14px 14px; font: var(--read-size, 18px)/1.55 var(--read-font); color: var(--muted); }
 
 .fold { margin: 0 16px 10px; padding: 0 14px; background: var(--card-bg); border: 1px solid var(--line); border-radius: 12px; }
 .fold summary { padding: 13px 0; font-size: 15px; cursor: pointer; }
