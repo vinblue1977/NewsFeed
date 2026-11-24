@@ -3,10 +3,8 @@ import { cleanFollows } from './follow';
 import type { Feed } from './types';
 
 /** On-device preferences. Nothing here leaves the phone. */
-export type TextSize = 'small' | 'medium' | 'large';
 
 export interface Settings {
-  textSize: TextSize;
   hiddenSources: string[];
   hiddenTickers: string[];
   watchCollapsed: boolean;  // the Markets watchlist list is folded away
@@ -24,13 +22,8 @@ export interface Settings {
 
 export const SETTINGS_KEY = 'news.settings';
 export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
-export const DEFAULTS: Settings = { textSize: 'medium', hiddenSources: [], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULT_PUSH };
+export const DEFAULTS: Settings = { hiddenSources: [], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULT_PUSH };
 export const SCORE_SPORTS = ['nfl', 'tennis', 'cricket'] as const;
-export const TEXT_SIZES: { id: TextSize; label: string; px: number }[] = [
-  { id: 'small', label: 'Small', px: 16 },
-  { id: 'medium', label: 'Medium', px: 18 },
-  { id: 'large', label: 'Large', px: 21 },
-];
 export const MAX_TEAMS = 20;
 export const MAX_TEAM_CHARS = 40;
 const MAX_LIST = 200;  // a corrupted or hand-edited store cannot grow without bound
@@ -44,9 +37,8 @@ export function parseSettings(raw: string | null): Settings {
   try {
     const v = JSON.parse(raw) as Partial<Record<keyof Settings, unknown>> | null;
     if (!v || typeof v !== 'object') return DEFAULTS;
-    const size = TEXT_SIZES.find((t) => t.id === v.textSize)?.id ?? DEFAULTS.textSize;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { textSize: size, hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, kernelCollapsed: v.kernelCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), teamColors: v.teamColors !== false, myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
+    return { hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, kernelCollapsed: v.kernelCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), teamColors: v.teamColors !== false, myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
   } catch {
     return DEFAULTS;
   }
@@ -66,11 +58,6 @@ export function saveSettings(s: Settings): void {
   } catch {
     /* not remembered; fine */
   }
-}
-
-/** The reader's text size in px. */
-export function readSize(size: TextSize): number {
-  return TEXT_SIZES.find((t) => t.id === size)?.px ?? 18;
 }
 
 /** `list` with `name` added or removed. */
