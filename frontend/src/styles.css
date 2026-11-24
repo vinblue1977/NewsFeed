@@ -4,7 +4,7 @@
   --bg: #000;
   --card: #0f1012;
   --line: #26282c;
-  --band: #24272c;  /* the full-width band between sections */
+  --divider: #33373d;  /* the hairline between sections */
   --chip: #1a1c1f;
   --card-bg: linear-gradient(160deg, color-mix(in srgb, var(--card), #fff 9%), var(--card) 70%);  /* the gradient every section card wears */
   --wx-text: #d6d9de;
@@ -338,5 +338,5 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .otd { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.4; color: var(--muted); }
 .otd b { display: block; margin-bottom: 2px; font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); }
 
-/* A full-width band closes each topic section that another section follows. */
-.tsec:has(+ .tsec)::after { content: ""; display: block; height: 14px; background: var(--band); margin-top: 6px; }
+/* A hairline, with air above it, closes each topic section that another section follows. */
+.tsec:has(+ .tsec)::after { content: ""; display: block; margin: 22px 16px 10px; border-top: 1px solid var(--divider); }
