@@ -144,7 +144,7 @@ function TopicSection({ section, now, onAll, since }: { section: Pick<Section, '
   const { lead } = section;
   const split = since === undefined ? -1 : dividerAt([lead, ...section.more], since);  // 1 or more: the lead and some rows are new, the rest are not
   return (
-    <section aria-label={section.label}>
+    <section class="tsec" aria-label={section.label}>
       <div class="grp sech"><i style={{ background: section.color }} />{section.label}
         {onAll && <button type="button" class="all" onClick={onAll}>See all {section.total} ›</button>}</div>
       <StoryAnchor story={lead} class="lead">
