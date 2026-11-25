@@ -12,7 +12,7 @@ class Source:
     id: str
     name: str
     url: str
-    topic: str  # us | world | india | sports | tech | business | entertainment | science | local
+    topic: str  # us | world | india | sports | tech | business | entertainment | science | local | chicago
     subtopic: str | None = None  # a Browse tile: sports, tech or business ids, e.g. nfl, gadgets, science, bollywood
     enabled: bool = True
     metered: bool = False
@@ -53,6 +53,15 @@ INDIA_ANGLE = r"India|Sensex|Nifty|Rupee|RBI|Dalal|Modi|Jaishankar|Delhi|Mumbai"
 NOT_INDIA_TITLE = (
     rf"^(?!.*(?:{INDIA_ANGLE})).*(?:\bUS\b|\bU\.S\.|\bTrump\b|White House|Wall Street|\bDemocrats?\b|\bRepublicans?\b|\bUSA\b"
     r"|\bAmerica(?:n|ns)?\b)"
+)
+
+
+# Words that mark a US politics story. The politics feeds are tagged `politics` wholesale; a story from a general US feed is
+# tagged, and a story from a mixed publisher is kept, only when it matches.
+POLITICS_RE = (
+    r"\b(Congress(?:ional)?|Senate|Senators?|House (?:Republicans?|Democrats?|Speaker|vote)|White House|Trump|Biden|Vance"
+    r"|Supreme Court|GOP|Republicans?|Democrats?|lawmakers?|Capitol Hill|midterms?|filibuster|impeach\w*|Speaker Johnson"
+    r"|Schumer|Thune|Pelosi)\b"
 )
 
 
@@ -127,13 +136,35 @@ SOURCES: tuple[Source, ...] = (
     _s("nbc-us", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/us-news", "us"),
     _s("washtimes", "The Washington Times", "https://www.washingtontimes.com/rss/headlines/news/", "us"),
     # US politics
-    _s("politico", "Politico", "https://rss.politico.com/politics-news.xml", "us"),
-    _s("npr-politics", "NPR", "https://feeds.npr.org/1014/rss.xml", "us"),
-    _s("guardian-uspolitics", "The Guardian", "https://www.theguardian.com/us-news/us-politics/rss", "us"),
-    _s("pbs-politics", "PBS NewsHour", "https://www.pbs.org/newshour/feeds/rss/politics", "us"),
-    _s("cbs-politics", "CBS News", "https://www.cbsnews.com/latest/rss/politics", "us"),
-    _s("abc-politics", "ABC News", "https://abcnews.go.com/abcnews/politicsheadlines", "us"),
-    _s("thehill-admin", "The Hill", "https://thehill.com/homenews/administration/feed/", "us"),
+    _s("politico", "Politico", "https://rss.politico.com/politics-news.xml", "us", "politics"),
+    _s("npr-politics", "NPR", "https://feeds.npr.org/1014/rss.xml", "us", "politics"),
+    _s("guardian-uspolitics", "The Guardian", "https://www.theguardian.com/us-news/us-politics/rss", "us", "politics"),
+    _s("pbs-politics", "PBS NewsHour", "https://www.pbs.org/newshour/feeds/rss/politics", "us", "politics"),
+    _s("cbs-politics", "CBS News", "https://www.cbsnews.com/latest/rss/politics", "us", "politics"),
+    _s("abc-politics", "ABC News", "https://abcnews.go.com/abcnews/politicsheadlines", "us", "politics"),
+    _s("thehill-admin", "The Hill", "https://thehill.com/homenews/administration/feed/", "us", "politics"),
+    _s("nbc-politics", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/politics", "us", "politics"),
+    _s("fox-politics", "Fox News", "https://moxie.foxnews.com/google-publisher/politics.xml", "us", "politics"),
+    _s("slate-politics", "Slate", "https://slate.com/feeds/news-and-politics.rss", "us", "politics"),
+    _s("salon-politics", "Salon", "https://www.salon.com/category/politics/feed/", "us", "politics"),
+    # Mixed publishers: only the stories that read as politics
+    _s("axios", "Axios", "https://www.axios.com/feeds/feed.rss", "us", "politics", only_matching=POLITICS_RE),
+    _s(
+        "washex",
+        "Washington Examiner",
+        "https://www.washingtonexaminer.com/section/news/feed",
+        "us",
+        "politics",
+        only_matching=POLITICS_RE,
+    ),
+    _s("reason", "Reason", "https://reason.com/feed/", "us", "politics", only_matching=POLITICS_RE),
+    _s("natreview", "National Review", "https://www.nationalreview.com/feed/", "us", "politics", only_matching=POLITICS_RE),
+    _s("motherjones", "Mother Jones", "https://www.motherjones.com/feed/", "us", "politics", only_matching=POLITICS_RE),
+    # Chicago: public feeds, no place filter (the Local tab's own feeds stay in the private location parameter)
+    _s("cbs-chicago", "CBS Chicago", "https://www.cbsnews.com/chicago/latest/rss/main", "chicago", "chicago"),
+    _s("fox32", "FOX 32 Chicago", "https://www.fox32chicago.com/rss/category/news", "chicago", "chicago"),
+    _s("wttw", "WTTW", "https://news.wttw.com/feed", "chicago", "chicago"),
+    _s("capitol-il", "Capitol News Illinois", "https://capitolnewsillinois.com/feed/", "chicago", "chicago"),
     # World
     _s("bbc-world", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml", "world"),
     _s("dw", "DW", "https://rss.dw.com/xml/rss-en-world", "world"),

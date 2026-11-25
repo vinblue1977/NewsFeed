@@ -163,6 +163,18 @@ function TopicSection({ section, now, onAll, since }: { section: Pick<Section, '
   );
 }
 
+/** A short strip at the end of another tab: a heading with "See all N", then the newest few stories (US Politics in the US tab, Chicago in Local). Hidden when empty. */
+const STRIP_ROWS = 3;
+function Strip({ label, color, list, route, now }: { label: string; color: string; list: Story[]; route: string; now: Date }) {
+  if (list.length === 0) return null;
+  return (
+    <section class="tabstrip" aria-label={label}>
+      <div class="grp sech"><i style={{ background: color }} />{label}<a class="all" href={route}>See all {list.length} ›</a></div>
+      {list.slice(0, STRIP_ROWS).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
+    </section>
+  );
+}
+
 /** A story link: the Story screen when several sources cover it, otherwise the publisher's page. */
 function StoryAnchor({ story, class: cls, children }: { story: Story; class: string; children: ComponentChildren }) {
   return <a class={cls} {...linkAttrs(storyLink(story), STANDALONE)}>{children}</a>;
@@ -702,6 +714,7 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   feed: Feed | undefined; loaded: boolean; failed: boolean; weather: Weather | undefined; weatherStale: boolean; now: Date; shown: number; onMore: () => void; onRetry: () => void;
 }) {
   const local = useMemo(() => (feed ? stories(feed, 'local') : []), [feed]);  // the sort depends on the feed only; the split on the clock
+  const chicago = useMemo(() => (feed ? stories(feed, 'chicago') : []), [feed]);  // the Chicago-wide feeds: a strip under the town's own stories
   const { recent, earlier } = useMemo(() => splitRecent(local, now), [local, now]);
   const recentShown = recent.slice(0, shown);
   const earlierShown = earlier.slice(0, Math.max(0, shown - recent.length));
@@ -730,6 +743,7 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
         </>
       )}
       {recent.length + earlier.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
+      <Strip label="Chicago" color="#1f8a70" list={chicago} route="#/discovery/chicago" now={now} />
     </div>
   );
 }
@@ -1402,7 +1416,9 @@ export function App() {
     return () => { document.removeEventListener('visibilitychange', onChange); };
   }, []);
   const brief = useMemo(() => (topic === 'all' ? briefing(list.filter((s) => s.item.id !== lead?.item.id), now) : []), [list, lead, now, topic]);
-  const rest = list.filter((s) => s.item.id !== lead?.item.id);
+  const politics = useMemo(() => (topic === 'us' ? list.filter((s) => s.item.subtopic === 'politics') : []), [list, topic]);  // the US tab's strip
+  const inStrip = new Set(politics.slice(0, STRIP_ROWS).map((s) => s.item.id));  // shown in the strip, so not again in the list above it
+  const rest = list.filter((s) => s.item.id !== lead?.item.id && !inStrip.has(s.item.id));
   const grouped = useMemo(() => (topic === 'all' ? sections(list, lead) : []), [list, lead, topic]);
   const dividerAtShown = since === undefined ? -1 : dividerAt(rest.slice(0, shown), since);  // flat list of a topic tab, newest first
   const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has neither local nor sports stories:
@@ -1588,7 +1604,7 @@ export function App() {
         {topic === 'all' && <FollowingSection groups={followed} now={now} />}
         {topic !== 'all' && weather && <WeatherStrip weather={weather} stale={weatherStale} now={now} />}
         {topic === 'all' && grouped.map((g) => (
-          <TopicSection key={g.topic} section={g} now={now} since={since} onAll={() => { setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
+          <TopicSection key={g.key} section={g} now={now} since={since} onAll={() => { if (g.route) { location.hash = g.route; return; } setTopic(g.topic); setShown(PAGE); window.scrollTo(0, 0); }} />
         ))}
         {topic !== 'all' && rest.slice(0, shown).map((s, n) => (
           <Fragment key={s.item.id}>
@@ -1596,6 +1612,7 @@ export function App() {
             <StoryRow s={s} now={now} />
           </Fragment>
         ))}
+        {topic === 'us' && <Strip label="Politics in US" color="#c0392b" list={politics} route="#/discovery/politics" now={now} />}
         {topic !== 'all' && rest.length > shown && (
           <div class="more"><button type="button" class="btn g" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>
         )}

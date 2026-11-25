@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunspli
 
 from ingest.feeds import FeedError, fetch, parse_feed
 from ingest.filters import block_reason
-from ingest.sources import Source
+from ingest.sources import POLITICS_RE, Source
 
 MAX_AGE = timedelta(hours=72)
 MAX_AGE_LOCAL = timedelta(days=7)  # a suburb has few stories a day, so Local keeps a week (its Earlier section shows them)
@@ -128,6 +128,7 @@ def collect(
     pool.shutdown(wait=False, cancel_futures=True)  # stragglers are abandoned, not waited for
     results = [f.result() if f.done() else (source, [], "timed out") for source, f in futures]
 
+    politics = re.compile(POLITICS_RE, re.IGNORECASE)
     items: dict[str, dict[str, Any]] = {}
     by_headline: dict[tuple[str, str], dict[str, Any]] = {}
     status: dict[str, dict[str, Any]] = {}
@@ -165,6 +166,8 @@ def collect(
             if only and not only.search(f"{item['title']} {item['summary']}"):
                 filtered += 1
                 continue
+            if source.topic == "us" and not item.get("subtopic") and politics.search(item["title"]):
+                item["subtopic"] = "politics"  # a politics story from a general US feed still lands in the politics sections
             key = _dedupe_key(item["url"])
             same_headline = (item["source"].lower(), item["title"].lower())  # a direct feed and Google News carry one story
             seen = items.get(key) or by_headline.get(same_headline)

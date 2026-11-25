@@ -11,7 +11,7 @@ export const TOPICS: { id: Topic | 'all'; label: string }[] = [
 
 /** Topics with a tab of their own (Local, Sports, Entertainment, Science): `stories(feed, 'all')` (For You) leaves them out. */
 const TAB_ONLY_TOPICS: ReadonlySet<string> = new Set(['local', 'sports', 'entertainment', 'science']);
-const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local'], ['sports', 'Sports'], ['entertainment', 'Entertainment'], ['science', 'Science']]);
+const LABELS = new Map<string, string>([...TOPICS.map((t) => [t.id, t.label] as const), ['local', 'Local'], ['sports', 'Sports'], ['entertainment', 'Entertainment'], ['science', 'Science'], ['chicago', 'Chicago']]);
 const STALE_AFTER_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -246,17 +246,24 @@ function withoutTop(list: Story[], top: Story | undefined): Story[] {
   return list.filter((s) => s.item.id !== top?.item.id && !(top?.cluster && s.cluster?.id === top.cluster.id));
 }
 
-export const SECTION_TOPICS: { topic: Topic; color: string }[] = [
-  { topic: 'us', color: '#5b86c9' },
-  { topic: 'world', color: '#3fb6a8' },
-  { topic: 'india', color: '#e0a53f' },
-  { topic: 'tech', color: '#8a6fe0' },
-  { topic: 'business', color: '#c97aa8' },
+/** The For You sections, in order. A section is a topic, or one sub-topic of a topic (US Politics); a topic's own section leaves out
+ * a sub-topic that has a section of its own (`except`), so no story shows twice. */
+export interface SectionDef { key: string; topic: Topic; color: string; label?: string; sub?: string; except?: string; route?: string }
+export const SECTION_TOPICS: SectionDef[] = [
+  { key: 'us', topic: 'us', color: '#5b86c9', except: 'politics' },
+  { key: 'us-politics', topic: 'us', color: '#c0392b', label: 'US Politics', sub: 'politics', route: '#/discovery/politics' },
+  { key: 'chicago', topic: 'chicago', color: '#1f8a70', route: '#/discovery/chicago' },
+  { key: 'world', topic: 'world', color: '#3fb6a8' },
+  { key: 'india', topic: 'india', color: '#e0a53f' },
+  { key: 'tech', topic: 'tech', color: '#8a6fe0' },
+  { key: 'business', topic: 'business', color: '#c97aa8' },
 ];
 export const PER_SECTION = 3;  // the lead plus two more
 
 export interface Section {
+  key: string;
   topic: Topic;
+  route?: string;  // where "See all" goes when the section has no tab of its own (US Politics, Chicago)
   label: string;
   color: string;
   lead: Story;
@@ -268,11 +275,11 @@ export interface Section {
  * `list` is newest first; the story shown as the top story is left out so it does not appear twice. */
 export function sections(list: Story[], top: Story | undefined): Section[] {
   const rest = withoutTop(list, top);
-  return SECTION_TOPICS.flatMap(({ topic, color }) => {
-    const here = rest.filter((s) => s.item.topic === topic);
+  return SECTION_TOPICS.flatMap(({ key, topic, color, label, sub, except, route }) => {
+    const here = rest.filter((s) => s.item.topic === topic && (sub === undefined || s.item.subtopic === sub) && (except === undefined || s.item.subtopic !== except));
     const lead = here.find((s) => imageSrc(s.item)) ?? here[0];
     if (!lead) return [];
-    return [{ topic, label: topicLabel(topic), color, lead, more: here.filter((s) => s !== lead).slice(0, PER_SECTION - 1), total: here.length }];
+    return [{ key, topic, route, label: label ?? topicLabel(topic), color, lead, more: here.filter((s) => s !== lead).slice(0, PER_SECTION - 1), total: here.length }];
   });
 }
 
@@ -307,7 +314,7 @@ export function parseRoute(hash: string): Route {
   return m[1] === 'story' ? { kind: 'story', id: m[2] } : { kind: 'read', id: m[2] };
 }
 
-const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', world: 'World News', gadgets: 'Technology', science: 'Science and Space', bollywood: 'Bollywood', south: 'South Cinema', hollywood: 'Hollywood' };
+const SUBTOPIC_LABELS: Record<string, string> = { nfl: 'NFL', world: 'World News', gadgets: 'Technology', science: 'Science and Space', bollywood: 'Bollywood', south: 'South Cinema', hollywood: 'Hollywood', politics: 'US Politics', chicago: 'Chicago' };
 
 /** A sub-topic id ("cricket") as a title ("Cricket"). */
 export function subtopicLabel(id: string): string {
