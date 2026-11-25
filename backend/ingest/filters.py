@@ -28,7 +28,7 @@ PAYWALLED_DOMAINS = frozenset(
     }
 )
 
-# Not paywalled, but never worth a card: obituaries, school-sports score boxes, wire press releases.
+# Not paywalled, but never worth a card: obituaries, school-sports score boxes, wire press releases, and English Lincolnshire papers.
 NOISE_DOMAINS = frozenset(
     {
         "legacy.com",
@@ -39,6 +39,13 @@ NOISE_DOMAINS = frozenset(
         "globenewswire.com",
         "einpresswire.com",
         "openpr.com",
+        # England, not the Illinois village: the place name "Lincolnshire" also matches the county's papers
+        "lincolnshireworld.com",
+        "lincolnshirelive.co.uk",
+        "lincolnshirereporter.co.uk",
+        "thelincolnite.co.uk",
+        "bostonstandard.co.uk",
+        "granthamjournal.co.uk",
     }
 )
 
