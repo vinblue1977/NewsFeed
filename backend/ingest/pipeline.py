@@ -76,6 +76,19 @@ def _host(url: str) -> str:
     return re.sub(r"^www\.", "", host) if host else "local"
 
 
+_SITE = re.compile(r"(?<![-\w])site:([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)")  # not a "-site:" exclusion; the host only, no path
+
+
+def status_name(source: Source) -> str:
+    """What Settings > Source health calls a feed. A national feed: its name. A local feed: its host, or for a Google News
+    search the one publisher it is limited to ("dailyherald.com (Google News)"). Never the rest of the query: that is where the
+    nearby places are. `collect` publishes a local feed's name only when the feed produced stories, see there."""
+    if source.topic != "local" or not _is_google_news(source.url):
+        return source.name
+    site = _SITE.search(unquote_plus(urlsplit(source.url).query).lower())
+    return f"{site.group(1)} (Google News)" if site else "Google News search"
+
+
 def _dedupe_key(url: str) -> str:
     """The URL without tracking parameters, fragment and trailing slash, so one story is not shown twice."""
     parts = urlsplit(url)
@@ -185,7 +198,9 @@ def collect(
             by_headline[same_headline] = item
             kept += 1
         status[source.id] = {
-            **({"name": source.name} if source.topic != "local" else {}),  # a local feed's host would give away the town
+            # A local feed is named only when it produced stories: that name already shows on them. A silent local feed's host
+            # (a village or school site) could give away the town, so it stays unnamed and Settings shows its position instead.
+            **({"name": status_name(source)} if source.topic != "local" or kept else {}),
             "ok": error is None,
             "items": kept,
             **({"blocked": blocked} if blocked else {}),
