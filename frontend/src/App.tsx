@@ -7,6 +7,7 @@ import { type Kernel, kernelFresh, kernelTitle } from './kernel';
 import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
+import { needAttention, sourceHealth } from './health';
 import { externalAttrs, isStandalone, linkAttrs } from './links';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, itemLink, parseRoute, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
@@ -1073,8 +1074,25 @@ function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: P
   );
 }
 
-function SettingsScreen({ settings, update, sources, suggestions, markets, marketsLoaded, onSaved, canGoBack }: {
-  settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; suggestions: string[]; markets: Markets | undefined; marketsLoaded: boolean;
+/** What the last ingest run said about each feed, failed and empty ones first. A fold like the others, so it is closed until opened. */
+function SourceHealth({ status }: { status: Feed['sources'] }) {
+  const rows = useMemo(() => sourceHealth(status), [status]);
+  if (rows.length === 0) return null;
+  const bad = needAttention(rows);
+  return (
+    <details class="card fold">
+      <summary>Source health ({bad === 0 ? 'all fine' : `${bad} to check`})</summary>
+      <ul class="set inner health">
+        {rows.map((r) => (
+          <li key={r.id} class={r.state}><span class="hl">{r.label}<small>{r.id}</small></span><span class="hn">{r.note}</span></li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function SettingsScreen({ settings, update, sources, health, suggestions, markets, marketsLoaded, onSaved, canGoBack }: {
+  settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; health: Feed['sources']; suggestions: string[]; markets: Markets | undefined; marketsLoaded: boolean;
   onSaved: (key: string) => void; canGoBack: boolean;
 }) {
   const symbols = [...new Map([...(markets?.tickers ?? []).map((q) => [q.symbol, `${q.name} · ${q.symbol}`] as const),
@@ -1098,6 +1116,7 @@ function SettingsScreen({ settings, update, sources, suggestions, markets, marke
           </ul>
         </details>
       )}
+      <SourceHealth status={health} />
       <details class="card fold">
         <summary>Following{settings.following.length > 0 ? ` (${settings.following.length})` : ''}</summary>
         <FollowEditor following={settings.following} onChange={(following) => update({ following })} />
@@ -1541,7 +1560,7 @@ export function App() {
   if (route.kind === 'settings') {
     return (
       <>
-        <SettingsScreen settings={settings} update={update} sources={sources} suggestions={teamSuggestions(scores)} markets={markets} marketsLoaded={marketsLoaded}
+        <SettingsScreen settings={settings} update={update} sources={sources} health={raw?.sources} suggestions={teamSuggestions(scores)} markets={markets} marketsLoaded={marketsLoaded}
           onSaved={(key) => afterSave(key)} canGoBack={inAppNavs.current > 0} />
         <TabBar current={null} />
       </>

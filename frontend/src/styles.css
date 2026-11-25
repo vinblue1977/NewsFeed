@@ -9,6 +9,7 @@
   --card-bg: linear-gradient(160deg, color-mix(in srgb, var(--card), #fff 9%), var(--card) 70%);  /* the gradient every section card wears */
   --wx-text: #d6d9de;
   --warn-text: #ffd48a;
+  --bad-text: #ff9a9a;
   --gain: #7bd88f;
   --loss: #ff8a80;
   --text: #e8eaed;
@@ -341,3 +342,10 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 /* A hairline, with air above it, closes each topic section that another section follows. */
 .tabstrip { margin-top: 14px; }
 .tsec:has(+ .tsec)::after { content: ""; display: block; margin: 22px 16px 10px; border-top: 1px solid var(--divider); }
+
+.health li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 15px; }
+.health .hl { display: flex; flex-direction: column; min-width: 0; }
+.health small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.health .hn { color: var(--muted); font-size: 13px; text-align: right; flex: none; max-width: 55%; }
+.health .failed .hn { color: var(--bad-text); }
+.health .empty .hn { color: var(--warn-text); }
