@@ -388,9 +388,9 @@ function QuoteScreen({ markets, earnings, loaded, symbol, now, canGoBack }: { ma
 }
 
 /** The Browse screen (route and name kept as Discovery). Stories you would not otherwise open: the widest coverage, the newest, and the feed's sub-topics. A sub-topic opens its own list. */
-function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onOpenSports, onRetry, canGoBack, cornersCollapsed, onToggleCorners, following, onFollow }: {
+function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpenSub, onRetry, canGoBack, cornersCollapsed, onToggleCorners, following, onFollow }: {
   cornersCollapsed: boolean; onToggleCorners: () => void; following: string[]; onFollow: (key: string) => void;
-  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void; onOpenSports: () => void;
+  feed: Feed | undefined; loaded: boolean; failed: boolean; now: Date; sub: string | undefined; shown: number; onMore: () => void; onOpenSub: () => void;
   onRetry: () => void; canGoBack: boolean;
 }) {
   const all = useMemo(() => (feed ? stories(feed, 'all') : []), [feed]);
@@ -434,7 +434,7 @@ function DiscoveryScreen({ feed, loaded, failed, now, sub, shown, onMore, onOpen
           {!cornersCollapsed && (
             <div class="tiles">
               {found.corners.map((c) => (
-                <a key={subtopicRoute(c.topic, c.id)} class="tile" href={subtopicRoute(c.topic, c.id)} onClick={c.topic === 'sports' ? onOpenSports : onOpenSub}>
+                <a key={subtopicRoute(c.topic, c.id)} class="tile" href={subtopicRoute(c.topic, c.id)} onClick={onOpenSub}>
                   <b>{c.label}</b>
                   <span class="tl">{c.lead.item.title}</span>
                   <span class="tn">{c.total} {c.total === 1 ? 'story' : 'stories'} · {timeAgo(c.lead.item.published, now)} ›</span>
@@ -1530,7 +1530,7 @@ export function App() {
       <>
         <PullIndicator {...pull} />
         <DiscoveryScreen key={route.sub ?? ''} feed={feed} loaded={load.state === 'ready'} failed={load.state === 'error'} now={now} sub={route.sub}
-          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)} onOpenSports={() => setSportsShown(PAGE)} following={settings.following} onFollow={toggleFollowing}
+          shown={subShown} onMore={() => setSubShown((n) => n + PAGE)} onOpenSub={() => setSubShown(PAGE)} following={settings.following} onFollow={toggleFollowing}
           canGoBack={inAppNavs.current > 0} cornersCollapsed={settings.cornersCollapsed} onToggleCorners={toggleCorners} onRetry={() => { setLoad({ state: 'loading' }); refresh(); }} />
         <TabBar current="discovery" />
       </>

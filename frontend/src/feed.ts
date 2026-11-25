@@ -389,12 +389,14 @@ export interface Corner {
 }
 
 export const DISCOVERY_PER_SECTION = 5;
-export const MAX_CORNERS = 8;
+/** The Browse "Corners of the feed", in this order: World News, Technology, Science and Space, US Politics. Fixed, not the most recently active:
+ * the other topics have a tab, a For You section or a strip of their own. A tile with no stories is left out. */
+export const CORNER_ROUTES = ['#/discovery/world', '#/discovery/gadgets', '#/discovery/science', '#/discovery/politics'] as const;
 
 /** What the Browse screen (internally Discovery) shows, from `list` (newest first; local stories are not in it, they have their own tab).
  * - widely: stories from the last day that several sources cover, most sources first (ties: newest); the For You top story is left out
  * - justIn: the newest stories from the last day not already above
- * - corners: each sub-topic (gadgets, markets...) with its newest story and its story count, the most recently active first, at most MAX_CORNERS. These use every story
+ * - corners: the four fixed sub-topics (CORNER_ROUTES), each with its newest story and its story count. These use every story
  *   in the feed (any age, top story included; `extraList` adds the Browse-only science stories, which are not in `list`), so a tile's count
  *   matches the list it opens. */
 export function discovery(list: Story[], now: Date, extraList: Story[] = []): { widely: Story[]; justIn: Story[]; corners: Corner[] } {
@@ -410,6 +412,7 @@ export function discovery(list: Story[], now: Date, extraList: Story[] = []): { 
     const id = subtopicOf(s.item);
     if (!id || FILM_ORDER.includes(id)) continue;  // the Films tab has these; an `india`-topic film story must not make a Browse tile of its own
     const key = subtopicRoute(s.item.topic, id);  // one tile per list it opens: a science copy of a World or Business story joins the Science tile, not a tile of its own
+    if (!(CORNER_ROUTES as readonly string[]).includes(key)) continue;  // only the four fixed tiles are ever shown
     const have = byKey.get(key);
     if (!have) byKey.set(key, { id, label: subtopicLabel(id), topic: s.item.topic, lead: s, total: 1 });
     else {
@@ -420,7 +423,7 @@ export function discovery(list: Story[], now: Date, extraList: Story[] = []): { 
       }
     }
   }
-  return { widely, justIn, corners: [...byKey.values()].sort((a, b) => b.lead.item.published.localeCompare(a.lead.item.published) || b.total - a.total).slice(0, MAX_CORNERS) };
+  return { widely, justIn, corners: CORNER_ROUTES.flatMap((route) => byKey.get(route) ?? []) };
 }
 
 /** Where a sub-topic's list lives: sports sub-topics in the Sports tab, film ones in the Films tab, the rest in Browse. */

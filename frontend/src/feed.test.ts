@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { FILM_ORDER, SECTION_KEYS, movedKey, orderedKeys, sectionLabel, SECTION_TOPICS, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, storyLink, storyPage, isStale, shouldRetryStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { CORNER_ROUTES, FILM_ORDER, SECTION_KEYS, movedKey, orderedKeys, sectionLabel, SECTION_TOPICS, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, storyLink, storyPage, isStale, shouldRetryStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 import type { Story } from './feed';
 
@@ -306,7 +306,7 @@ describe('discovery', () => {
     expect(discovery([mk('old', '2026-11-01T00:00:00Z', 1)], now).justIn).toEqual([]);
   });
   it('counts every story of a sub-topic, top story included, so a tile matches the list it opens', () => {
-    expect(discovery(list, now).corners.map((c) => [c.id, c.lead.item.id, c.total])).toEqual([['cricket', 'new1', 3], ['nfl', 'nfl1', 1]]);
+    expect(discovery(list, now).corners).toEqual([]);  // cricket and NFL have the Sports tab: they are not among the four fixed tiles
     expect(discovery([], now)).toEqual({ widely: [], justIn: [], corners: [] });
   });
   it('titles sub-topics', () => {
@@ -345,12 +345,11 @@ describe('sports tab helpers', () => {
     expect(subtopicsOf([mk('a', 'nfl'), mk('b', 'soccer'), mk('c', 'soccer'), mk('d')])).toEqual(['soccer', 'nfl']);
     expect(subtopicsOf([])).toEqual([]);
   });
-  it('merges a sub-topic, keeps the newest as its lead, and keeps topics apart', () => {
+  it('merges a sub-topic, keeps the newest as its lead, and shows only the four fixed tiles', () => {
     const now = new Date('2026-11-15T12:00:00Z');
-    const biz = { ...mk('b', 'markets'), item: { ...mk('b', 'markets').item, topic: 'business' as const, published: '2026-11-15T09:00:00Z' } };
-    const newer = { ...mk('n', 'nfl'), item: { ...mk('n', 'nfl').item, published: '2026-11-15T11:00:00Z' } };
-    const corners = discovery([biz, mk('x', 'markets'), mk('a', 'nfl'), newer], now).corners;
-    expect(corners.map((c) => [c.topic, c.id, c.total, c.lead.item.id])).toEqual([['sports', 'nfl', 2, 'n'], ['sports', 'markets', 1, 'x'], ['business', 'markets', 1, 'b']]);
+    const us = (id: string, published: string) => ({ ...mk(id, 'politics'), item: { ...mk(id, 'politics').item, topic: 'us' as const, published } });
+    const corners = discovery([us('a', '2026-11-15T09:00:00Z'), us('n', '2026-11-15T11:00:00Z'), mk('x', 'nfl'), mk('m', 'markets')], now).corners;
+    expect(corners.map((c) => [c.topic, c.id, c.total, c.lead.item.id])).toEqual([['us', 'politics', 2, 'n']]);  // NFL and Markets have tabs
     expect(subtopicRoute('sports', 'nfl')).toBe('#/sports/nfl');
     expect(subtopicRoute('business', 'markets')).toBe('#/discovery/markets');
   });
@@ -485,7 +484,7 @@ describe('World News corner', () => {
 
   it('makes no Browse tile for film sub-topics, whatever their topic', () => {
     const list = [mk('i1', 'india', 'bollywood'), mk('i2', 'india', 'south'), mk('n1', 'sports', 'nfl')];
-    expect(discovery(list, now).corners.map((c) => c.id)).toEqual(['nfl']);
+    expect(discovery(list, now).corners).toEqual([]);  // no film tiles, and NFL is not one of the four
   });
 
   it('labels the Technology and entertainment tiles', () => {
@@ -517,6 +516,25 @@ describe('World News corner', () => {
   });
 });
 
+describe('the four fixed corners', () => {
+  const now = new Date('2026-11-16T12:00:00Z');
+  const sub = (id: string, topic: 'world' | 'tech' | 'science' | 'us' | 'sports' | 'business', subtopic: string | undefined, published: string) =>
+    ({ item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic, ...(subtopic ? { subtopic } : {}) }, cluster: undefined, sources: 1 });
+  it('are World News, Technology, Science and Space and US Politics, in that order, whatever was published last', () => {
+    const list = [
+      sub('p', 'us', 'politics', '2026-11-16T11:59:00Z'), sub('s', 'science', 'science', '2026-11-16T11:00:00Z'),
+      sub('g', 'tech', 'gadgets', '2026-11-16T10:00:00Z'), sub('w', 'world', undefined, '2026-11-16T09:00:00Z'),
+      sub('n', 'sports', 'nfl', '2026-11-16T11:58:00Z'), sub('b', 'business', 'markets', '2026-11-16T11:57:00Z'),
+    ];
+    const corners = discovery(list, now).corners;
+    expect(corners.map((c) => c.label)).toEqual(['World News', 'Technology', 'Science and Space', 'US Politics']);
+    expect(corners.map((c) => subtopicRoute(c.topic, c.id))).toEqual([...CORNER_ROUTES]);
+  });
+  it('leave out a tile that has no stories', () => {
+    expect(discovery([sub('p', 'us', 'politics', '2026-11-16T11:00:00Z')], now).corners.map((c) => c.id)).toEqual(['politics']);
+  });
+});
+
 describe('one tile per list', () => {
   const now = new Date('2026-11-16T12:00:00Z');
   const mk = (id: string, topic: string, published: string) => ({ item: { id, title: id, url: 'https://x.test', summary: '', published, source: 's', topic: topic as 'world', subtopic: 'science' }, cluster: undefined, sources: 1 });
@@ -528,9 +546,9 @@ describe('one tile per list', () => {
     expect(corners[0]?.lead.item.id).toBe('b');
     expect(corners[0]?.topic).toBe('world');  // follows the lead
   });
-  it('keeps a Sports tile and a Browse tile with the same sub-topic id apart', () => {
+  it('does not make a Sports tile from a sub-topic id that is also a Browse tile', () => {
     const corners = discovery([mk('w', 'world', '2026-11-16T10:00:00Z'), mk('s', 'sports', '2026-11-16T09:00:00Z')], now).corners;
-    expect(corners.map((c) => subtopicRoute(c.topic, c.id)).sort()).toEqual(['#/discovery/science', '#/sports/science']);
+    expect(corners.map((c) => subtopicRoute(c.topic, c.id))).toEqual(['#/discovery/science']);  // the Sports copy is not a tile: Sports has its own tab
   });
 });
 
