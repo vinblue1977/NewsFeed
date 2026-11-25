@@ -146,7 +146,6 @@ SOURCES: tuple[Source, ...] = (
     _s("nbc-politics", "NBC News", "https://feeds.nbcnews.com/nbcnews/public/politics", "us", "politics"),
     _s("fox-politics", "Fox News", "https://moxie.foxnews.com/google-publisher/politics.xml", "us", "politics"),
     _s("slate-politics", "Slate", "https://slate.com/feeds/news-and-politics.rss", "us", "politics"),
-    _s("salon-politics", "Salon", "https://www.salon.com/category/politics/feed/", "us", "politics"),
     # Mixed publishers: only the stories that read as politics
     _s("axios", "Axios", "https://www.axios.com/feeds/feed.rss", "us", "politics", only_matching=POLITICS_RE),
     _s(
