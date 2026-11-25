@@ -190,6 +190,30 @@ describe('pictures and sections', () => {
     expect(us?.total).toBe(4);
     expect(out[2]?.lead.item.id).toBe('t1');
   });
+  it('puts US Politics and Chicago right after US, and the US section leaves out the politics stories', () => {
+    const list = [
+      story('u1', 'us'), story('p1', 'us', { subtopic: 'politics' }), story('p2', 'us', { subtopic: 'politics' }),
+      story('c1', 'chicago', { subtopic: 'chicago' }), story('w1', 'world'),
+    ];
+    const out = sections(list, undefined);
+    expect(out.map((s) => s.key)).toEqual(['us', 'us-politics', 'chicago', 'world']);
+    expect(out.map((s) => s.label)).toEqual(['US', 'US Politics', 'Chicago', 'World']);
+    expect(out[0]?.total).toBe(1);  // u1 only: the politics stories are in their own section
+    expect(out[1]).toMatchObject({ total: 2, route: '#/discovery/politics', topic: 'us' });
+    expect(out[2]).toMatchObject({ total: 1, route: '#/discovery/chicago' });
+    expect(out[0]?.route).toBeUndefined();  // a topic with a tab has no route
+  });
+  it('shows no politics or Chicago section when there are none', () => {
+    expect(sections([story('u1', 'us')], undefined).map((s) => s.key)).toEqual(['us']);
+  });
+  it('lists Chicago stories in For You and in the Chicago tile, never in the US tab', () => {
+    const feed = { generated: '', items: [item('c1', { topic: 'chicago', subtopic: 'chicago' }), item('u1', { topic: 'us' })], clusters: [] } as unknown as Feed;
+    expect(stories(feed, 'all').map((s) => s.item.id).sort()).toEqual(['c1', 'u1']);
+    expect(stories(feed, 'us').map((s) => s.item.id)).toEqual(['u1']);
+    expect(stories(feed, 'chicago').map((s) => s.item.id)).toEqual(['c1']);
+    expect(subtopicLabel('politics')).toBe('US Politics');
+    expect(topicLabel('chicago')).toBe('Chicago');
+  });
   it('leaves out a topic with nothing and the whole cluster of the top story', () => {
     const c = { id: 'c', title: '', topic: 'us' as const, lead: 'a', published: '', sources: 2, items: [] };
     const a = { item: item('a'), cluster: c, sources: 2 };

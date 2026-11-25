@@ -1,4 +1,4 @@
-export type Topic = 'us' | 'world' | 'india' | 'sports' | 'tech' | 'business' | 'entertainment' | 'science' | 'local';
+export type Topic = 'us' | 'world' | 'india' | 'sports' | 'tech' | 'business' | 'entertainment' | 'science' | 'local' | 'chicago';
 
 export interface Item {
   id: string;

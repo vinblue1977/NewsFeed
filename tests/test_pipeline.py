@@ -1191,3 +1191,74 @@ def test_skip_title_drops_us_stories_from_an_india_feed() -> None:
     items, status = collect([feed], now=NOW, fetcher=docs.__getitem__)
     assert [i["title"] for i in items] == ["Delhi pollution report"]
     assert status["fp"]["filtered"] == 1
+
+
+POLITICS_WHEN = "Fri, 13 Nov 2026 11:00:00 GMT"
+
+
+def test_a_politics_headline_from_a_general_us_feed_is_tagged_politics() -> None:
+    docs = {
+        "https://a.example/f": rss(
+            ("Senate leaders near a deal to avert a shutdown", "https://a.example/us/1", "", POLITICS_WHEN),
+            ("Maps show how far lead dust could travel", "https://a.example/us/2", "", POLITICS_WHEN),
+        )
+    }
+    feed = Source("us1", "Site", "https://a.example/f", "us")
+    items, _ = collect([feed], now=NOW, fetcher=docs.__getitem__)
+    tags = {i["title"]: i.get("subtopic") for i in items}
+    assert tags == {
+        "Senate leaders near a deal to avert a shutdown": "politics",
+        "Maps show how far lead dust could travel": None,
+    }
+
+
+def test_the_politics_tag_does_not_touch_other_topics_or_an_existing_subtopic() -> None:
+    docs = {
+        "https://a.example/w": rss(("Trump meets the Pope", "https://a.example/w/1", "", POLITICS_WHEN)),
+        "https://a.example/t": rss(("Senate hearing on chips", "https://a.example/t/1", "", POLITICS_WHEN)),
+    }
+    world = Source("w1", "Site", "https://a.example/w", "world")
+    tech = Source("t1", "Site", "https://a.example/t", "us", "gadgets")
+    items, _ = collect([world, tech], now=NOW, fetcher=docs.__getitem__)
+    assert {i["title"]: i.get("subtopic") for i in items} == {"Trump meets the Pope": None, "Senate hearing on chips": "gadgets"}
+
+
+def test_a_mixed_publisher_keeps_only_politics_stories() -> None:
+    from ingest.sources import POLITICS_RE
+
+    docs = {
+        "https://a.example/f": rss(
+            ("House Republicans split on the budget", "https://a.example/p/1", "", POLITICS_WHEN),
+            ("A new phone camera, reviewed", "https://a.example/p/2", "", POLITICS_WHEN),
+        )
+    }
+    feed = Source("mix2", "Site", "https://a.example/f", "us", "politics", only_matching=POLITICS_RE)
+    items, status = collect([feed], now=NOW, fetcher=docs.__getitem__)
+    assert [i["title"] for i in items] == ["House Republicans split on the budget"]
+    assert status["mix2"]["filtered"] == 1
+
+
+def test_chicago_stories_are_not_place_filtered() -> None:
+    docs = {"https://a.example/c": rss(("CTA announces winter service changes", "https://a.example/c/1", "", POLITICS_WHEN))}
+    feed = Source("chi", "Site", "https://a.example/c", "chicago")
+    items, _ = collect([feed], now=NOW, fetcher=docs.__getitem__, nearby=["Buffalo Grove"])
+    assert [(i["topic"], i["title"]) for i in items] == [("chicago", "CTA announces winter service changes")]
+
+
+def test_a_story_in_a_general_feed_and_a_politics_feed_keeps_the_politics_tag() -> None:
+    docs = {
+        "https://a.example/general": rss(("Lawmakers weigh a bill", "https://a.example/us/9", "", POLITICS_WHEN)),
+        "https://a.example/politics": rss(("Lawmakers weigh a bill", "https://a.example/us/9", "", POLITICS_WHEN)),
+    }
+    general = Source("gen", "Site", "https://a.example/general", "us")
+    politics = Source("pol", "Site", "https://a.example/politics", "us", "politics")
+    items, _ = collect([general, politics], now=NOW, fetcher=docs.__getitem__)
+    assert [i.get("subtopic") for i in items] == ["politics"]  # the general feed's copy is kept, and gets the tag
+
+
+def test_the_politics_words_do_not_catch_local_or_unrelated_stories() -> None:
+    from ingest.sources import POLITICS_RE
+
+    for title in ["School board election results", "Ballot measure on bike lanes", "Illinois attorney general sues landlord"]:
+        assert not re.search(POLITICS_RE, title, re.IGNORECASE), title
+    assert re.search(POLITICS_RE, "Senate passes the budget bill", re.IGNORECASE)
