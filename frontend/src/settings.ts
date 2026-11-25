@@ -1,6 +1,7 @@
 import { DEFAULT_PUSH, parsePushPrefs, type PushPrefs } from './push';
 import { cleanFollows } from './follow';
 import { cleanMuted, keepItems } from './mute';
+import { SECTION_KEYS } from './feed';  // a value import: feed.ts must never import from settings.ts, or this would be undefined while parsing and reset every setting
 import type { Feed } from './types';
 
 /** On-device preferences. Nothing here leaves the phone. */
@@ -18,13 +19,15 @@ export interface Settings {
   teamColors: boolean;  // the Sports tab takes its accent and background from the first team in My teams
   myTeams: string[];  // teams, countries or players to follow on the Sports tab, matched by name
   scoresCollapsed: string[];  // sports (nfl, tennis, cricket) whose scores are folded away under All on the Sports tab
+  hiddenSections: string[];  // For you sections (keys, see SECTION_TOPICS) the user switched off
+  sectionOrder: string[];  // For you section keys in the user's order; empty means the default order
   watchKey: string;  // names the private watchlist file; empty when not set
   push: PushPrefs;  // which notifications to ask for; copied by hand to the server with the registration (docs/PUSH.md)
 }
 
 export const SETTINGS_KEY = 'news.settings';
 export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
-export const DEFAULTS: Settings = { hiddenSources: [], hiddenTickers: [], mutedWords: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULT_PUSH };
+export const DEFAULTS: Settings = { hiddenSources: [], hiddenTickers: [], mutedWords: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], hiddenSections: [], sectionOrder: [], watchKey: '', push: DEFAULT_PUSH };
 export const SCORE_SPORTS = ['nfl', 'tennis', 'cricket'] as const;
 export const MAX_TEAMS = 20;
 export const MAX_TEAM_CHARS = 40;
@@ -40,7 +43,7 @@ export function parseSettings(raw: string | null): Settings {
     const v = JSON.parse(raw) as Partial<Record<keyof Settings, unknown>> | null;
     if (!v || typeof v !== 'object') return DEFAULTS;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), mutedWords: cleanMuted(strings(v.mutedWords)), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, kernelCollapsed: v.kernelCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), teamColors: v.teamColors !== false, myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
+    return { hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), mutedWords: cleanMuted(strings(v.mutedWords)), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, kernelCollapsed: v.kernelCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), teamColors: v.teamColors !== false, myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), hiddenSections: strings(v.hiddenSections).filter((k) => SECTION_KEYS.includes(k)), sectionOrder: strings(v.sectionOrder).filter((k) => SECTION_KEYS.includes(k)), watchKey: key, push: parsePushPrefs(v.push) };
   } catch {
     return DEFAULTS;
   }
