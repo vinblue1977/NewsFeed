@@ -81,8 +81,8 @@ def test_collect_dedupes_drops_old_clamps_future_and_isolates_failures() -> None
     items, status = collect(sources, now=NOW, fetcher=fake_fetcher)
     assert [i["title"] for i in items] == ["Future", "New"]  # newest first; old, duplicate and bogus-dated dropped
     assert items[0]["published"] == NOW.isoformat(timespec="seconds")  # clamped, not shown from the future
-    assert status["a"] == {"ok": True, "items": 2}
-    assert status["b"] == {"ok": True, "items": 0}  # its only item duplicated a's
+    assert status["a"] == {"name": "a", "ok": True, "items": 2}
+    assert status["b"] == {"name": "b", "ok": True, "items": 0, "duplicates": 1}  # its only item duplicated a's
     assert status["bad"]["ok"] is False and "404" in status["bad"]["error"]
     assert "off" not in status
 
@@ -107,7 +107,7 @@ def test_an_unexpected_exception_in_one_source_does_not_sink_the_run() -> None:
         return DOCS[url]
 
     items, status = collect([src("boom", "boom"), src("a", "a")], now=NOW, fetcher=fetcher)
-    assert status["boom"] == {"ok": False, "items": 0, "error": "unexpected RecursionError"}
+    assert status["boom"] == {"name": "boom", "ok": False, "items": 0, "error": "unexpected RecursionError"}
     assert len(items) == 2
 
 
@@ -447,7 +447,7 @@ def test_a_slow_run_is_cut_off_and_the_rest_still_counts(monkeypatch: pytest.Mon
     start = time.monotonic()
     items, status = collect([src("slow", "slow"), src("a", "a")], now=NOW, fetcher=fetcher)
     assert time.monotonic() - start < 1.5
-    assert status["slow"] == {"ok": False, "items": 0, "error": "timed out"}
+    assert status["slow"] == {"name": "slow", "ok": False, "items": 0, "error": "timed out"}
     assert status["a"]["ok"] and len(items) == 2
 
 
@@ -461,7 +461,7 @@ def test_blocked_items_are_dropped_and_counted() -> None:
     }
     items, status = collect([src("a", "a")], now=NOW, fetcher=docs.__getitem__)
     assert [i["title"] for i in items] == ["Free story"]
-    assert status["a"] == {"ok": True, "items": 1, "blocked": 2}
+    assert status["a"] == {"name": "a", "ok": True, "items": 1, "blocked": 2}
 
 
 def test_a_trusted_local_search_keeps_items_without_a_place_mention() -> None:
@@ -1262,3 +1262,17 @@ def test_the_politics_words_do_not_catch_local_or_unrelated_stories() -> None:
     for title in ["School board election results", "Ballot measure on bike lanes", "Illinois attorney general sues landlord"]:
         assert not re.search(POLITICS_RE, title, re.IGNORECASE), title
     assert re.search(POLITICS_RE, "Senate passes the budget bill", re.IGNORECASE)
+
+
+def test_a_local_feed_status_has_no_name_so_a_town_host_is_not_published() -> None:
+    docs = {"https://a.example/f": rss(("Board adopts the calendar", "https://a.example/1", "", POLITICS_WHEN))}
+    items, status = collect(
+        [
+            Source("own", "village.example", "https://a.example/f", "local", trusted=True),
+            Source("nat", "Site", "https://a.example/f", "us"),
+        ],
+        now=NOW,
+        fetcher=docs.__getitem__,
+    )
+    assert "name" not in status["own"]
+    assert status["nat"]["name"] == "Site"

@@ -136,6 +136,7 @@ def collect(
         kept = 0
         blocked = 0
         filtered = 0
+        duplicates = 0
         only = re.compile(source.only_matching, re.IGNORECASE) if source.only_matching else None
         skip = re.compile(source.skip_path, re.IGNORECASE) if source.skip_path else None
         skip_title = re.compile(source.skip_title) if source.skip_title else None  # case-sensitive on purpose
@@ -176,6 +177,7 @@ def collect(
                     seen["subtopic"] = item["subtopic"]  # first seen in a general feed: it still gets the sub-topic tag
                 if source.alert:
                     seen["_alert"] = True  # the village's own alert for a story another feed carried first is still an alert
+                duplicates += 1  # fetched fine, but another feed had the story first: Settings must not call this feed empty
                 continue
             if source.alert:
                 item["_alert"] = True  # private: build_feed takes it off again before anything is written
@@ -183,10 +185,12 @@ def collect(
             by_headline[same_headline] = item
             kept += 1
         status[source.id] = {
+            **({"name": source.name} if source.topic != "local" else {}),  # a local feed's host would give away the town
             "ok": error is None,
             "items": kept,
             **({"blocked": blocked} if blocked else {}),
             **({"filtered": filtered} if filtered else {}),
+            **({"duplicates": duplicates} if duplicates else {}),
             **({"error": error} if error else {}),
         }
     return sorted(items.values(), key=lambda i: i["published"], reverse=True), status

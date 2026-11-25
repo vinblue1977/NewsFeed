@@ -214,6 +214,17 @@ describe('pictures and sections', () => {
     expect(subtopicLabel('politics')).toBe('US Politics');
     expect(topicLabel('chicago')).toBe('Chicago');
   });
+  it('keeps only well-formed source statuses, and an id like __proto__ cannot change the prototype', () => {
+    const base = { generated: '', items: [], clusters: [] };
+    const sources = JSON.parse('{"npr":{"name":"NPR","ok":true,"items":3,"filtered":2,"duplicates":1},"bad":{"ok":"yes","items":1},"__proto__":{"ok":true,"items":1},"x":null}') as unknown;
+    const out = parseFeed({ ...base, sources })?.sources;
+    expect(out?.npr).toEqual({ name: 'NPR', ok: true, items: 3, filtered: 2, duplicates: 1 });
+    expect(out && 'bad' in out).toBe(false);
+    expect(out && 'x' in out).toBe(false);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(parseFeed({ ...base, sources: [1] })?.sources).toBeUndefined();
+    expect(parseFeed(base)?.sources).toBeUndefined();
+  });
   it('leaves out a topic with nothing and the whole cluster of the top story', () => {
     const c = { id: 'c', title: '', topic: 'us' as const, lead: 'a', published: '', sources: 2, items: [] };
     const a = { item: item('a'), cluster: c, sources: 2 };
