@@ -5,7 +5,7 @@ export type HealthState = 'failed' | 'empty' | 'ok';
 
 export interface HealthRow {
   id: string;  // the id in backend/ingest/sources.py, the one to change to drop the source
-  label: string;  // the publisher's name; a local feed is "Local feed N" (its host would give away the town)
+  label: string;  // the feed's name; a local feed with no stories is "Local feed N", its position in the location setting
   state: HealthState;
   note: string;  // what to read next to the label: "12 stories", "failed: HTTP 404", "0 stories (4 filtered)"
 }
@@ -26,8 +26,8 @@ function describe(s: SourceStatus): { state: HealthState; note: string } {
 
 const LOCAL_KINDS: Record<string, string> = { local: 'Local feed', 'local-official': 'Local official feed', 'local-alert': 'Local alert feed' };
 
-/** The name to show: the publisher's, or for a local feed (its host would give away the town) "Local feed 1", numbered from its id
- * so the same feed keeps the same label whatever else is added or removed. */
+/** The name to show: the ingest's, or for a local feed without one "Local feed 1", numbered from its id (its position in the
+ * location setting) so the same feed keeps the same label whatever else is added or removed. */
 function labelOf(id: string, s: SourceStatus): string {
   if (s.name) return s.name;
   const m = /^(local(?:-official|-alert)?)-(\d+)$/.exec(id);

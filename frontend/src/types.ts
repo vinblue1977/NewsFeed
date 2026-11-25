@@ -25,7 +25,8 @@ export interface Cluster {
   items: string[];
 }
 
-/** What the last ingest run said about one feed: `name` is missing for a local feed. */
+/** What the last ingest run said about one feed: `name` is missing for a local feed that produced no stories (its host could give
+ * away the town), and in a feed.json written before names were added. */
 export interface SourceStatus {
   name?: string;
   ok: boolean;

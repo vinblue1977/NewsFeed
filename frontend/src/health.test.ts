@@ -23,9 +23,10 @@ describe('sourceHealth', () => {
     expect(by.npr?.note).toBe('10 stories');
     expect(by.dup).toMatchObject({ state: 'ok', note: '0 new (4 stories already from another feed)' });  // fetched fine: not a problem
   });
-  it('never shows a local feed by name: it is "Local feed N"', () => {
+  it('shows a local feed with no name as "Local feed N", and one that has a name by it', () => {
     const labels = sourceHealth(sources).filter((r) => r.id.startsWith('local-')).map((r) => r.label).sort();
     expect(labels).toEqual(['Local feed 1', 'Local feed 2']);
+    expect(sourceHealth({ 'local-official-0': { name: 'village.example', ok: true, items: 4 } })[0]?.label).toBe('village.example');
   });
   it('numbers a local feed from its id, so the label does not move and 2 sorts before 10', () => {
     const rows = sourceHealth({ 'local-9': { ok: true, items: 1 }, 'local-1': { ok: true, items: 1 }, 'local-official-0': { ok: true, items: 1 }, 'local-alert-0': { ok: true, items: 1 } });

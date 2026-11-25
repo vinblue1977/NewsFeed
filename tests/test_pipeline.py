@@ -73,7 +73,7 @@ def test_a_news_only_source_drops_page_titles_and_keeps_headlines() -> None:
     school = Source("official", "official", "https://school.example/f", "local", trusted=True, news_only=True)
     items, status = collect([school], now=NOW, fetcher=lambda url: page)
     assert [i["title"] for i in items] == ["Board adopts the new school calendar"]
-    assert status["official"] == {"ok": True, "items": 1, "filtered": 1}
+    assert status["official"] == {"name": "official", "ok": True, "items": 1, "filtered": 1}
 
 
 def test_collect_dedupes_drops_old_clamps_future_and_isolates_failures() -> None:
@@ -202,7 +202,9 @@ def test_build_feed_returns_the_alert_ids_and_keeps_the_flag_out_of_the_feed(mon
     feed, _, alert_ids = handler_module.build_feed({"nearby": ["Elsewhere"], "feeds": []})
     assert [i["title"] for i in feed["items"]] == ["Water main break"]
     assert alert_ids == {feed["items"][0]["id"]}
-    assert "_alert" not in json.dumps(feed) and "alert" not in json.dumps(feed["sources"]).replace("local-alert-0", "")
+    assert "_alert" not in json.dumps(feed) and "alert" not in json.dumps(feed["sources"]).replace("local-alert-0", "").replace(
+        "alerts.example", ""
+    )
 
 
 def test_build_feed_reads_official_from_both_the_location_and_the_local_feeds_parameter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1064,7 +1066,8 @@ def test_a_google_news_search_is_retried_once_after_a_busy_answer(no_pause: list
 def test_a_google_news_search_that_fails_twice_is_reported_failed(no_pause: list[float]) -> None:
     fetcher = _flaky([FeedError("fetch failed: HTTPError 429", 429)] * 2)
     _, status = collect([Source("g", "G", GOOGLE, "local", trusted=True)], now=NOW, fetcher=fetcher)
-    assert status["g"] == {"ok": False, "items": 0, "error": "fetch failed: HTTPError 429"} and fetcher.calls["n"] == 2
+    assert status["g"] == {"ok": False, "items": 0, "error": "fetch failed: HTTPError 429"}  # a silent local feed is not named
+    assert fetcher.calls["n"] == 2
 
 
 def test_other_failures_are_not_retried(no_pause: list[float]) -> None:
@@ -1264,15 +1267,36 @@ def test_the_politics_words_do_not_catch_local_or_unrelated_stories() -> None:
     assert re.search(POLITICS_RE, "Senate passes the budget bill", re.IGNORECASE)
 
 
-def test_a_local_feed_status_has_no_name_so_a_town_host_is_not_published() -> None:
-    docs = {"https://a.example/f": rss(("Board adopts the calendar", "https://a.example/1", "", POLITICS_WHEN))}
-    items, status = collect(
-        [
-            Source("own", "village.example", "https://a.example/f", "local", trusted=True),
-            Source("nat", "Site", "https://a.example/f", "us"),
-        ],
-        now=NOW,
-        fetcher=docs.__getitem__,
+def test_a_local_feed_is_named_by_its_host_or_its_publisher_never_by_the_places_in_its_query() -> None:
+    from ingest.pipeline import status_name
+
+    own = Source("o", "village.example", "https://www.village.example/rss", "local", trusted=True)
+    search = Source(
+        "g",
+        "news.google.com",
+        "https://news.google.com/rss/search?q=site%3Adailyherald.com%2Fnews+%28Springfield+OR+Shelbyville%29&hl=en-US",
+        "local",
     )
-    assert "name" not in status["own"]
-    assert status["nat"]["name"] == "Site"
+    excluded = Source(
+        "x", "news.google.com", "https://news.google.com/rss/search?q=Springfield+-site:spam.example", "local", trusted=True
+    )
+    national = Source("n", "NPR", "https://feeds.npr.org/1001/rss.xml", "us")
+    assert status_name(own) == "village.example"
+    assert status_name(search) == "dailyherald.com (Google News)"  # the host, not the path, not the places
+    assert status_name(excluded) == "Google News search"  # "-site:" excludes a site, it does not limit to it
+    assert "Springfield" not in status_name(search) + status_name(excluded)
+    assert status_name(national) == "NPR"
+
+
+def test_a_silent_local_feed_is_not_named_in_the_public_status() -> None:
+    docs = {
+        "https://a.example/f": rss(("Board adopts the calendar", "https://a.example/1", "", POLITICS_WHEN)),
+        "https://quiet.example/f": rss(),
+    }
+    local = Source("loud", "village.example", "https://a.example/f", "local", trusted=True)
+    quiet = Source("quiet", "school.example", "https://quiet.example/f", "local", trusted=True)
+    national = Source("nat", "Site", "https://a.example/f", "us")
+    _, status = collect([local, quiet, national], now=NOW, fetcher=docs.__getitem__)
+    assert status["loud"]["name"] == "village.example"  # it produced a story, which already shows its name
+    assert "name" not in status["quiet"]  # nothing public shows this host: Settings says "Local feed N"
+    assert status["nat"]["name"] == "Site"  # a national feed is always named
