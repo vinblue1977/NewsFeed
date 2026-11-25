@@ -26,6 +26,9 @@ def test_paywalled_and_noise_domains_are_blocked() -> None:
     assert block_reason(item("https://news.google.com/rss/articles/x", "chicagotribune.com")) == "paywalled"
     assert block_reason(item("https://www.legacy.com/obituaries/x")) == "noise"
     assert block_reason(item("https://news.google.com/rss/articles/x", "maxpreps.com")) == "noise"
+    assert block_reason(item("https://www.lincolnshireworld.com/news/x")) == "noise"  # England, not Illinois
+    assert block_reason(item("https://www.lincolnshirelive.co.uk/news/x")) == "noise"
+    assert block_reason(item("https://news.google.com/rss/articles/x", "lincolnshirelive.co.uk")) == "noise"
 
 
 def test_paid_sections_of_free_sites_are_blocked() -> None:
