@@ -346,6 +346,7 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 
 /* A hairline, with air above it, closes each topic section that another section follows. */
 .tabstrip { margin-top: 14px; }
+.tabstrip.lead { margin-bottom: 12px; }
 .tsec:has(+ .tsec)::after { content: ""; display: block; margin: 22px 16px 10px; border-top: 1px solid var(--divider); }
 
 .health li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 15px; }
