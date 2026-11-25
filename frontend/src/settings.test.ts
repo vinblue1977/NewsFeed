@@ -22,7 +22,7 @@ describe('settings', () => {
   });
   it('keeps valid values and drops bad ones', () => {
     const s = parseSettings(JSON.stringify({ hiddenSources: ['AP', 'AP', 3, '', 'x'.repeat(101)], hiddenTickers: 'no' }));
-    expect(s).toEqual({ hiddenSources: ['AP'], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULTS.push });
+    expect(s).toEqual({ hiddenSources: ['AP'], hiddenTickers: [], mutedWords: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULTS.push });
     expect(parseSettings(JSON.stringify({ push: { topics: ['us', 'x'], weather: false, quietStart: '23:00' } })).push)
       .toEqual({ topics: ['us'], weather: false, alerts: true, quietStart: '23:00', quietEnd: '07:00' });  // an old save has no alerts field: on
     expect(parseSettings(JSON.stringify({ push: 'junk' })).push).toEqual(DEFAULTS.push);
