@@ -7,6 +7,7 @@ import { type Kernel, kernelFresh, kernelTitle } from './kernel';
 import { type Fact, factFor, type OnThisDay } from './onthisday';
 import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
+import { externalAttrs, isStandalone, linkAttrs } from './links';
 import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, itemLink, parseRoute, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
@@ -34,7 +35,9 @@ const needsMarkets =(kind: string) => kind === 'home' || kind === 'markets' || k
 const PAGE = 30;
 const TICK_MS = 60_000;
 const COVERAGE_SHOWN = 8;
-const EXTERNAL = { target: '_blank', rel: 'noopener noreferrer' } as const;
+const STANDALONE = isStandalone();
+/** Attributes for an external link (see links.ts). */
+const EXTERNAL = externalAttrs(STANDALONE);
 type Load = { state: 'loading' } | { state: 'error' } | { state: 'ready'; feed: Feed };
 
 /** The Technology list's header: the kernel's current releases, three rows. Folds to its header (with the Stable version). */
@@ -160,14 +163,9 @@ function TopicSection({ section, now, onAll, since }: { section: Pick<Section, '
   );
 }
 
-/** Attributes for a link that leaves the app (a publisher's page opens in a new tab); in-app "#/..." links get none. */
-function linkAttrs(href: string): { href: string; target?: string; rel?: string } {
-  return href.startsWith('#') ? { href } : { href, ...EXTERNAL };
-}
-
 /** A story link: the Story screen when several sources cover it, otherwise the publisher's page. */
 function StoryAnchor({ story, class: cls, children }: { story: Story; class: string; children: ComponentChildren }) {
-  return <a class={cls} {...linkAttrs(storyLink(story))}>{children}</a>;
+  return <a class={cls} {...linkAttrs(storyLink(story), STANDALONE)}>{children}</a>;
 }
 
 /** "#/read/<id>": an old link or a notification. Shows the story with a button to the publisher's page (a button, not an automatic
@@ -215,7 +213,7 @@ function StoryScreen({ feed, id, now, canGoBack, chromeHidden }: { feed: Feed; i
           <div class="meta">Updated {timeAgo(page.items[0]?.published ?? page.cluster.published, now)} · {page.sources} {page.sources === 1 ? 'source' : 'sources'}</div>
           <div class="sh"><b>Coverage from {page.sources} {page.sources === 1 ? 'source' : 'sources'}</b></div>
           {shown.map((i) => (
-            <a class="cv" key={i.id} {...linkAttrs(itemLink(i))}>
+            <a class="cv" key={i.id} {...linkAttrs(itemLink(i), STANDALONE)}>
               <span class="fav" style={{ background: badgeColor(i.source) }}>{initial(i.source)}</span>
               <div class="cvt"><b>{i.title}</b><small>{i.source} · {timeAgo(i.published, now)}{i.metered ? ' · Metered' : ''}</small></div>
               <span class="chev" aria-hidden="true">›</span>
@@ -1159,7 +1157,7 @@ function Briefing({ stories: list, read, onOpen, now, fact }: { stories: Story[]
     <section class="brief" aria-label="Your briefing">
       <div class="bh"><b>{caught ? "You're caught up" : 'Your briefing'}</b><span>{list.length} stories</span></div>
       {list.map((s, n) => (
-        <a key={s.item.id} class={read.includes(s.item.id) ? 'bi seen' : 'bi'} {...linkAttrs(storyLink(s))} onClick={() => onOpen(s.item.id)}>
+        <a key={s.item.id} class={read.includes(s.item.id) ? 'bi seen' : 'bi'} {...linkAttrs(storyLink(s), STANDALONE)} onClick={() => onOpen(s.item.id)}>
           <span class="bn">{n + 1}</span>
           <div class="bt">
             <b>{s.item.title}</b>
@@ -1577,7 +1575,7 @@ export function App() {
               <div class="full">
                 <div class="lab">FULL COVERAGE · {lead.sources} SOURCES</div>
                 {full.map((i) => (
-                  <a class="it" key={i.id} {...linkAttrs(itemLink(i))}>
+                  <a class="it" key={i.id} {...linkAttrs(itemLink(i), STANDALONE)}>
                     <Source name={i.source} when={timeAgo(i.published, now)} />
                     <b>{i.title}</b>
                   </a>
