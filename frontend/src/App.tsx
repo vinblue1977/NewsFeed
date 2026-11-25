@@ -165,12 +165,13 @@ function TopicSection({ section, now, onAll, since }: { section: Pick<Section, '
   );
 }
 
-/** A short strip at the end of another tab: a heading with "See all N", then the newest few stories (US Politics in the US tab, Chicago in Local). Hidden when empty. */
+/** A short strip inside another tab: a heading with "See all N", then the newest few stories. Chicago leads the Local tab (the lead
+ * prop adds space below it) and Politics in US ends the US tab. Hidden when empty. */
 const STRIP_ROWS = 3;
-function Strip({ label, color, list, route, now }: { label: string; color: string; list: Story[]; route: string; now: Date }) {
+function Strip({ label, color, list, route, now, lead }: { label: string; color: string; list: Story[]; route: string; now: Date; lead?: boolean }) {
   if (list.length === 0) return null;
   return (
-    <section class="tabstrip" aria-label={label}>
+    <section class={lead ? 'tabstrip lead' : 'tabstrip'} aria-label={label}>
       <div class="grp sech"><i style={{ background: color }} />{label}<a class="all" href={route}>See all {list.length} ›</a></div>
       {list.slice(0, STRIP_ROWS).map((s) => <StoryRow key={s.item.id} s={s} now={now} />)}
     </section>
@@ -716,7 +717,7 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
   feed: Feed | undefined; loaded: boolean; failed: boolean; weather: Weather | undefined; weatherStale: boolean; now: Date; shown: number; onMore: () => void; onRetry: () => void;
 }) {
   const local = useMemo(() => (feed ? stories(feed, 'local') : []), [feed]);  // the sort depends on the feed only; the split on the clock
-  const chicago = useMemo(() => (feed ? stories(feed, 'chicago') : []), [feed]);  // the Chicago-wide feeds: a strip under the town's own stories
+  const chicago = useMemo(() => (feed ? stories(feed, 'chicago') : []), [feed]);  // the Chicago-wide feeds: a strip at the top, above the town's own stories
   const { recent, earlier } = useMemo(() => splitRecent(local, now), [local, now]);
   const recentShown = recent.slice(0, shown);
   const earlierShown = earlier.slice(0, Math.max(0, shown - recent.length));
@@ -731,7 +732,8 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
           <button type="button" class="btn" onClick={onRetry}>Try again</button></div>
       )}
       {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
-      {empty && <div class="empty"><b>No local stories yet</b><span>Local stories from your town's feeds appear here.</span></div>}
+      <Strip label="Chicago" color="#1f8a70" list={chicago} route="#/discovery/chicago" now={now} lead />
+      {empty && <div class="empty"><b>{chicago.length > 0 ? 'No town stories yet' : 'No local stories yet'}</b><span>Local stories from your town's feeds appear here.</span></div>}
       {recentShown.length > 0 && (
         <>
           <div class="grp">Last 24 hours</div>
@@ -745,7 +747,6 @@ function LocalScreen({ feed, loaded, failed, weather, weatherStale, now, shown, 
         </>
       )}
       {recent.length + earlier.length > shown && <div class="more"><button type="button" class="btn g" onClick={onMore}>Show more</button></div>}
-      <Strip label="Chicago" color="#1f8a70" list={chicago} route="#/discovery/chicago" now={now} />
     </div>
   );
 }
