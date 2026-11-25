@@ -28,7 +28,7 @@ PAYWALLED_DOMAINS = frozenset(
     }
 )
 
-# Not paywalled, but never worth a card: obituaries, school-sports score boxes, wire press releases, and English Lincolnshire papers.
+# Not paywalled, but never worth a card: obituaries, school-sports score boxes, wire press releases, English Lincolnshire papers.
 NOISE_DOMAINS = frozenset(
     {
         "legacy.com",
