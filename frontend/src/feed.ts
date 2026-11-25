@@ -267,10 +267,11 @@ function withoutTop(list: Story[], top: Story | undefined): Story[] {
 }
 
 /** The For You sections, in order. A section is a topic, or one sub-topic of a topic (US Politics); a topic's own section leaves out
- * a sub-topic that has a section of its own (`except`), so no story shows twice. */
-export interface SectionDef { key: string; topic: Topic; color: string; label?: string; sub?: string; except?: string; route?: string }
+ * a sub-topic that has a section of its own (`except`, owned by the section `exceptBy`), so no story shows twice; when that section is hidden the
+ * stories fall back into the topic's own section instead of disappearing. */
+export interface SectionDef { key: string; topic: Topic; color: string; label?: string; sub?: string; except?: string; exceptBy?: string; route?: string }
 export const SECTION_TOPICS: SectionDef[] = [
-  { key: 'us', topic: 'us', color: '#5b86c9', except: 'politics' },
+  { key: 'us', topic: 'us', color: '#5b86c9', except: 'politics', exceptBy: 'us-politics' },
   { key: 'us-politics', topic: 'us', color: '#c0392b', label: 'US Politics', sub: 'politics', route: '#/discovery/politics' },
   { key: 'chicago', topic: 'chicago', color: '#1f8a70', route: '#/discovery/chicago' },
   { key: 'world', topic: 'world', color: '#3fb6a8' },
@@ -279,6 +280,34 @@ export const SECTION_TOPICS: SectionDef[] = [
   { key: 'business', topic: 'business', color: '#c97aa8' },
 ];
 export const PER_SECTION = 3;  // the lead plus two more
+export const SECTION_KEYS: string[] = SECTION_TOPICS.map((d) => d.key);
+
+/** The heading of a For You section. */
+export function sectionLabel(def: SectionDef): string {
+  return def.label ?? topicLabel(def.topic);
+}
+
+/** Every section key in the order the user chose: unknown keys are dropped, and a section the order does not mention (a new one)
+ * goes right after the section that precedes it by default, so with no saved order this is the default order. */
+export function orderedKeys(order: string[] = []): string[] {
+  const keys = [...new Set(order.filter((k) => SECTION_KEYS.includes(k)))];
+  SECTION_TOPICS.forEach((d, i) => {
+    if (keys.includes(d.key)) return;
+    const prev = SECTION_TOPICS[i - 1];
+    keys.splice(prev ? keys.indexOf(prev.key) + 1 : 0, 0, d.key);
+  });
+  return keys;
+}
+
+/** `keys` with `key` one place earlier (-1) or later (1); unchanged at either end. */
+export function movedKey(keys: string[], key: string, by: -1 | 1): string[] {
+  const at = keys.indexOf(key);
+  const to = at + by;
+  if (at < 0 || to < 0 || to >= keys.length) return keys;
+  const out = [...keys];
+  [out[at], out[to]] = [out[to] as string, out[at] as string];
+  return out;
+}
 
 export interface Section {
   key: string;
@@ -292,11 +321,15 @@ export interface Section {
 }
 
 /** For You, grouped by topic: in each, a lead (the newest story that has a picture, else the newest) and the next few.
- * `list` is newest first; the story shown as the top story is left out so it does not appear twice. */
-export function sections(list: Story[], top: Story | undefined): Section[] {
+ * `list` is newest first; the story shown as the top story is left out so it does not appear twice. `hidden` section keys are
+ * left out and `order` (section keys) sets the order; the defaults are all shown in SECTION_TOPICS order. */
+export function sections(list: Story[], top: Story | undefined, hidden: string[] = [], order: string[] = []): Section[] {
   const rest = withoutTop(list, top);
-  return SECTION_TOPICS.flatMap(({ key, topic, color, label, sub, except, route }) => {
-    const here = rest.filter((s) => s.item.topic === topic && (sub === undefined || s.item.subtopic === sub) && (except === undefined || s.item.subtopic !== except));
+  const defs = orderedKeys(order).flatMap((k) => SECTION_TOPICS.filter((d) => d.key === k && !hidden.includes(k)));
+  const shown = new Set(defs.map((d) => d.key));
+  return defs.flatMap(({ key, topic, color, label, sub, except, exceptBy, route }) => {
+    const leftOut = except !== undefined && (exceptBy === undefined || shown.has(exceptBy));  // its sub-topic has a section of its own on screen
+    const here = rest.filter((s) => s.item.topic === topic && (sub === undefined || s.item.subtopic === sub) && !(leftOut && s.item.subtopic === except));
     const lead = here.find((s) => imageSrc(s.item)) ?? here[0];
     if (!lead) return [];
     return [{ key, topic, route, label: label ?? topicLabel(topic), color, lead, more: here.filter((s) => s !== lead).slice(0, PER_SECTION - 1), total: here.length }];

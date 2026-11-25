@@ -9,7 +9,7 @@ import { teamTheme, THEME_VARS, themeVars } from './theme';
 import { followGroups, followLabel, keywordKey, MAX_FOLLOWS, parseFollow, toggleFollow, topicKey } from './follow';
 import { needAttention, sourceHealth } from './health';
 import { externalAttrs, isStandalone, linkAttrs } from './links';
-import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, itemLink, parseRoute, safeUrl, sections, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
+import { badgeColor, BREAKING_STEP_MS, briefing, byBreaking, coverage, discovery, FILM_ORDER, imageSrc, inOrder, initial, isStale, itemLink, parseRoute, safeUrl, sections, SECTION_TOPICS, sectionLabel, orderedKeys, movedKey, shouldRetryStale, splitRecent, stories, storyLink, sportSections, mixSources, subtopicOf, teamStories, subtopicLabel, subtopicRoute, subtopicsOf, storyPage, timeAgo, TOPICS, topicLabel, topStory } from './feed';
 import { dayKey, loadRead, markRead } from './briefing';
 import { dividerAt, dividerLabel, loadLastVisit, MIN_GAP_MS, saveVisit, sinceWhen } from './visit';
 import type { Route, Section, Story } from './feed';
@@ -934,6 +934,34 @@ function FollowEditor({ following, onChange }: { following: string[]; onChange: 
   );
 }
 
+/** Show, hide and reorder the For you sections: stored on this device. The end buttons are aria-disabled, not disabled, so a tap that
+ * reaches an end does not drop the focus (movedKey does nothing there). Hiding one only removes it from For you; its stories stay in their tab. */
+function SectionsEditor({ settings, update }: { settings: Settings; update: (next: Partial<Settings>) => void }) {
+  const keys = orderedKeys(settings.sectionOrder);
+  const label = (key: string) => { const d = SECTION_TOPICS.find((x) => x.key === key); return d ? sectionLabel(d) : key; };
+  const move = (key: string, by: -1 | 1) => update({ sectionOrder: movedKey(keys, key, by) });
+  const custom = settings.hiddenSections.length > 0 || settings.sectionOrder.length > 0;
+  return (
+    <>
+      <ul class="set inner">
+        {keys.map((key, n) => (
+          <li key={key} class="srow">
+            <label>{label(key)}
+              <input type="checkbox" checked={!settings.hiddenSections.includes(key)} onChange={() => update({ hiddenSections: toggled(settings.hiddenSections, key) })} />
+            </label>
+            <span class="mv">
+              <button type="button" aria-label={`Move ${label(key)} up`} aria-disabled={n === 0} onClick={() => move(key, -1)}>↑</button>
+              <button type="button" aria-label={`Move ${label(key)} down`} aria-disabled={n === keys.length - 1} onClick={() => move(key, 1)}>↓</button>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {settings.hiddenSections.length >= keys.length && <p class="note">All sections are hidden: For you shows only the top story and your briefing.</p>}
+      <div class="btns"><button type="button" class="btn g" disabled={!custom} onClick={() => update({ hiddenSections: [], sectionOrder: [] })}>Reset to default</button></div>
+    </>
+  );
+}
+
 /** Follow teams, countries or players by name: they are matched against the scores and the story headlines. */
 function TeamsEditor({ teams, suggestions, onChange }: { teams: string[]; suggestions: string[]; onChange: (next: string[]) => void }) {
   const [text, setText] = useState('');
@@ -1091,6 +1119,8 @@ function SourceHealth({ status }: { status: Feed['sources'] }) {
   );
 }
 
+const keysShown = (hidden: string[]) => SECTION_TOPICS.length - hidden.length;  // sections still on, for the fold's summary
+
 function SettingsScreen({ settings, update, sources, health, suggestions, markets, marketsLoaded, onSaved, canGoBack }: {
   settings: Settings; update: (next: Partial<Settings>) => void; sources: string[]; health: Feed['sources']; suggestions: string[]; markets: Markets | undefined; marketsLoaded: boolean;
   onSaved: (key: string) => void; canGoBack: boolean;
@@ -1117,6 +1147,10 @@ function SettingsScreen({ settings, update, sources, health, suggestions, market
         </details>
       )}
       <SourceHealth status={health} />
+      <details class="card fold">
+        <summary>For you sections{settings.hiddenSections.length > 0 ? ` (${keysShown(settings.hiddenSections)} shown)` : settings.sectionOrder.length > 0 ? ' (custom order)' : ''}</summary>
+        <SectionsEditor settings={settings} update={update} />
+      </details>
       <details class="card fold">
         <summary>Following{settings.following.length > 0 ? ` (${settings.following.length})` : ''}</summary>
         <FollowEditor following={settings.following} onChange={(following) => update({ following })} />
@@ -1469,7 +1503,7 @@ export function App() {
   const politics = useMemo(() => (topic === 'us' ? list.filter((s) => s.item.subtopic === 'politics') : []), [list, topic]);  // the US tab's strip
   const inStrip = new Set(politics.slice(0, STRIP_ROWS).map((s) => s.item.id));  // shown in the strip, so not again in the list above it
   const rest = list.filter((s) => s.item.id !== lead?.item.id && !inStrip.has(s.item.id));
-  const grouped = useMemo(() => (topic === 'all' ? sections(list, lead) : []), [list, lead, topic]);
+  const grouped = useMemo(() => (topic === 'all' ? sections(list, lead, settings.hiddenSections, settings.sectionOrder) : []), [list, lead, topic, settings.hiddenSections, settings.sectionOrder]);
   const dividerAtShown = since === undefined ? -1 : dividerAt(rest.slice(0, shown), since);  // flat list of a topic tab, newest first
   const hasLocal = feed?.items.some((i) => i.topic === 'local') ?? false;  // For You has neither local nor sports stories:
   const hasSports = feed?.items.some((i) => i.topic === 'sports') ?? false;  // point to their tabs when that is all there is

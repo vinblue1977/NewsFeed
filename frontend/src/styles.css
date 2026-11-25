@@ -200,6 +200,11 @@ button.wx-top:focus-visible { outline: 2px solid currentColor; outline-offset: 4
 .fld { display: block; font-size: 13px; color: var(--muted); margin: 8px 0; }
 .fld input, .fld textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 10px; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
 .fold .btns { padding: 4px 0 12px; }
+.set li.srow { display: flex; align-items: center; }
+.set li.srow label { flex: 1; }
+.srow .mv { display: flex; gap: 4px; padding-right: 8px; }
+.srow .mv button { width: 44px; height: 44px; border: 0; border-radius: 10px; background: var(--chip); color: var(--text); font-size: 18px; }
+.srow .mv button[aria-disabled=true] { opacity: .35; }
 .set.inner { margin: 0 -14px; border: 0; border-radius: 0; background: none; }
 .pull { position: fixed; top: 0; left: 50%; margin: -32px 0 0 -16px; width: 32px; height: 32px; border-radius: 50%; background: var(--card); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--text); z-index: 5; pointer-events: none; }
 .pull.spin span { animation: pull-spin .8s linear infinite; }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { FILM_ORDER, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, storyLink, storyPage, isStale, shouldRetryStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
+import { FILM_ORDER, SECTION_KEYS, movedKey, orderedKeys, sectionLabel, SECTION_TOPICS, inOrder, TOPICS, briefing, badgeColor, imageSrc, sections, subtopicsOf, subtopicRoute, coverage, initial, parseFeed, parseRoute, storyLink, storyPage, isStale, shouldRetryStale, safeUrl, splitRecent, discovery, sportSections, teamStories, byBreaking, mixSources, subtopicOf, subtopicLabel, stories, timeAgo, topicLabel, topStory } from './feed';
 import type { Feed, Item } from './types';
 import type { Story } from './feed';
 
@@ -202,6 +202,48 @@ describe('pictures and sections', () => {
     expect(out[1]).toMatchObject({ total: 2, route: '#/discovery/politics', topic: 'us' });
     expect(out[2]).toMatchObject({ total: 1, route: '#/discovery/chicago' });
     expect(out[0]?.route).toBeUndefined();  // a topic with a tab has no route
+  });
+  describe('choosing the For You sections', () => {
+    const list = [
+      story('u1', 'us'), story('p1', 'us', { subtopic: 'politics' }), story('c1', 'chicago', { subtopic: 'chicago' }),
+      story('w1', 'world'), story('t1', 'tech'),
+    ];
+    const keys = (hidden: string[] = [], order: string[] = []) => sections(list, undefined, hidden, order).map((s) => s.key);
+
+    it('shows every section in the default order when nothing is chosen', () => {
+      expect(keys()).toEqual(['us', 'us-politics', 'chicago', 'world', 'tech']);
+      expect(orderedKeys()).toEqual(SECTION_KEYS);
+      expect(orderedKeys([])).toEqual(SECTION_KEYS);
+    });
+    it('drops a hidden section from For You only', () => {
+      expect(keys(['chicago', 'world'])).toEqual(['us', 'us-politics', 'tech']);
+      expect(keys(SECTION_KEYS)).toEqual([]);
+    });
+    it('follows the chosen order', () => {
+      expect(keys([], ['tech', 'world', 'chicago', 'us-politics', 'us'])).toEqual(['tech', 'world', 'chicago', 'us-politics', 'us']);
+    });
+    it('ignores unknown keys and puts a section the order does not mention after its default predecessor', () => {
+      expect(orderedKeys(['nope', 'world', 'us', 'world'])).toEqual(['world', 'india', 'tech', 'business', 'us', 'us-politics', 'chicago']);
+      expect(orderedKeys(['business', 'us'])).toEqual(['business', 'us', 'us-politics', 'chicago', 'world', 'india', 'tech']);
+    });
+    it('puts the politics stories back into US when US Politics is hidden, and leaves them out when it is shown', () => {
+      const us = (hidden: string[]) => sections(list, undefined, hidden).find((s) => s.key === 'us');
+      expect(us([])?.total).toBe(1);  // u1 only
+      expect(us(['us-politics'])?.total).toBe(2);  // u1 and p1: not lost
+      expect(sections(list, undefined, ['us-politics']).map((s) => s.key)).not.toContain('us-politics');
+    });
+    it('moves a key one place and stops at the ends', () => {
+      expect(movedKey(['a', 'b', 'c'], 'b', -1)).toEqual(['b', 'a', 'c']);
+      expect(movedKey(['a', 'b', 'c'], 'b', 1)).toEqual(['a', 'c', 'b']);
+      expect(movedKey(['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c']);
+      expect(movedKey(['a', 'b', 'c'], 'c', 1)).toEqual(['a', 'b', 'c']);
+      expect(movedKey(['a', 'b'], 'zz', 1)).toEqual(['a', 'b']);
+    });
+    it('labels a section by its own label, else its topic', () => {
+      const label = (key: string) => sectionLabel(SECTION_TOPICS.find((d) => d.key === key) as (typeof SECTION_TOPICS)[number]);
+      expect(label('us-politics')).toBe('US Politics');
+      expect(label('tech')).toBe('Technology');
+    });
   });
   it('shows no politics or Chicago section when there are none', () => {
     expect(sections([story('u1', 'us')], undefined).map((s) => s.key)).toEqual(['us']);
