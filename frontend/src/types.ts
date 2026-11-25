@@ -25,8 +25,20 @@ export interface Cluster {
   items: string[];
 }
 
+/** What the last ingest run said about one feed: `name` is missing for a local feed. */
+export interface SourceStatus {
+  name?: string;
+  ok: boolean;
+  items: number;
+  filtered?: number;
+  blocked?: number;
+  duplicates?: number;  // fetched fine, but another feed had the story first
+  error?: string;
+}
+
 export interface Feed {
   generated: string;
   items: Item[];
   clusters: Cluster[];
+  sources?: Record<string, SourceStatus>;
 }

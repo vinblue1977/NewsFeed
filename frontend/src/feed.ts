@@ -1,4 +1,4 @@
-import type { Cluster, Feed, Item, Topic } from './types';
+import type { Cluster, Feed, Item, SourceStatus, Topic } from './types';
 
 export const TOPICS: { id: Topic | 'all'; label: string }[] = [
   { id: 'all', label: 'For you' },
@@ -81,7 +81,27 @@ function validCluster(v: unknown): v is Cluster {
 export function parseFeed(value: unknown): Feed | undefined {
   const v = value as Partial<Feed> | null;
   if (!v || typeof v.generated !== 'string' || !Array.isArray(v.items) || !Array.isArray(v.clusters)) return undefined;
-  return { generated: v.generated, items: v.items.filter(validItem), clusters: v.clusters.filter(validCluster) };
+  return { generated: v.generated, items: v.items.filter(validItem), clusters: v.clusters.filter(validCluster), sources: parseSources(v.sources) };
+}
+
+/** The per-feed status map, keeping only well-formed entries; missing or malformed data is just no health list. */
+function parseSources(value: unknown): Record<string, SourceStatus> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const num = (n: unknown) => (typeof n === 'number' && n > 0 ? n : undefined);
+  const entries: [string, SourceStatus][] = [];
+  for (const [id, raw] of Object.entries(value)) {
+    const s = raw as Partial<SourceStatus> | null;
+    if (!s || typeof s !== 'object' || typeof s.ok !== 'boolean' || typeof s.items !== 'number') continue;
+    entries.push([id.slice(0, 60), {
+      ok: s.ok, items: s.items,
+      ...(typeof s.name === 'string' ? { name: s.name.slice(0, 60) } : {}),
+      ...(num(s.filtered) ? { filtered: s.filtered as number } : {}),
+      ...(num(s.blocked) ? { blocked: s.blocked as number } : {}),
+      ...(num(s.duplicates) ? { duplicates: s.duplicates as number } : {}),
+      ...(typeof s.error === 'string' ? { error: s.error.slice(0, 200) } : {}),
+    }]);
+  }
+  return Object.fromEntries(entries);  // fromEntries makes own properties, so an id like "__proto__" cannot change the prototype
 }
 
 export interface Story {
