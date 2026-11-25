@@ -1111,6 +1111,7 @@ function SourceHealth({ status }: { status: Feed['sources'] }) {
   return (
     <details class="card fold">
       <summary>Source health ({bad === 0 ? 'all fine' : `${bad} to check`})</summary>
+      <p class="fine">A local feed with no stories shows as "Local feed N": its position in your location setting.</p>
       <ul class="set inner health">
         {rows.map((r) => (
           <li key={r.id} class={r.state}><span class="hl">{r.label}<small>{r.id}</small></span><span class="hn">{r.note}</span></li>
