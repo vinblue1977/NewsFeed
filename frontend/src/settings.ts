@@ -1,5 +1,6 @@
 import { DEFAULT_PUSH, parsePushPrefs, type PushPrefs } from './push';
 import { cleanFollows } from './follow';
+import { cleanMuted, keepItems } from './mute';
 import type { Feed } from './types';
 
 /** On-device preferences. Nothing here leaves the phone. */
@@ -7,6 +8,7 @@ import type { Feed } from './types';
 export interface Settings {
   hiddenSources: string[];
   hiddenTickers: string[];
+  mutedWords: string[];  // headlines containing one of these (as a whole word or phrase) are hidden everywhere (see mute.ts)
   watchCollapsed: boolean;  // the Markets watchlist list is folded away
   scheduleCollapsed: boolean;  // the Sports tab's My schedule card is folded away
   earningsCollapsed: boolean;  // the Markets upcoming earnings card is folded away
@@ -22,7 +24,7 @@ export interface Settings {
 
 export const SETTINGS_KEY = 'news.settings';
 export const WATCH_KEY = /^[a-z0-9]{16,64}$/;
-export const DEFAULTS: Settings = { hiddenSources: [], hiddenTickers: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULT_PUSH };
+export const DEFAULTS: Settings = { hiddenSources: [], hiddenTickers: [], mutedWords: [], watchCollapsed: false, earningsCollapsed: false, cornersCollapsed: false, kernelCollapsed: false, scheduleCollapsed: false, scoresCollapsed: [], following: [], teamColors: true, myTeams: [], watchKey: '', push: DEFAULT_PUSH };
 export const SCORE_SPORTS = ['nfl', 'tennis', 'cricket'] as const;
 export const MAX_TEAMS = 20;
 export const MAX_TEAM_CHARS = 40;
@@ -38,7 +40,7 @@ export function parseSettings(raw: string | null): Settings {
     const v = JSON.parse(raw) as Partial<Record<keyof Settings, unknown>> | null;
     if (!v || typeof v !== 'object') return DEFAULTS;
     const key = typeof v.watchKey === 'string' && WATCH_KEY.test(v.watchKey) ? v.watchKey : '';
-    return { hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, kernelCollapsed: v.kernelCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), teamColors: v.teamColors !== false, myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
+    return { hiddenSources: strings(v.hiddenSources), hiddenTickers: strings(v.hiddenTickers), mutedWords: cleanMuted(strings(v.mutedWords)), watchCollapsed: v.watchCollapsed === true, earningsCollapsed: v.earningsCollapsed === true, cornersCollapsed: v.cornersCollapsed === true, kernelCollapsed: v.kernelCollapsed === true, scheduleCollapsed: v.scheduleCollapsed === true, scoresCollapsed: strings(v.scoresCollapsed).filter((x) => (SCORE_SPORTS as readonly string[]).includes(x)), following: cleanFollows(strings(v.following)), teamColors: v.teamColors !== false, myTeams: strings(v.myTeams).reduce(withTeam, [] as string[]), watchKey: key, push: parsePushPrefs(v.push) };
   } catch {
     return DEFAULTS;
   }
@@ -69,14 +71,7 @@ export function toggled(list: string[], name: string): string[] {
 export function withoutSources(feed: Feed, hidden: string[]): Feed {
   if (hidden.length === 0) return feed;
   const off = new Set(hidden);
-  const items = feed.items.filter((i) => !off.has(i.source));
-  const byCluster = new Map<string, Set<string>>();
-  for (const i of items) if (i.cluster) byCluster.set(i.cluster, (byCluster.get(i.cluster) ?? new Set()).add(i.source));
-  const clusters = feed.clusters.flatMap((c) => {
-    const here = byCluster.get(c.id);
-    return here ? [{ ...c, sources: here.size }] : [];
-  });
-  return { ...feed, items, clusters };
+  return keepItems(feed, feed.items.filter((i) => !off.has(i.source)));
 }
 
 /** Every source in the feed, A to Z, plus any hidden one that is not in the current feed (so it can be switched back on). */

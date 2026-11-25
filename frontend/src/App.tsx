@@ -17,6 +17,7 @@ import { activePreMarket, dayRange, earningDate, earningDay, EARNINGS_DAYS, type
 import { usePullToRefresh } from './pull';
 import { httpsOrigin, PUSH_NOTES, PUSH_SUMMARY, PUSH_TOPICS, pushState, registration, validTime, type PushEnv, type PushPrefs, type PushTopic, type Subscription } from './push';
 import { disable as disablePush, enable as enablePush, readEnv } from './pushClient';
+import { MAX_MUTED, MAX_MUTED_CHARS, MIN_MUTED_CHARS, withMutedWord, withoutMuted } from './mute';
 import { loadSettings, MAX_TEAM_CHARS, MAX_TEAMS, saveSettings, type Settings, shownCount, sourceNames, toggled, WATCH_KEY, withoutSources, withTeam } from './settings';
 import type { Feed, Item, Topic } from './types';
 import { teamSchedules, type Schedule, type TeamSchedule } from './schedule';
@@ -957,6 +958,32 @@ function TeamsEditor({ teams, suggestions, onChange }: { teams: string[]; sugges
   );
 }
 
+/** Muted words: add a word or phrase, remove it with its chip. Headlines that contain one are hidden everywhere on this device. */
+function MutedEditor({ words, onChange }: { words: string[]; onChange: (next: string[]) => void }) {
+  const [text, setText] = useState('');
+  const add = () => {
+    const next = withMutedWord(words, text);
+    if (next === words) return;  // too short, too long or already there: keep the text so it can be fixed
+    onChange(next);
+    setText('');
+  };
+  return (
+    <div class="teams">
+      <p class="note">Hides headlines that contain one of these whole words or phrases (a plural counts), in any case, in the lists and sections. A story opened from a link or a notification still opens. Only on this device.</p>
+      {words.length > 0 && (
+        <ul class="tchips">
+          {words.map((w) => <li key={w}><button type="button" aria-label={`Stop muting ${w}`} onClick={() => onChange(words.filter((x) => x !== w))}>{w} <span aria-hidden="true">×</span></button></li>)}
+        </ul>
+      )}
+      <form class="fld trow" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <input type="text" value={text} maxLength={MAX_MUTED_CHARS} placeholder="A name, a phrase…" aria-label="Word or phrase to mute"
+          onInput={(e) => setText((e.currentTarget as HTMLInputElement).value)} />
+        <button type="submit" class="btn" disabled={text.trim().length < MIN_MUTED_CHARS || words.length >= MAX_MUTED}>Mute</button>
+      </form>
+    </div>
+  );
+}
+
 /** Notifications: turn them on for this device, choose what to be told about, and copy the registration that goes into SSM
  *  (docs/PUSH.md). There is no server to send it to: the subscription never leaves the phone except by this copy. */
 function PushSection({ prefs, onChange }: { prefs: PushPrefs; onChange: (next: PushPrefs) => void }) {
@@ -1102,6 +1129,10 @@ function SettingsScreen({ settings, update, sources, health, suggestions, market
             <input type="checkbox" checked={settings.teamColors} onChange={() => update({ teamColors: !settings.teamColors })} />
           </label></li>
         </ul>
+      </details>
+      <details class="card fold">
+        <summary>Muted words{settings.mutedWords.length > 0 ? ` (${settings.mutedWords.length})` : ''}</summary>
+        <MutedEditor words={settings.mutedWords} onChange={(mutedWords) => update({ mutedWords })} />
       </details>
       <div class="grp">Markets watchlist</div>
       <WatchlistEditor watchKey={settings.watchKey} update={update} onSaved={onSaved} />
@@ -1379,7 +1410,7 @@ export function App() {
   }, []);
 
   const raw = load.state === 'ready' ? load.feed : undefined;  // the Story screen and old links open any article, even from a hidden source
-  const feed = useMemo(() => (raw ? withoutSources(raw, settings.hiddenSources) : undefined), [raw, settings.hiddenSources]);
+  const feed = useMemo(() => (raw ? withoutMuted(withoutSources(raw, settings.hiddenSources), settings.mutedWords) : undefined), [raw, settings.hiddenSources, settings.mutedWords]);
   const sources = useMemo(() => sourceNames(raw, settings.hiddenSources), [raw, settings.hiddenSources]);
   const change = (next: (prev: Settings) => Settings) => {
     setSettings((prev) => {  // from the latest state, so two quick taps both count (or cancel out, for a toggle)
@@ -1589,7 +1620,11 @@ export function App() {
             <button type="button" class="btn" onClick={() => { setLoad({ state: 'loading' }); refresh(); }}>Try again</button></div>
         )}
         {feed && isStale(feed.generated, now) && <p class="note warn">Updated {timeAgo(feed.generated, now)}; newer stories may be missing.</p>}
-        {raw && feed && raw.items.length > 0 && feed.items.length === 0 && <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>}
+        {raw && feed && raw.items.length > 0 && feed.items.length === 0 && (
+          withoutSources(raw, settings.hiddenSources).items.length === 0
+            ? <div class="empty"><b>All sources are hidden</b><span>Turn some back on in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>
+            : <div class="empty"><b>Everything is muted</b><span>Your muted words match every story. Remove some in Settings.</span><a class="btn" href="#/settings">Open Settings</a></div>
+        )}
         {feed && list.length === 0 && feed.items.length > 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.{hasLocal && <> Local stories are in the <a href="#/local">Local tab</a>.</>}{hasSports && <> Sports stories are in the <a href="#/sports">Sports tab</a>.</>}</span></div>}
         {feed && list.length === 0 && raw?.items.length === 0 && <div class="empty"><b>Nothing here yet</b><span>No recent stories in this topic.</span></div>}
 
